@@ -15,6 +15,7 @@ export interface UseAuthReturn {
   session: Session | null
   loading: boolean
   signInWithMagicLink: (email: string) => Promise<{ error: Error | null }>
+  signInWithPassword: (email: string, password: string) => Promise<{ error: Error | null }>
   signInWithGoogle: () => Promise<{ error: Error | null }>
   signOut: () => Promise<void>
   isHubUser: boolean
@@ -128,6 +129,11 @@ export function useAuth(): UseAuthReturn {
     return { error: error as Error | null }
   }, [])
 
+  const signInWithPassword = useCallback(async (email: string, password: string) => {
+    const { error } = await supabase.auth.signInWithPassword({ email, password })
+    return { error: error as Error | null }
+  }, [])
+
   const signInWithGoogle = useCallback(async () => {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
@@ -159,5 +165,5 @@ export function useAuth(): UseAuthReturn {
     return false
   }, [authUser, isHubUser])
 
-  return { authUser, session, loading, signInWithMagicLink, signInWithGoogle, signOut, isHubUser, hasAccess }
+  return { authUser, session, loading, signInWithMagicLink, signInWithPassword, signInWithGoogle, signOut, isHubUser, hasAccess }
 }

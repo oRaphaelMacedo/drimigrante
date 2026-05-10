@@ -1,9 +1,9 @@
 import { useState } from 'react'
-import { Link, useLocation } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { Mail, Loader2, CheckCircle } from 'lucide-react'
+import { Mail, Loader2, CheckCircle, KeyRound } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { cn } from '@/lib/utils'
 
@@ -12,11 +12,18 @@ const schema = z.object({
 })
 type FormValues = z.infer<typeof schema>
 
+const isDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+
 export function LoginPage() {
-  const { signInWithMagicLink, signInWithGoogle } = useAuth()
+  const { signInWithMagicLink, signInWithPassword, signInWithGoogle } = useAuth()
   const location = useLocation()
+  const navigate = useNavigate()
   const [sent, setSent] = useState(false)
   const [sentEmail, setSentEmail] = useState('')
+  const [devPassword, setDevPassword] = useState('')
+  const [devEmail, setDevEmail] = useState('dev@drimigrante.test')
+  const [devError, setDevError] = useState('')
+  const [devLoading, setDevLoading] = useState(false)
 
   const {
     register,
@@ -43,6 +50,16 @@ export function LoginPage() {
     }
     setSentEmail(email)
     setSent(true)
+  }
+
+  const handleDevLogin = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setDevError('')
+    setDevLoading(true)
+    const { error } = await signInWithPassword(devEmail, devPassword)
+    setDevLoading(false)
+    if (error) { setDevError(error.message); return }
+    navigate('/dashboard')
   }
 
   const handleGoogleLogin = async () => {
@@ -176,6 +193,38 @@ export function LoginPage() {
               Faça o quiz gratuitamente
             </Link>
           </div>
+
+          {isDev && (
+            <div className="mt-6 rounded-lg border border-dashed border-amber-300 bg-amber-50 p-4">
+              <p className="mb-3 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-amber-700">
+                <KeyRound className="h-3.5 w-3.5" />
+                DEV — Login rápido
+              </p>
+              <form onSubmit={handleDevLogin} className="space-y-2">
+                <input
+                  type="email"
+                  value={devEmail}
+                  onChange={(e) => setDevEmail(e.target.value)}
+                  className="w-full rounded border border-amber-200 bg-white px-3 py-1.5 text-xs text-gray-700 outline-none focus:border-amber-400"
+                />
+                <input
+                  type="password"
+                  value={devPassword}
+                  onChange={(e) => setDevPassword(e.target.value)}
+                  placeholder="password"
+                  className="w-full rounded border border-amber-200 bg-white px-3 py-1.5 text-xs text-gray-700 outline-none focus:border-amber-400"
+                />
+                {devError && <p className="text-xs text-red-500">{devError}</p>}
+                <button
+                  type="submit"
+                  disabled={devLoading || !devPassword}
+                  className="w-full rounded bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-amber-600 disabled:opacity-50"
+                >
+                  {devLoading ? 'A entrar...' : 'Entrar como dev@drimigrante.test'}
+                </button>
+              </form>
+            </div>
+          )}
         </div>
 
         <p className="mt-4 text-center text-xs text-gray-400">

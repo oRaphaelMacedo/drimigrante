@@ -1,95 +1,173 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
+// ÚNICO bloco corsHeaders — não duplicar
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-}
-
-interface ChatRequest {
-  assessment_id: string
-  message: string
-  user_id: string
-  history?: { role: string; content: string }[]
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
 }
 
 serve(async (req) => {
+  // (a) CORS preflight
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
 
   try {
-    const supabase = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
-    )
-    const openaiKey = Deno.env.get('OPENAI_API_KEY')
-    if (!openaiKey) throw new Error('OPENAI_API_KEY not configured')
-
-    const { assessment_id, message, user_id, history = [] }: ChatRequest = await req.json()
-
-    // Verify user has chat access
-    const { data: sub } = await supabase
-      .from('subscriptions')
-      .select('has_chat_access')
-      .eq('user_id', user_id)
-      .single()
-
-    if (!sub?.has_chat_access) {
-      return new Response(JSON.stringify({ error: 'Chat access required. Upgrade to access.' }), {
-        status: 403,
+    // (b) Auth — usar JWT do utilizador
+    const authHeader = req.headers.get('Authorization')
+    if (!authHeader) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        status: 401,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       })
     }
 
-    // Fetch assessment context
-    let context = 'Nenhum contexto de avaliação encontrado.'
-    if (assessment_id) {
-      const { data: assessmentData } = await supabase
-        .from('assessment_results')
-        .select('score_category, suggested_visa_types')
-        .eq('assessment_id', assessment_id)
-        .single()
-      
-      if (assessmentData) {
-        context = `Vistos sugeridos: ${JSON.stringify(assessmentData.suggested_visa_types)}
-Categoria: ${assessmentData.score_category}`
-      }
+    const supabaseClient = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_ANON_KEY')!,
+      { global: { headers: { Authorization: authHeader } } }
+    )
+
+    const { data: { user }, error: authError } = await supabaseClient.auth.getUser()
+    if (authError || !user) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
     }
 
-    const systemContent = `You are Doutor Imigrante, a highly specialized virtual assistant helping people migrate to Portugal. Provide clear, accurate, and helpful information.
-    
-Contexto do Utilizador:
-${context}
-`
+    // (d) Validar body
+    const body = await req.json()
+    const { message, assessmentId } = body
+    if (!message || !assessmentId) {
+      return new Response(JSON.stringify({ error: 'message and assessmentId are required' }), {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
 
-    const messages = [
-      { role: 'system', content: systemContent },
-      ...history,
-      { role: 'user', content: message },
-    ]
+    // TASK-005: Verificar ownership via tabela assessments
+    const { data: assessment, error: assessmentError } = await supabaseClient
+      .from('assessments')
+      .select('id, answers')
+      .eq('id', assessmentId)
+      .eq('user_id', user.id)
+      .single()
 
-    // Call OpenAI
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    if (assessmentError || !assessment) {
+      return new Response(JSON.stringify({ error: 'Assessment not found' }), {
+        status: 404,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+
+    // Buscar contexto de score/vistos em assessment_results
+    const { data: assessmentResult } = await supabaseClient
+      .from('assessment_results')
+      .select('score_numeric, score_category, suggested_visa_types')
+      .eq('assessment_id', assessmentId)
+      .single()
+
+    // TASK-006: Carregar histórico de mensagens
+    const { data: history } = await supabaseClient
+      .from('messages')
+      .select('role, content')
+      .eq('assessment_id', assessmentId)
+      .order('created_at', { ascending: true })
+      .limit(20)
+
+    const historyMessages = (history ?? []).map((m: { role: string; content: string }) => ({
+      role: m.role as 'user' | 'assistant',
+      content: m.content,
+    }))
+
+    // TASK-007: Persistir mensagem do utilizador
+    await supabaseClient
+      .from('messages')
+      .insert({
+        assessment_id: assessmentId,
+        user_id: user.id,
+        role: 'user',
+        content: message,
+      })
+
+    // Construir system prompt
+    const systemPrompt = buildSystemPrompt(assessment, assessmentResult)
+
+    // Chamar OpenAI
+    const openaiKey = Deno.env.get('OPENAI_API_KEY')
+    if (!openaiKey) throw new Error('OPENAI_API_KEY not configured')
+
+    const openAIResponse = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${openaiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: 'gpt-4o-mini', temperature: 0.5, max_tokens: 1500, messages }),
+      headers: {
+        'Authorization': `Bearer ${openaiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          ...historyMessages,
+          { role: 'user', content: message },
+        ],
+        max_tokens: 1000,
+        temperature: 0.7,
+      }),
     })
 
-    const json = await response.json()
-    const assistantContent = json.choices?.[0]?.message?.content ?? ''
-    const tokensUsed = json.usage?.total_tokens ?? 0
+    if (!openAIResponse.ok) {
+      throw new Error(`OpenAI error: ${openAIResponse.status}`)
+    }
 
-    return new Response(JSON.stringify({ content: assistantContent, tokens_used: tokensUsed }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    })
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    })
-  } catch (err) {
-    console.error(err)
-    return new Response(JSON.stringify({ error: String(err) }), {
-      status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    })
+    const openAIData = await openAIResponse.json()
+    const aiReply = openAIData.choices?.[0]?.message?.content ?? ''
+
+    // TASK-007: Persistir resposta da IA
+    const { data: assistantMessage } = await supabaseClient
+      .from('messages')
+      .insert({
+        assessment_id: assessmentId,
+        user_id: user.id,
+        role: 'assistant',
+        content: aiReply,
+      })
+      .select('id')
+      .single()
+
+    return new Response(
+      JSON.stringify({ reply: aiReply, messageId: assistantMessage?.id }),
+      { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
+    )
+
+  } catch (error) {
+    console.error('chat-completion error:', error)
+    return new Response(
+      JSON.stringify({ error: 'Internal server error' }),
+      { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
+    )
   }
 })
+
+function buildSystemPrompt(
+  assessment: { answers: unknown },
+  result: { score_numeric: number | null; score_category: string | null; suggested_visa_types: unknown } | null
+): string {
+  return `Você é o Doutor Imigrante, um assistente especializado em imigração para Portugal.
+Está a ajudar um utilizador com base no seu diagnóstico de elegibilidade.
+
+DADOS DO DIAGNÓSTICO:
+- Score de elegibilidade: ${result?.score_numeric ?? 'não calculado'}
+- Categoria: ${result?.score_category ?? 'não calculada'}
+- Vistos sugeridos: ${JSON.stringify(result?.suggested_visa_types ?? [])}
+- Respostas do quiz: ${JSON.stringify(assessment.answers ?? {})}
+
+INSTRUÇÕES:
+- Responda sempre em português (pt-PT)
+- Seja preciso, empático e profissional
+- Baseie as suas respostas no contexto do diagnóstico acima
+- Não garanta resultados jurídicos — informe e oriente
+- Se não souber algo, diga claramente e sugira consultar um advogado`
+}
