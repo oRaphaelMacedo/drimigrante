@@ -69,8 +69,14 @@ export function useQuiz() {
 
   // Move to next question
   const nextQuestion = useCallback(() => {
+    const current = visibleQuestions[state.currentIndex]
+    // Se P0 foi respondida com algo que não seja "nacionalidade", vai para "em breve"
+    if (current?.key === 'processo_tipo' && session.answers['processo_tipo'] !== 'nacionalidade') {
+      dispatch({ type: 'GO_COMINGSOON' })
+      return
+    }
     dispatch({ type: 'NEXT_QUESTION', totalVisible: visibleQuestions.length })
-  }, [dispatch, visibleQuestions.length])
+  }, [dispatch, visibleQuestions, state.currentIndex, session.answers])
 
   // Move to previous question
   const prevQuestion = useCallback(() => {
@@ -153,6 +159,11 @@ export function useQuiz() {
     [session, navigate, visibleQuestions.length, dispatch, allQuestions],
   )
 
+  // Voltar da tela "em breve" para P0
+  const backFromComingSoon = useCallback(() => {
+    dispatch({ type: 'BACK_FROM_COMINGSOON' })
+  }, [dispatch])
+
   // Reset quiz
   const resetQuiz = useCallback(() => {
     resetSession()
@@ -186,5 +197,6 @@ export function useQuiz() {
     prevQuestion,
     submitQuiz,
     resetQuiz,
+    backFromComingSoon,
   }
 }

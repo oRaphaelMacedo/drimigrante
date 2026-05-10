@@ -94,7 +94,7 @@ export function QuizQuestionEditor({
     setQuestionKey(question.key)
     setThemeCode(question.themeCode)
     setText(question.text)
-    setTextEn(question.textEn ?? '')
+    setTextEn('')
     setHelpText(question.helpText ?? '')
     setFieldType(question.fieldType)
     setIsRequired(question.isRequired)
@@ -105,19 +105,22 @@ export function QuizQuestionEditor({
       (question.options ?? []).map((o, i) => ({
         option_key: o.key,
         option_text_pt: o.label,
-        option_text_en: o.labelEn ?? null,
+        option_text_en: null,
         score: o.score,
         is_eliminatory: o.isEliminatory ?? false,
         sort_order: i,
       })),
     )
     setHasCondition(!!question.showIf)
-    setCondQuestionKey(question.showIf?.questionKey ?? '')
+    const simpleShowIf = question.showIf && !('any' in question.showIf) && !('all' in question.showIf)
+      ? question.showIf as { questionKey: string; answerKey?: string | string[] }
+      : null
+    setCondQuestionKey(simpleShowIf?.questionKey ?? '')
     setCondAnswerKeys(
-      question.showIf
-        ? Array.isArray(question.showIf.answerKey)
-          ? question.showIf.answerKey
-          : [question.showIf.answerKey]
+      simpleShowIf
+        ? Array.isArray(simpleShowIf.answerKey)
+          ? simpleShowIf.answerKey
+          : simpleShowIf.answerKey ? [simpleShowIf.answerKey] : []
         : [],
     )
   }, [question?.key, isCreate, initialThemeCode, themes])

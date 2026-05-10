@@ -37,8 +37,8 @@ export function QuizProgress({
         />
       </div>
 
-      {/* Theme dots */}
-      <div className="flex items-center gap-1.5">
+      {/* Theme segments */}
+      <div className="flex items-center gap-1">
         {QUIZ_THEMES.map((theme, idx) => {
           const isDone = idx < currentThemeIdx
           const isCurrent = idx === currentThemeIdx
@@ -46,20 +46,21 @@ export function QuizProgress({
             <div
               key={theme.code}
               className={cn(
-                'relative flex h-6 flex-1 items-center justify-center rounded-full text-xs font-medium transition-all duration-300',
-                isDone && 'bg-brand-600 text-white',
-                isCurrent && 'bg-brand-100 text-brand-700 ring-2 ring-brand-400 ring-offset-1',
-                !isDone && !isCurrent && 'bg-gray-100 text-gray-400',
+                'h-1.5 flex-1 rounded-full transition-all duration-300',
+                isDone && 'bg-brand-600',
+                isCurrent && 'bg-brand-400',
+                !isDone && !isCurrent && 'bg-gray-200',
               )}
               title={theme.name}
-            >
-              <span className="text-[10px] leading-none">
-                {isDone ? '✓' : theme.icon}
-              </span>
-            </div>
+            />
           )
         })}
       </div>
+
+      {/* Current theme label */}
+      <p className="text-xs font-medium text-gray-400">
+        {QUIZ_THEMES.find((t) => t.code === currentThemeCode)?.name ?? ''}
+      </p>
     </div>
   )
 }

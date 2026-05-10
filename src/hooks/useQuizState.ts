@@ -1,7 +1,7 @@
 import { useReducer } from 'react'
 import type { QuizResult } from './useQuiz'
 
-export type QuizFlowState = 'intro' | 'question' | 'capture' | 'processing' | 'results'
+export type QuizFlowState = 'intro' | 'question' | 'capture' | 'processing' | 'results' | 'comingsoon'
 
 interface State {
   quizState: QuizFlowState
@@ -15,6 +15,8 @@ type Action =
   | { type: 'START' }
   | { type: 'NEXT_QUESTION'; totalVisible: number }
   | { type: 'PREV_QUESTION' }
+  | { type: 'GO_COMINGSOON' }
+  | { type: 'BACK_FROM_COMINGSOON' }
   | { type: 'SUBMIT_START' }
   | { type: 'SUBMIT_SUCCESS'; payload: QuizResult }
   | { type: 'SUBMIT_ERROR' }
@@ -42,6 +44,10 @@ function quizReducer(state: State, action: Action): State {
         return { ...state, currentIndex: state.currentIndex - 1, animationDirection: 'backward' }
       }
       return { ...state, quizState: 'intro' }
+    case 'GO_COMINGSOON':
+      return { ...state, quizState: 'comingsoon' }
+    case 'BACK_FROM_COMINGSOON':
+      return { ...state, quizState: 'question', currentIndex: 0, animationDirection: 'backward' }
     case 'SUBMIT_START':
       return { ...state, quizState: 'processing', isSubmitting: true }
     case 'SUBMIT_SUCCESS':

@@ -5,13 +5,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { supabase } from '@/lib/supabase'
-import type { QuizQuestion, FieldType } from '@/data/quiz-questions'
+import type { QuizQuestion } from '@/data/quiz-questions'
 
 export interface QuestionUpdate {
   question_text_pt?: string
   question_text_en?: string | null
   help_text?: string | null
-  field_type?: FieldType
+  field_type?: string
   is_required?: boolean
   placeholder?: string | null
   validation_rules?: { min?: number; max?: number } | null
@@ -80,7 +80,8 @@ export function useUpdateQuestion() {
 
       const { error: updErr } = await supabase
         .from('form_questions')
-        .update(updates)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .update(updates as any)
         .eq('id', questionId)
       if (updErr) throw updErr
 
@@ -150,7 +151,7 @@ export function useCreateQuestion() {
         question_text_pt: string
         question_text_en?: string | null
         help_text?: string | null
-        field_type: FieldType
+        field_type: string
         is_required: boolean
         placeholder?: string | null
         validation_rules?: { min?: number; max?: number } | null
@@ -174,6 +175,8 @@ export function useCreateQuestion() {
         .insert({
           theme_id: themeId,
           ...question,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          field_type: question.field_type as any,
           sort_order: nextOrder,
           is_active: true,
         })

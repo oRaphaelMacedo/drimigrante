@@ -1,15 +1,33 @@
-// QuizPage.tsx — Day 2: Quiz Engine I
-// Full multi-step quiz UI with state machine
-import { Loader2 } from 'lucide-react'
+// QuizPage.tsx — Quiz Engine — Diagnóstico da Imigração
+import { Loader2, ArrowLeft, Mail } from 'lucide-react'
 import { useQuiz } from '@/hooks/useQuiz'
 import { QuizIntro } from '@/components/quiz/QuizIntro'
 import { QuizProgress } from '@/components/quiz/QuizProgress'
 import { QuizQuestionCard } from '@/components/quiz/QuizQuestion'
 import { QuizCaptureForm } from '@/components/quiz/QuizCaptureForm'
 
+const COMING_SOON_LABELS: Record<string, { title: string; description: string }> = {
+  visto: {
+    title: 'Diagnóstico de Vistos — Em Breve',
+    description:
+      'Estamos a preparar o diagnóstico completo para vistos de residência, trabalho e nómadas digitais. Em breve estará disponível.',
+  },
+  regularizacao: {
+    title: 'Diagnóstico de Regularização — Em Breve',
+    description:
+      'O módulo de regularização de situação junto da AIMA estará disponível em breve. Enquanto isso, um dos nossos advogados pode orientá-lo(a) diretamente.',
+  },
+  nao_sei: {
+    title: 'Orientação Personalizada — Em Breve',
+    description:
+      'Estamos a preparar uma jornada guiada para quem ainda não sabe por onde começar. Por enquanto, podemos conectá-lo(a) com um advogado especializado que irá orientá-lo(a).',
+  },
+}
+
 export function QuizPage() {
   const {
     quizState,
+    session,
     currentQuestion,
     currentIndex,
     currentAnswer,
@@ -23,7 +41,12 @@ export function QuizPage() {
     nextQuestion,
     prevQuestion,
     submitQuiz,
+    backFromComingSoon,
   } = useQuiz()
+
+  const comingSoonContent =
+    COMING_SOON_LABELS[session.answers['processo_tipo'] ?? ''] ??
+    COMING_SOON_LABELS['nao_sei']
 
   return (
     <div className="min-h-[calc(100vh-64px)] bg-gradient-to-b from-brand-50/40 to-white">
@@ -36,9 +59,7 @@ export function QuizPage() {
           {/* ── QUESTIONS ── */}
           {quizState === 'question' && currentQuestion && (
             <div className="space-y-6">
-              {/* Card */}
               <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm sm:p-8">
-                {/* Progress */}
                 <div className="mb-8">
                   <QuizProgress
                     currentThemeCode={currentQuestion.themeCode}
@@ -48,7 +69,6 @@ export function QuizPage() {
                   />
                 </div>
 
-                {/* Question */}
                 <QuizQuestionCard
                   question={currentQuestion}
                   answer={currentAnswer}
@@ -64,22 +84,19 @@ export function QuizPage() {
                   onClick={prevQuestion}
                   className="rounded-xl border-2 border-gray-200 bg-white px-5 py-2.5 text-sm font-medium text-gray-600 transition hover:border-gray-300 hover:bg-gray-50"
                 >
-                  ← Anterior
+                  Anterior
                 </button>
 
                 <button
                   id="quiz-next-btn"
-                  onClick={() => {
-                    if (canProceed) nextQuestion()
-                  }}
+                  onClick={() => { if (canProceed) nextQuestion() }}
                   disabled={!canProceed}
                   className="flex-1 rounded-xl bg-brand-700 py-2.5 text-sm font-bold text-white shadow-sm transition-all hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-40 sm:flex-none sm:px-8"
                 >
-                  {currentIndex === totalQuestions - 1 ? 'Concluir Quiz →' : 'Próximo →'}
+                  {currentIndex === totalQuestions - 1 ? 'Concluir Diagnóstico' : 'Próximo'}
                 </button>
               </div>
 
-              {/* Skip note for optional conditional questions */}
               {!currentQuestion.isRequired && (
                 <p className="text-center text-xs text-gray-400">
                   Esta pergunta é opcional.{' '}
@@ -91,6 +108,60 @@ export function QuizPage() {
                   </button>
                 </p>
               )}
+            </div>
+          )}
+
+          {/* ── EM BREVE ── */}
+          {quizState === 'comingsoon' && (
+            <div className="animate-in fade-in-0 slide-in-from-bottom-4 duration-400 space-y-6">
+              <div className="rounded-2xl border border-gray-100 bg-white p-8 shadow-sm text-center">
+                <div className="mb-4 inline-flex h-14 w-14 items-center justify-center rounded-full bg-brand-50">
+                  <Mail className="h-6 w-6 text-brand-600" />
+                </div>
+
+                <h2 className="mb-2 text-2xl font-extrabold text-gray-900">
+                  {comingSoonContent.title}
+                </h2>
+                <p className="mb-8 text-sm text-gray-500 max-w-sm mx-auto leading-relaxed">
+                  {comingSoonContent.description}
+                </p>
+
+                <div className="rounded-xl border border-gray-100 bg-gray-50 p-5 text-left mb-6">
+                  <p className="mb-3 text-sm font-semibold text-gray-700">
+                    Entretanto, podemos:
+                  </p>
+                  <ul className="space-y-2 text-sm text-gray-600">
+                    <li className="flex items-start gap-2">
+                      <span className="mt-0.5 h-4 w-4 shrink-0 rounded-full bg-brand-100 text-brand-700 flex items-center justify-center text-[10px] font-bold">1</span>
+                      Notificá-lo(a) assim que este módulo estiver disponível
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="mt-0.5 h-4 w-4 shrink-0 rounded-full bg-brand-100 text-brand-700 flex items-center justify-center text-[10px] font-bold">2</span>
+                      Conectá-lo(a) com um advogado especializado em imigração para Portugal
+                    </li>
+                  </ul>
+                </div>
+
+                {/* Email capture simples */}
+                <div className="flex gap-2">
+                  <input
+                    type="email"
+                    placeholder="O seu e-mail"
+                    className="flex-1 rounded-xl border-2 border-gray-200 px-4 py-2.5 text-sm text-gray-700 focus:border-brand-500 focus:outline-none"
+                  />
+                  <button className="rounded-xl bg-brand-700 px-5 py-2.5 text-sm font-bold text-white hover:bg-brand-600 transition whitespace-nowrap">
+                    Quero ser notificado(a)
+                  </button>
+                </div>
+              </div>
+
+              <button
+                onClick={backFromComingSoon}
+                className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-gray-600 transition mx-auto"
+              >
+                <ArrowLeft className="h-3.5 w-3.5" />
+                Voltar e escolher outra opção
+              </button>
             </div>
           )}
 
@@ -112,14 +183,14 @@ export function QuizPage() {
               </div>
               <div>
                 <h2 className="mb-2 text-xl font-bold text-gray-900">
-                  A calcular o seu perfil...
+                  A analisar o seu perfil...
                 </h2>
                 <p className="text-sm text-gray-500">
-                  A nossa IA está a analisar as suas respostas. Um momento.
+                  A nossa IA está a calcular a sua elegibilidade. Um momento.
                 </p>
               </div>
-              <div className="flex gap-2">
-                {['Perfil Pessoal', 'Finanças', 'Família', 'Qualificações'].map((step, i) => (
+              <div className="flex flex-wrap justify-center gap-2">
+                {['Descendência', 'Matrimônio', 'Residência', 'Documentação'].map((step, i) => (
                   <div
                     key={step}
                     className="flex items-center gap-1.5 rounded-full bg-brand-50 px-3 py-1 text-xs font-medium text-brand-700"
@@ -132,6 +203,7 @@ export function QuizPage() {
               </div>
             </div>
           )}
+
         </div>
       </div>
     </div>

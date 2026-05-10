@@ -6,7 +6,15 @@ import {
   ChevronDown, ChevronRight, Search, ListChecks, AlertCircle, Loader2,
   Pencil, ArrowUp, ArrowDown, EyeOff, History, Plus, Palette, X, Save,
 } from 'lucide-react'
-import type { QuizQuestion } from '@/data/quiz-questions'
+import type { QuizQuestion, ShowIfRule } from '@/data/quiz-questions'
+
+function showIfSummary(rule: ShowIfRule): string {
+  if ('any' in rule) return `any(${(rule as { any: { questionKey: string }[] }).any.map(c => c.questionKey).join(', ')})`
+  if ('all' in rule) return `all(${(rule as { all: { questionKey: string }[] }).all.map(c => c.questionKey).join(', ')})`
+  const c = rule as { questionKey: string; answerKey?: string | string[] }
+  const val = Array.isArray(c.answerKey) ? c.answerKey.join('|') : String(c.answerKey ?? '')
+  return `${c.questionKey} = ${val}`
+}
 import { useQuizQuestions } from '@/hooks/useQuizQuestions'
 import {
   useReorderQuestion, useToggleQuestionActive,
@@ -53,7 +61,7 @@ export function AdminQuizPage() {
     questions.forEach((q) => {
       const cur = map.get(q.themeCode)
       if (cur) cur.count++
-      else map.set(q.themeCode, { code: q.themeCode, name: q.themeName, color: q.themeColor, icon: q.themeIcon, count: 1 })
+      else map.set(q.themeCode, { code: q.themeCode, name: q.themeName, color: q.themeColor, icon: '', count: 1 })
     })
     return Array.from(map.values())
   }, [questions])
@@ -267,9 +275,7 @@ export function AdminQuizPage() {
                           </span>
                         </div>
                         <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-500">
-                          <span>
-                            {q.themeIcon} {q.themeName}
-                          </span>
+                          <span>{q.themeName}</span>
                           <span>·</span>
                           <span>{FIELD_TYPE_LABEL[q.fieldType] ?? q.fieldType}</span>
                           {q.options?.length ? (
@@ -346,10 +352,7 @@ export function AdminQuizPage() {
                         <div className="text-xs text-gray-600">
                           <span className="font-semibold">Mostra quando:</span>{' '}
                           <code className="rounded bg-white px-1.5 py-0.5 text-[11px]">
-                            {q.showIf.questionKey} ={' '}
-                            {Array.isArray(q.showIf.answerKey)
-                              ? q.showIf.answerKey.join(' ou ')
-                              : q.showIf.answerKey}
+                            {showIfSummary(q.showIf)}
                           </code>
                         </div>
                       ) : null}
