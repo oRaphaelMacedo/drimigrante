@@ -10,28 +10,67 @@ export interface ChatMessage {
   created_at: string
 }
 
+// Read assessmentId stored by the quiz on completion
+function getStoredAssessmentId(): string | null {
+  try {
+    const raw = localStorage.getItem('dr_imigrante_quiz_result')
+    return raw ? (JSON.parse(raw)?.assessmentId as string | null) ?? null : null
+  } catch {
+    return null
+  }
+}
+
 export function useChatData() {
   const { authUser } = useAuth()
   const queryClient = useQueryClient()
   const userId = authUser?.user.id
+  const userEmail = authUser?.user.email
+  const storedAssessmentId = getStoredAssessmentId()
 
   const {
     data: assessment,
     isLoading: isLoadingAssessment,
   } = useQuery({
-    queryKey: ['chat-assessment', userId],
+    queryKey: ['chat-assessment', storedAssessmentId ?? userId ?? userEmail],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('assessments')
-        .select('id, answers')
-        .eq('user_id', userId!)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .single()
-      if (error) throw error
-      return data
+      // 1. Prefer localStorage ID — assessments are saved without user_id (anonymous quiz)
+      if (storedAssessmentId) {
+        const { data, error } = await supabase
+          .from('assessments')
+          .select('id, answers')
+          .eq('id', storedAssessmentId)
+          .single()
+        if (!error && data) return data
+      }
+
+      // 2. Try by user_id for assessments linked post-auth
+      if (userId) {
+        const { data } = await supabase
+          .from('assessments')
+          .select('id, answers')
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+        if (data) return data
+      }
+
+      // 3. Try by email — anonymous quiz assessments are saved with email only
+      if (userEmail) {
+        const { data, error } = await supabase
+          .from('assessments')
+          .select('id, answers')
+          .eq('email', userEmail)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .single()
+        if (error) throw error
+        return data
+      }
+
+      throw new Error('No assessment found')
     },
-    enabled: !!userId,
+    enabled: !!storedAssessmentId || !!userId || !!userEmail,
     staleTime: 5 * 60 * 1000,
   })
 
