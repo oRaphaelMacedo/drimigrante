@@ -43,11 +43,14 @@ export function LoginPage() {
       const returnTo = (location.state?.returnTo as string) ?? '/dashboard'
       const returnPlan = (location.state?.plan as string) ?? null
       const returnAssessmentId = (location.state?.assessmentId as string) ?? null
-      sessionStorage.setItem('auth_return_to', returnTo)
-      if (returnPlan) sessionStorage.setItem('auth_return_plan', returnPlan)
-      if (returnAssessmentId) sessionStorage.setItem('auth_return_assessment_id', returnAssessmentId)
+      // Use localStorage so the intent survives across tabs/windows (magic link opens new tab)
+      localStorage.setItem('auth_return_to', returnTo)
+      if (returnPlan) localStorage.setItem('auth_return_plan', returnPlan)
+      else localStorage.removeItem('auth_return_plan')
+      if (returnAssessmentId) localStorage.setItem('auth_return_assessment_id', returnAssessmentId)
+      else localStorage.removeItem('auth_return_assessment_id')
     } catch {
-      // ignore sessionStorage errors
+      // ignore storage errors
     }
 
     const { error } = await signInWithMagicLink(email)
@@ -74,11 +77,13 @@ export function LoginPage() {
       const returnTo = (location.state?.returnTo as string) ?? '/dashboard'
       const returnPlan = (location.state?.plan as string) ?? null
       const returnAssessmentId = (location.state?.assessmentId as string) ?? null
-      sessionStorage.setItem('auth_return_to', returnTo)
-      if (returnPlan) sessionStorage.setItem('auth_return_plan', returnPlan)
-      if (returnAssessmentId) sessionStorage.setItem('auth_return_assessment_id', returnAssessmentId)
+      localStorage.setItem('auth_return_to', returnTo)
+      if (returnPlan) localStorage.setItem('auth_return_plan', returnPlan)
+      else localStorage.removeItem('auth_return_plan')
+      if (returnAssessmentId) localStorage.setItem('auth_return_assessment_id', returnAssessmentId)
+      else localStorage.removeItem('auth_return_assessment_id')
     } catch {
-      // ignore sessionStorage errors
+      // ignore storage errors
     }
     // B04-A09: handle Google OAuth errors instead of silently ignoring them
     const { error } = await signInWithGoogle()

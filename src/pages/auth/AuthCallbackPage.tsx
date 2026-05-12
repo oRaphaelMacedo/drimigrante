@@ -21,12 +21,13 @@ export function AuthCallbackPage() {
     } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'SIGNED_IN' && session) {
         try {
-          const returnTo = sessionStorage.getItem('auth_return_to') ?? '/dashboard'
-          const returnPlan = sessionStorage.getItem('auth_return_plan')
-          const returnAssessmentId = sessionStorage.getItem('auth_return_assessment_id')
-          sessionStorage.removeItem('auth_return_to')
-          sessionStorage.removeItem('auth_return_plan')
-          sessionStorage.removeItem('auth_return_assessment_id')
+          // localStorage survives across tabs — magic link opens in a new tab
+          const returnTo = localStorage.getItem('auth_return_to') ?? '/dashboard'
+          const returnPlan = localStorage.getItem('auth_return_plan')
+          const returnAssessmentId = localStorage.getItem('auth_return_assessment_id')
+          localStorage.removeItem('auth_return_to')
+          localStorage.removeItem('auth_return_plan')
+          localStorage.removeItem('auth_return_assessment_id')
 
           // B04-A02: prevent open redirect — only allow same-origin paths
           const safeReturn = returnTo.startsWith('/') ? returnTo : '/dashboard'
