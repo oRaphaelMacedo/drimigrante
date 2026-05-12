@@ -1,9 +1,10 @@
 import { useState } from 'react'
-import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { Mail, Loader2, CheckCircle, KeyRound } from 'lucide-react'
+import { Mail, Loader2, CheckCircle, KeyRound, AlertCircle } from 'lucide-react'
+import { toast } from 'sonner'
 import { useAuth } from '@/hooks/useAuth'
 import { cn } from '@/lib/utils'
 
@@ -12,12 +13,16 @@ const schema = z.object({
 })
 type FormValues = z.infer<typeof schema>
 
-const isDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+// B04-A07: guard by env var, not hostname — prevents panel appearing in `npm run preview`
+const isDev = import.meta.env.VITE_APP_ENV === 'development'
 
 export function LoginPage() {
   const { signInWithMagicLink, signInWithPassword, signInWithGoogle } = useAuth()
   const location = useLocation()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  // B04-A06: feedback when magic link has expired (set by AuthCallbackPage)
+  const linkExpired = searchParams.get('error') === 'link_expired'
   const [sent, setSent] = useState(false)
   const [sentEmail, setSentEmail] = useState('')
   const [devPassword, setDevPassword] = useState('')
@@ -37,8 +42,10 @@ export function LoginPage() {
     try {
       const returnTo = (location.state?.returnTo as string) ?? '/dashboard'
       const returnPlan = (location.state?.plan as string) ?? null
+      const returnAssessmentId = (location.state?.assessmentId as string) ?? null
       sessionStorage.setItem('auth_return_to', returnTo)
       if (returnPlan) sessionStorage.setItem('auth_return_plan', returnPlan)
+      if (returnAssessmentId) sessionStorage.setItem('auth_return_assessment_id', returnAssessmentId)
     } catch {
       // ignore sessionStorage errors
     }
@@ -66,13 +73,16 @@ export function LoginPage() {
     try {
       const returnTo = (location.state?.returnTo as string) ?? '/dashboard'
       const returnPlan = (location.state?.plan as string) ?? null
+      const returnAssessmentId = (location.state?.assessmentId as string) ?? null
       sessionStorage.setItem('auth_return_to', returnTo)
       if (returnPlan) sessionStorage.setItem('auth_return_plan', returnPlan)
+      if (returnAssessmentId) sessionStorage.setItem('auth_return_assessment_id', returnAssessmentId)
     } catch {
       // ignore sessionStorage errors
     }
-    
-    await signInWithGoogle()
+    // B04-A09: handle Google OAuth errors instead of silently ignoring them
+    const { error } = await signInWithGoogle()
+    if (error) toast.error('Erro ao autenticar com Google. Tente novamente.')
   }
 
   if (sent) {
@@ -114,6 +124,13 @@ export function LoginPage() {
         </div>
 
         <div className="rounded-2xl bg-white p-8 shadow-lg">
+          {/* B04-A06: feedback when redirected from an expired magic link */}
+          {linkExpired && (
+            <div className="mb-5 flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>O link de acesso expirou ou já foi utilizado. Solicite um novo abaixo.</span>
+            </div>
+          )}
           <h1 className="mb-2 text-xl font-semibold text-gray-900">Entrar</h1>
           <p className="mb-6 text-sm text-gray-500">
             Enviaremos um link de acesso para o seu email. Sem senha necessária.

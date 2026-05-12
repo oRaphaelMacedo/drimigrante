@@ -77,6 +77,16 @@ const PLANS: Plan[] = [
 
 // ─── Component ──────────────────────────────────────────────────────────────
 
+// Read assessmentId from localStorage — needed after the auth redirect clears location.state
+function getStoredAssessmentId(): string | null {
+  try {
+    const raw = localStorage.getItem('dr_imigrante_quiz_result')
+    return raw ? (JSON.parse(raw)?.assessmentId as string | null) ?? null : null
+  } catch {
+    return null
+  }
+}
+
 export function CheckoutPage() {
   const location = useLocation()
   const navigate = useNavigate()
@@ -87,12 +97,16 @@ export function CheckoutPage() {
   const [selectedPlan, setSelectedPlan] = useState<PlanId>(initialPlan)
   const [isProcessing, setIsProcessing] = useState(false)
 
+  // assessmentId: prefer location.state (direct nav), fall back to localStorage
+  // (localStorage is the only source after the magic-link auth round-trip clears state)
+  const assessmentId = (location.state?.assessmentId as string | null) ?? getStoredAssessmentId()
+
   const plan = PLANS.find((p) => p.id === selectedPlan)!
 
   const handleCheckout = async () => {
     // If not logged in, redirect to login with return intent
     if (!authUser) {
-      navigate('/login', { state: { returnTo: '/checkout', plan: selectedPlan } })
+      navigate('/login', { state: { returnTo: '/checkout', plan: selectedPlan, assessmentId } })
       return
     }
 
@@ -101,7 +115,7 @@ export function CheckoutPage() {
       const { data, error } = await supabase.functions.invoke('create-checkout-session', {
         body: {
           plan: selectedPlan,
-          assessmentId: location.state?.assessmentId ?? null,
+          assessmentId: assessmentId ?? null,
         },
       })
 

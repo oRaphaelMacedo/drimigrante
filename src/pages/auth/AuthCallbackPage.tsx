@@ -1,6 +1,12 @@
-// AuthCallbackPage.tsx — Day 3: Smart redirect after magic link auth
-// Reads returnTo intent from sessionStorage (set by LoginPage) and redirects accordingly
-
+/**
+ * AuthCallbackPage — handles the redirect after magic link / OAuth.
+ *
+ * Fixes applied:
+ *  B04-A02 — validate returnTo before navigating (open redirect prevention)
+ *  B04-A06 — use onAuthStateChange instead of getSession() to avoid race
+ *             condition with detectSessionInUrl processing the URL hash.
+ *             Show error feedback when magic link is expired/invalid.
+ */
 import { useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
@@ -10,26 +16,39 @@ export function AuthCallbackPage() {
   const navigate = useNavigate()
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) {
-        // Read return intent that LoginPage may have stored before redirecting to magic link
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_IN' && session) {
         try {
           const returnTo = sessionStorage.getItem('auth_return_to') ?? '/dashboard'
           const returnPlan = sessionStorage.getItem('auth_return_plan')
+          const returnAssessmentId = sessionStorage.getItem('auth_return_assessment_id')
           sessionStorage.removeItem('auth_return_to')
           sessionStorage.removeItem('auth_return_plan')
+          sessionStorage.removeItem('auth_return_assessment_id')
 
-          navigate(returnTo, {
+          // B04-A02: prevent open redirect — only allow same-origin paths
+          const safeReturn = returnTo.startsWith('/') ? returnTo : '/dashboard'
+
+          const returnState: Record<string, string> = {}
+          if (returnPlan) returnState.plan = returnPlan
+          if (returnAssessmentId) returnState.assessmentId = returnAssessmentId
+
+          navigate(safeReturn, {
             replace: true,
-            state: returnPlan ? { plan: returnPlan } : undefined,
+            state: Object.keys(returnState).length > 0 ? returnState : undefined,
           })
         } catch {
           navigate('/dashboard', { replace: true })
         }
-      } else {
-        navigate('/login', { replace: true })
+      } else if (event === 'INITIAL_SESSION' && !session) {
+        // No session detected — magic link may have expired or already been used
+        navigate('/login?error=link_expired', { replace: true })
       }
     })
+
+    return () => subscription.unsubscribe()
   }, [navigate])
 
   return (
