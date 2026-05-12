@@ -48,11 +48,7 @@ const AdminQuizPage = lazy(() => import('@/pages/admin/AdminQuizPage').then((m) 
 const AdminQuizHistoryPage = lazy(() => import('@/pages/admin/AdminQuizHistoryPage').then((m) => ({ default: m.AdminQuizHistoryPage })))
 
 export const router = createBrowserRouter([
-  // Auth routes — full-screen, sem navbar
-  { path: '/login', element: LazyPage(LoginPage) },
-  { path: '/auth/callback', element: LazyPage(AuthCallbackPage) },
-
-  // Public routes com navbar
+  // Public routes
   {
     element: <Layout />,
     children: [
@@ -61,6 +57,8 @@ export const router = createBrowserRouter([
       { path: '/results', element: LazyPage(ResultsPage) },
       { path: '/checkout', element: LazyPage(CheckoutPage) },
       { path: '/checkout/success', element: LazyPage(SuccessPage) },
+      { path: '/login', element: LazyPage(LoginPage) },
+      { path: '/auth/callback', element: LazyPage(AuthCallbackPage) },
       { path: '*', element: LazyPage(NotFoundPage) },
     ],
   },
