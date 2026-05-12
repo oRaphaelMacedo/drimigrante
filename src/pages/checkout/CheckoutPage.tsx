@@ -19,6 +19,7 @@ import {
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/hooks/useAuth'
 import { toast } from 'sonner'
+import { track } from '@/lib/analytics'
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -117,6 +118,7 @@ export function CheckoutPage() {
     }
 
     setIsProcessing(true)
+    track('checkout_started', { plan: selectedPlan, assessment_id: assessmentId })
     try {
       const { data, error } = await supabase.functions.invoke('create-checkout-session', {
         body: {

@@ -7,6 +7,7 @@ import { QuizProgress } from '@/components/quiz/QuizProgress'
 import { QuizQuestionCard } from '@/components/quiz/QuizQuestion'
 import { QuizCaptureForm } from '@/components/quiz/QuizCaptureForm'
 import { supabase } from '@/lib/supabase'
+import { track } from '@/lib/analytics'
 
 const COMING_SOON_LABELS: Record<string, { title: string; description: string }> = {
   visto: {
@@ -84,7 +85,14 @@ export function QuizPage() {
         <div className="mx-auto max-w-2xl">
 
           {/* ── INTRO ── */}
-          {quizState === 'intro' && <QuizIntro onStart={startQuiz} />}
+          {quizState === 'intro' && (
+            <QuizIntro
+              onStart={() => {
+                track('quiz_started')
+                startQuiz()
+              }}
+            />
+          )}
 
           {/* ── QUESTIONS ── */}
           {quizState === 'question' && currentQuestion && (

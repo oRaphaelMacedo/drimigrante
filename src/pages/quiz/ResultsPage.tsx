@@ -6,6 +6,7 @@ import { ArrowRight, CheckCircle, Lock, RotateCcw, Star, TrendingUp, Users, Zap 
 import { cn } from '@/lib/utils'
 import type { QuizResult } from '@/hooks/useQuiz'
 import type { VisaSuggestion } from '@/data/quiz-questions'
+import { track } from '@/lib/analytics'
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
@@ -47,6 +48,17 @@ export function ResultsPage() {
       // ignore parse errors
     }
   }, [location.state])
+
+  // Fire quiz_completed once per result load
+  useEffect(() => {
+    if (result) {
+      track('quiz_completed', {
+        score: result.score.percentage,
+        category: result.score.category,
+        top_visa: result.visas?.[0]?.code,
+      })
+    }
+  }, [result])
 
   if (!result) {
     return (

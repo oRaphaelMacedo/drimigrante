@@ -5,6 +5,7 @@
 
 import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams, Link } from 'react-router-dom'
+import { track } from '@/lib/analytics'
 import {
   CheckCircle2,
   ArrowRight,
@@ -43,6 +44,11 @@ export function SuccessPage() {
   const [countdown, setCountdown] = useState(8)
 
   const percentage = useCountUp(100, 1500)
+
+  // Fire conversion event once on mount
+  useEffect(() => {
+    track('checkout_completed', { session_id: sessionId })
+  }, [sessionId])
 
   // Auto-redirect to dashboard
   useEffect(() => {
