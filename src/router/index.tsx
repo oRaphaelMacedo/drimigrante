@@ -30,6 +30,11 @@ const ResultsPage = lazy(() => import('@/pages/quiz/ResultsPage').then((m) => ({
 const CheckoutPage = lazy(() => import('@/pages/checkout/CheckoutPage').then((m) => ({ default: m.CheckoutPage })))
 const SuccessPage = lazy(() => import('@/pages/checkout/SuccessPage').then((m) => ({ default: m.SuccessPage })))
 
+// Legal
+const TermsPage = lazy(() => import('@/pages/legal/TermsPage').then((m) => ({ default: m.TermsPage })))
+const PrivacyPage = lazy(() => import('@/pages/legal/PrivacyPage').then((m) => ({ default: m.PrivacyPage })))
+const CookiesPage = lazy(() => import('@/pages/legal/CookiesPage').then((m) => ({ default: m.CookiesPage })))
+
 // Dashboard
 const DashboardHomePage = lazy(() => import('@/pages/dashboard/DashboardHomePage').then((m) => ({ default: m.DashboardHomePage })))
 const AnalysisPage = lazy(() => import('@/pages/dashboard/AnalysisPage').then((m) => ({ default: m.AnalysisPage })))
@@ -59,6 +64,9 @@ export const router = createBrowserRouter([
       { path: '/checkout/success', element: LazyPage(SuccessPage) },
       { path: '/login', element: LazyPage(LoginPage) },
       { path: '/auth/callback', element: LazyPage(AuthCallbackPage) },
+      { path: '/termos', element: LazyPage(TermsPage) },
+      { path: '/privacidade', element: LazyPage(PrivacyPage) },
+      { path: '/cookies', element: LazyPage(CookiesPage) },
       { path: '*', element: LazyPage(NotFoundPage) },
     ],
   },
