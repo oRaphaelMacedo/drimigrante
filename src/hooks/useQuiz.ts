@@ -13,6 +13,7 @@ import { persistAssessment } from '@/hooks/useAssessment'
 import { useQuizPersistence, type QuizSession } from './useQuizPersistence'
 import { useQuizState, type QuizFlowState } from './useQuizState'
 import { useQuizQuestions } from './useQuizQuestions'
+import { supabase } from '@/lib/supabase'
 
 export type QuizState = QuizFlowState
 export type { QuizSession }
@@ -147,8 +148,27 @@ export function useQuiz() {
           )
         } catch {}
 
-        // Simulate brief processing delay (AI feel)
-        await new Promise((r) => setTimeout(r, 2000))
+        // Run edge functions: compute-eligibility → generate-explanation (fire & forget — errors don't block UX)
+        if (assessmentId) {
+          try {
+            // 1. Compute eligibility score and visa suggestions (server-side, writes to assessment_results)
+            const { error: eligErr } = await supabase.functions.invoke('compute-eligibility', {
+              body: { assessment_id: assessmentId },
+            })
+            if (eligErr) console.warn('[useQuiz] compute-eligibility failed:', eligErr)
+
+            // 2. Generate AI explanation (requires assessment_results row from step 1)
+            const { error: explErr } = await supabase.functions.invoke('generate-explanation', {
+              body: { assessment_id: assessmentId },
+            })
+            if (explErr) console.warn('[useQuiz] generate-explanation failed:', explErr)
+          } catch (fnErr) {
+            console.warn('[useQuiz] Edge function error (non-blocking):', fnErr)
+          }
+        } else {
+          // No DB record — short delay to keep the processing animation visible
+          await new Promise((r) => setTimeout(r, 2000))
+        }
 
         dispatch({ type: 'SUBMIT_SUCCESS', payload: quizResult })
         navigate('/results', { state: { result: quizResult, assessmentId } })

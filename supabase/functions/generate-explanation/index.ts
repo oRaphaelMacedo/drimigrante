@@ -67,18 +67,43 @@ serve(async (req) => {
     const topVisa = suggestedVisas.find((v) => v.eligible) ?? suggestedVisas[0]
     const answers = assessment.answers as Record<string, unknown>
 
-    // Build prompt context
+    // Build prompt context from actual quiz answer keys
+    const processoTipo = answers.processo_tipo ?? 'nacionalidade'
+    const casos = Array.isArray(answers.caso)
+      ? (answers.caso as string[]).join(', ')
+      : (answers.caso as string | undefined) ?? 'Não indicado'
+
+    const antepassadoMap: Record<string, string> = {
+      pai_mae: 'Pai ou Mãe',
+      avos: 'Avós',
+      bisavos: 'Bisavós',
+      trisavos: 'Trisavós ou mais distante',
+      nao_sei: 'Incerto',
+    }
+    const casamentoMap: Record<string, string> = {
+      menos_1_ano: 'Menos de 1 ano',
+      '1_3_anos': 'Entre 1 e 3 anos',
+      mais_3_anos: 'Mais de 3 anos',
+    }
+    const residenciaMap: Record<string, string> = {
+      menos_2: 'Menos de 2 anos',
+      '2_5_anos': 'Entre 2 e 5 anos',
+      '5_ou_mais': '5 anos ou mais',
+    }
+
     const context = `
 Cliente: ${assessment.full_name ?? 'Utilizador anónimo'}
-Nacionalidade: ${answers.nationality ?? 'Não informado'}
-Rendimento mensal: ${answers.monthly_income ?? 'Não informado'} EUR
-Fonte de rendimento: ${answers.income_source ?? 'Não informado'}
-Poupanças: ${answers.has_savings === 'yes' ? `Sim (${answers.savings_amount ?? ''})` : 'Não'}
-Família portuguesa: ${answers.has_portuguese_family === 'yes' ? 'Sim' : 'Não'}
-Nível de português: ${answers.portuguese_language ?? 'Não informado'}
-Objetivo em Portugal: ${answers.main_goal ?? 'Não informado'}
-Score de elegibilidade: ${result.score_numeric}/100 (${result.score_category})
-Visto mais adequado: ${topVisa?.visa_type_name ?? 'A determinar'}
+Email: ${assessment.email ?? 'Não indicado'}
+Processo pretendido: ${processoTipo === 'nacionalidade' ? 'Obter Nacionalidade Portuguesa' : processoTipo}
+Casos selecionados: ${casos}
+Grau do antepassado português: ${antepassadoMap[answers.a1_antepassado as string] ?? (answers.a1_antepassado as string | undefined) ?? 'Não aplicável'}
+Grau de parentesco: ${answers.a2_grau_parentesco ?? 'Não aplicável'}
+Tempo de casamento com português(a): ${casamentoMap[answers.b1_casamento_anos as string] ?? 'Não aplicável'}
+Tempo de residência em Portugal: ${residenciaMap[answers.d1_residencia_anos as string] ?? 'Não aplicável'}
+Já teve advogado/processo anterior: ${answers.d3_ja_teve_advogado === 'sim' ? 'Sim' : (answers.d3_ja_teve_advogado === 'nao' ? 'Não' : 'Não aplicável')}
+Tem familiares portugueses: ${answers.tem_familia_portuguesa ?? 'Não informado'}
+Score de elegibilidade: ${result.score_numeric}/100 (categoria: ${result.score_category})
+Visto/via mais adequado(a): ${topVisa?.visa_type_name ?? 'Nacionalidade Portuguesa'}
 `.trim()
 
     // Generate short explanation (pre-result — free)
@@ -99,6 +124,10 @@ Visto mais adequado: ${topVisa?.visa_type_name ?? 'A determinar'}
       }),
     })
 
+    // B03-A03: check response before parsing — rate limits / 5xx return non-JSON bodies
+    if (!shortRes.ok) {
+      throw new Error(`OpenAI short explanation error: ${shortRes.status}`)
+    }
     const shortJson = await shortRes.json()
     const shortText = shortJson.choices?.[0]?.message?.content ?? ''
     const shortTokens = shortJson.usage?.total_tokens ?? 0
@@ -121,6 +150,10 @@ Visto mais adequado: ${topVisa?.visa_type_name ?? 'A determinar'}
       }),
     })
 
+    // B03-A03: same guard for full explanation call
+    if (!fullRes.ok) {
+      throw new Error(`OpenAI full explanation error: ${fullRes.status}`)
+    }
     const fullJson = await fullRes.json()
     const fullText = fullJson.choices?.[0]?.message?.content ?? ''
     const fullTokens = fullJson.usage?.total_tokens ?? 0
@@ -145,7 +178,8 @@ Visto mais adequado: ${topVisa?.visa_type_name ?? 'A determinar'}
     })
   } catch (err) {
     console.error(err)
-    return new Response(JSON.stringify({ error: String(err) }), {
+    // B03-A07: never leak internal error details to the caller
+    return new Response(JSON.stringify({ error: 'Internal server error' }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })

@@ -1,10 +1,12 @@
 // QuizPage.tsx — Quiz Engine — Diagnóstico da Imigração
-import { Loader2, ArrowLeft, Mail } from 'lucide-react'
+import { useState } from 'react'
+import { Loader2, ArrowLeft, Mail, CheckCircle2 } from 'lucide-react'
 import { useQuiz } from '@/hooks/useQuiz'
 import { QuizIntro } from '@/components/quiz/QuizIntro'
 import { QuizProgress } from '@/components/quiz/QuizProgress'
 import { QuizQuestionCard } from '@/components/quiz/QuizQuestion'
 import { QuizCaptureForm } from '@/components/quiz/QuizCaptureForm'
+import { supabase } from '@/lib/supabase'
 
 const COMING_SOON_LABELS: Record<string, { title: string; description: string }> = {
   visto: {
@@ -44,9 +46,37 @@ export function QuizPage() {
     backFromComingSoon,
   } = useQuiz()
 
+  // Coming soon — email capture state
+  const [notifyEmail, setNotifyEmail] = useState('')
+  const [notifyLoading, setNotifyLoading] = useState(false)
+  const [notifyDone, setNotifyDone] = useState(false)
+
   const comingSoonContent =
     COMING_SOON_LABELS[session.answers['processo_tipo'] ?? ''] ??
     COMING_SOON_LABELS['nao_sei']
+
+  const handleNotifySubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!notifyEmail.trim() || notifyLoading) return
+    setNotifyLoading(true)
+    try {
+      // Save as an assessment with status 'waiting_list' for this pathway
+      // Save as incomplete assessment so admin can see waitlist leads
+      await supabase.from('assessments').insert({
+        email: notifyEmail.trim(),
+        status: 'incomplete',
+        answers: { processo_tipo: session.answers['processo_tipo'] ?? 'nao_sei', waitlist: true },
+        questions_answered: 1,
+        total_questions: 1,
+        completion_percentage: 0,
+      })
+    } catch {
+      // fail silently — lead capture is best-effort
+    } finally {
+      setNotifyLoading(false)
+      setNotifyDone(true)
+    }
+  }
 
   return (
     <div className="min-h-[calc(100vh-64px)] bg-gradient-to-b from-brand-50/40 to-white">
@@ -142,17 +172,31 @@ export function QuizPage() {
                   </ul>
                 </div>
 
-                {/* Email capture simples */}
-                <div className="flex gap-2">
-                  <input
-                    type="email"
-                    placeholder="O seu e-mail"
-                    className="flex-1 rounded-xl border-2 border-gray-200 px-4 py-2.5 text-sm text-gray-700 focus:border-brand-500 focus:outline-none"
-                  />
-                  <button className="rounded-xl bg-brand-700 px-5 py-2.5 text-sm font-bold text-white hover:bg-brand-600 transition whitespace-nowrap">
-                    Quero ser notificado(a)
-                  </button>
-                </div>
+                {/* Email capture */}
+                {notifyDone ? (
+                  <div className="flex items-center justify-center gap-2 rounded-xl bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700">
+                    <CheckCircle2 className="h-4 w-4 shrink-0" />
+                    Guardado! Avisaremos assim que estiver disponível.
+                  </div>
+                ) : (
+                  <form onSubmit={handleNotifySubmit} className="flex gap-2">
+                    <input
+                      type="email"
+                      required
+                      value={notifyEmail}
+                      onChange={(e) => setNotifyEmail(e.target.value)}
+                      placeholder="O seu e-mail"
+                      className="flex-1 rounded-xl border-2 border-gray-200 px-4 py-2.5 text-sm text-gray-700 focus:border-brand-500 focus:outline-none"
+                    />
+                    <button
+                      type="submit"
+                      disabled={notifyLoading}
+                      className="rounded-xl bg-brand-700 px-5 py-2.5 text-sm font-bold text-white hover:bg-brand-600 transition whitespace-nowrap disabled:opacity-60"
+                    >
+                      {notifyLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Quero ser notificado(a)'}
+                    </button>
+                  </form>
+                )}
               </div>
 
               <button

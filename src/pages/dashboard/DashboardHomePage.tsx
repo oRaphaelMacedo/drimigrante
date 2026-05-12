@@ -1,8 +1,15 @@
-// DashboardHomePage.tsx — Day 3: Real dashboard with assessment status
-// Shows quiz result summary, unlock CTA, and navigation to main features
+// DashboardHomePage.tsx — Supabase + localStorage hybrid data loading
 
-import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+
+interface CachedResult {
+  score: { percentage: number; category: string; label: string }
+  visas: Array<{ code: string; name: string; match: string }>
+  leadInfo: { fullName: string; email: string } | null
+  completedAt: string
+  assessmentId?: string | null
+}
+
 import {
   FileText,
   MessageSquare,
@@ -15,33 +22,35 @@ import {
   User,
 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
+import { useAssessmentResult } from '@/hooks/useAssessmentResult'
 import { cn } from '@/lib/utils'
-
-interface CachedResult {
-  score: { percentage: number; category: string; label: string }
-  visas: Array<{ code: string; name: string; match: string }>
-  leadInfo: { fullName: string; email: string } | null
-  completedAt: string
-  assessmentId?: string | null
-}
 
 export function DashboardHomePage() {
   const { authUser, hasAccess } = useAuth()
-  const [cachedResult, setCachedResult] = useState<CachedResult | null>(null)
-  const firstName = authUser?.profile?.full_name?.split(' ')[0] ?? 'bem-vindo'
-
-  // Load quiz result from localStorage (Day 4: will fetch from Supabase)
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem('dr_imigrante_quiz_result')
-      if (raw) setCachedResult(JSON.parse(raw) as CachedResult)
-    } catch {
-      // ignore
-    }
-  }, [])
+  const { result: assessmentResult } = useAssessmentResult()
+  const firstName = authUser?.profile?.full_name?.split(' ')[0]
+    ?? assessmentResult?.leadName?.split(' ')[0]
+    ?? 'bem-vindo'
 
   const hasPaid = hasAccess('dashboard')
-  const hasQuizResult = !!cachedResult
+  const hasQuizResult = !!assessmentResult
+
+  // Adapt to the shape the existing sub-components expect
+  const cachedResult = assessmentResult
+    ? {
+        score: {
+          percentage: assessmentResult.scorePercentage,
+          category: assessmentResult.scoreCategory,
+          label: assessmentResult.scoreLabel,
+        },
+        visas: assessmentResult.localVisas,
+        leadInfo: assessmentResult.leadName
+          ? { fullName: assessmentResult.leadName, email: assessmentResult.leadEmail ?? '' }
+          : null,
+        completedAt: assessmentResult.completedAt ?? '',
+        assessmentId: assessmentResult.assessmentId || null,
+      }
+    : null
 
   return (
     <div className="space-y-8">
@@ -173,7 +182,7 @@ function QuizResultBanner({ result, hasPaid }: { result: CachedResult; hasPaid: 
             {result.visas?.length ?? 0} visto(s) identificado(s)
           </p>
           <div className="flex flex-wrap gap-1.5 sm:justify-end">
-            {(result.visas ?? []).slice(0, 3).map((v) => (
+            {(result.visas ?? []).slice(0, 3).map((v: { code: string; name: string; match: string }) => (
               <span
                 key={v.code}
                 className={cn(

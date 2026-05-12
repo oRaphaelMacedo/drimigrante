@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowLeft, CheckCircle2, Lock, FileText, Briefcase, Plane, AlertTriangle } from 'lucide-react'
+import { ArrowLeft, CheckCircle2, Lock, FileText, Briefcase, Plane, AlertTriangle, Sparkles, Loader2 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
+import { useAssessmentResult } from '@/hooks/useAssessmentResult'
 import { cn } from '@/lib/utils'
 
 interface VisaOption {
@@ -86,18 +86,29 @@ const visaDetails: Record<string, { description: string, docs: string[], icon: R
 
 export function AnalysisPage() {
   const { hasAccess } = useAuth()
-  const [result, setResult] = useState<CachedResult | null>(null)
-  
+  const { result: assessmentResult, isLoading, hasDbResult } = useAssessmentResult()
   const hasFullAccess = hasAccess('full_analysis')
 
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem('dr_imigrante_quiz_result')
-      if (raw) setResult(JSON.parse(raw))
-    } catch {
-      // ignore
-    }
-  }, [])
+  // Adapt to the shape the rest of the component expects
+  const result: CachedResult | null = assessmentResult
+    ? {
+        score: {
+          percentage: assessmentResult.scorePercentage,
+          category: assessmentResult.scoreCategory,
+          label: assessmentResult.scoreLabel,
+        },
+        visas: assessmentResult.localVisas.map((v) => ({
+          code: v.code,
+          name: v.name,
+          match: v.match === 'strong' ? 'high' : v.match === 'possible' ? 'medium' : 'low',
+        })),
+        leadInfo: assessmentResult.leadName
+          ? { fullName: assessmentResult.leadName, email: assessmentResult.leadEmail ?? '' }
+          : null,
+        completedAt: assessmentResult.completedAt ?? '',
+        assessmentId: assessmentResult.assessmentId || null,
+      }
+    : null
 
   if (!hasFullAccess) {
     return (
@@ -109,7 +120,7 @@ export function AnalysisPage() {
         </p>
         <Link
           to="/checkout"
-          state={{ plan: 'one_time', assessmentId: result?.assessmentId }}
+          state={{ plan: 'one_time', assessmentId: assessmentResult?.assessmentId }}
           className="mt-4 flex items-center gap-2 rounded-xl bg-brand-700 px-5 py-2.5 text-sm font-bold text-white shadow-sm transition hover:bg-brand-600"
         >
           Desbloquear por €30
@@ -117,6 +128,15 @@ export function AnalysisPage() {
         <Link to="/dashboard" className="mt-2 text-sm text-gray-500 hover:text-brand-600">
           Voltar ao Dashboard
         </Link>
+      </div>
+    )
+  }
+
+  if (isLoading) {
+    return (
+      <div className="flex h-[60vh] flex-col items-center justify-center gap-3">
+        <Loader2 className="h-8 w-8 animate-spin text-brand-600" />
+        <p className="text-sm text-gray-500">A carregar a sua análise…</p>
       </div>
     )
   }
@@ -252,6 +272,19 @@ export function AnalysisPage() {
           })}
         </div>
       </div>
+
+      {/* IA Full Explanation (shown when generate-explanation has run) */}
+      {hasDbResult && assessmentResult?.iaExplanationFull && (
+        <div className="rounded-2xl border border-purple-100 bg-white p-6 shadow-sm sm:p-8">
+          <div className="mb-4 flex items-center gap-2">
+            <Sparkles className="h-5 w-5 text-purple-500" />
+            <h2 className="text-lg font-bold text-gray-900">Análise Jurídica IA</h2>
+          </div>
+          <div className="prose prose-sm max-w-none text-gray-700 whitespace-pre-line">
+            {assessmentResult.iaExplanationFull}
+          </div>
+        </div>
+      )}
 
       {/* Next Steps CTA */}
       <div className="rounded-2xl border border-brand-100 bg-brand-50 p-6 sm:p-8">
