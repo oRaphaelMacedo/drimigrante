@@ -48,7 +48,11 @@ const AdminQuizPage = lazy(() => import('@/pages/admin/AdminQuizPage').then((m) 
 const AdminQuizHistoryPage = lazy(() => import('@/pages/admin/AdminQuizHistoryPage').then((m) => ({ default: m.AdminQuizHistoryPage })))
 
 export const router = createBrowserRouter([
-  // Public routes
+  // Auth routes — full-screen, sem navbar
+  { path: '/login', element: LazyPage(LoginPage) },
+  { path: '/auth/callback', element: LazyPage(AuthCallbackPage) },
+
+  // Public routes com navbar
   {
     element: <Layout />,
     children: [
@@ -57,8 +61,6 @@ export const router = createBrowserRouter([
       { path: '/results', element: LazyPage(ResultsPage) },
       { path: '/checkout', element: LazyPage(CheckoutPage) },
       { path: '/checkout/success', element: LazyPage(SuccessPage) },
-      { path: '/login', element: LazyPage(LoginPage) },
-      { path: '/auth/callback', element: LazyPage(AuthCallbackPage) },
       { path: '*', element: LazyPage(NotFoundPage) },
     ],
   },
@@ -73,16 +75,18 @@ export const router = createBrowserRouter([
       { path: '/dashboard', element: LazyPage(DashboardHomePage) },
       {
         path: '/dashboard/analysis',
+        // B06-A01: full_analysis is included in both one-time and subscription plans
         element: (
-          <ProtectedRoute requirePaid>
+          <ProtectedRoute requireFeature="full_analysis">
             {LazyPage(AnalysisPage)}
           </ProtectedRoute>
         ),
       },
       {
         path: '/dashboard/chat',
+        // B06-A01: chat is subscription-only — must gate on 'chat', not generic 'dashboard'
         element: (
-          <ProtectedRoute requirePaid>
+          <ProtectedRoute requireFeature="chat">
             {LazyPage(ChatPage)}
           </ProtectedRoute>
         ),
@@ -90,7 +94,7 @@ export const router = createBrowserRouter([
       {
         path: '/dashboard/documents',
         element: (
-          <ProtectedRoute requirePaid>
+          <ProtectedRoute requireFeature="dashboard">
             {LazyPage(DocumentsPage)}
           </ProtectedRoute>
         ),
