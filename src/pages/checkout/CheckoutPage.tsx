@@ -4,7 +4,7 @@
 
 import { useState } from 'react'
 import { supabase } from '@/lib/supabase'
-import { useLocation, useNavigate, Link } from 'react-router-dom'
+import { useLocation, useNavigate, Link, Navigate } from 'react-router-dom'
 import {
   ArrowLeft,
   CheckCircle,
@@ -90,12 +90,18 @@ function getStoredAssessmentId(): string | null {
 export function CheckoutPage() {
   const location = useLocation()
   const navigate = useNavigate()
-  const { authUser } = useAuth()
+  const { authUser, hasAccess } = useAuth()
 
   // Plan can be pre-selected from Results page link
   const initialPlan = (location.state?.plan as PlanId) ?? 'one_time'
   const [selectedPlan, setSelectedPlan] = useState<PlanId>(initialPlan)
   const [isProcessing, setIsProcessing] = useState(false)
+
+  // Guard: if user already paid, redirect to dashboard (hooks must come first)
+  const alreadyPaid = hasAccess('dashboard')
+  if (alreadyPaid) {
+    return <Navigate to="/dashboard" replace />
+  }
 
   // assessmentId: prefer location.state (direct nav), fall back to localStorage
   // (localStorage is the only source after the magic-link auth round-trip clears state)

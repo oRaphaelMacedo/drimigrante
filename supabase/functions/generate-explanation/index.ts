@@ -169,6 +169,28 @@ Visto/via mais adequado(a): ${topVisa?.visa_type_name ?? 'Nacionalidade Portugue
       })
       .eq('assessment_id', assessment_id)
 
+    // Trigger welcome_free email (best-effort — quiz result notification)
+    const internalSecret = Deno.env.get('INTERNAL_SECRET') ?? ''
+    const appUrl = Deno.env.get('APP_URL') ?? 'https://www.drimigrante.com'
+    if (assessment.email) {
+      try {
+        await supabase.functions.invoke('send-email', {
+          body: {
+            trigger_key: 'welcome_free',
+            recipient_email: assessment.email,
+            variables: {
+              name: assessment.full_name ?? 'Cliente',
+              score_category: result.score_category ?? 'média',
+              cta_link: `${appUrl}/checkout`,
+            },
+          },
+          headers: { 'x-internal-secret': internalSecret },
+        })
+      } catch (emailErr) {
+        console.warn('[generate-explanation] welcome_free email failed:', emailErr)
+      }
+    }
+
     return new Response(JSON.stringify({
       short: shortText,
       full: fullText,
