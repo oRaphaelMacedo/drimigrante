@@ -28,7 +28,9 @@ async function login(page: Page): Promise<AuthedUser> {
     )
   }
 
-  const email = `e2e+${Date.now()}@drimigrante.com`
+  // Add a random suffix — parallel workers can hit the same millisecond
+  // and Supabase rejects the duplicate user creation with a 500.
+  const email = `e2e+${Date.now()}-${Math.random().toString(36).slice(2, 8)}@drimigrante.com`
   const response = await page.request.post(
     `${supabaseUrl}/functions/v1/e2e-login`,
     {

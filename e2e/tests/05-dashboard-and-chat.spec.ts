@@ -44,10 +44,17 @@ test('chat: enviar mensagem mostra bubbles user e assistant', async ({ paidUser 
       { id: userId, role: 'user', content: body.message, created_at: now, assessment_id: assessmentId },
       { id: asstId, role: 'assistant', content: 'Resposta E2E mockada.', created_at: now, assessment_id: assessmentId },
     )
+    // SSE stream — useChatData() parses `data: {"delta":"..."}` lines and ends on
+    // `data: [DONE]`. Two chunks here so the streamingText state visibly grows.
+    const sse = [
+      'data: {"delta":"Resposta E2E"}\n\n',
+      'data: {"delta":" mockada."}\n\n',
+      'data: [DONE]\n\n',
+    ].join('')
     await route.fulfill({
       status: 200,
-      body: JSON.stringify({ reply: 'Resposta E2E mockada.', messageId: asstId }),
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'text/event-stream' },
+      body: sse,
     })
   })
 
@@ -63,6 +70,6 @@ test('chat: enviar mensagem mostra bubbles user e assistant', async ({ paidUser 
     timeout: 10_000,
   })
 
-  // O loading indicator (proxy do "streaming cursor") deve desaparecer.
+  // Streaming cursor should disappear once the stream completes.
   await expect(page.getByTestId('chat-streaming-cursor')).toBeHidden({ timeout: 5_000 })
 })

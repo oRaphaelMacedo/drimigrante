@@ -1,7 +1,9 @@
+// chat-completion — Streaming SSE proxy to OpenAI
+// Returns text/event-stream chunks to the client, persists final assistant message at end.
+
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
-// ÚNICO bloco corsHeaders — não duplicar
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -9,68 +11,41 @@ const corsHeaders = {
 }
 
 serve(async (req) => {
-  // (a) CORS preflight
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
 
   try {
-    // (b) Auth — usar JWT do utilizador
     const authHeader = req.headers.get('Authorization')
-    if (!authHeader) {
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-        status: 401,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
-    }
+    if (!authHeader) return jsonError(401, 'Unauthorized')
 
     const supabaseClient = createClient(
       Deno.env.get('SUPABASE_URL')!,
       Deno.env.get('SUPABASE_ANON_KEY')!,
-      { global: { headers: { Authorization: authHeader } } }
+      { global: { headers: { Authorization: authHeader } } },
     )
 
     const { data: { user }, error: authError } = await supabaseClient.auth.getUser()
-    if (authError || !user) {
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-        status: 401,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
-    }
+    if (authError || !user) return jsonError(401, 'Unauthorized')
 
-    // (d) Validar body
     const body = await req.json()
     const { message, assessmentId } = body
-    if (!message || !assessmentId) {
-      return new Response(JSON.stringify({ error: 'message and assessmentId are required' }), {
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
-    }
+    if (!message || !assessmentId) return jsonError(400, 'message and assessmentId are required')
 
-    // TASK-005: Verificar ownership via tabela assessments
     const { data: assessment, error: assessmentError } = await supabaseClient
       .from('assessments')
       .select('id, answers')
       .eq('id', assessmentId)
       .eq('user_id', user.id)
       .single()
+    if (assessmentError || !assessment) return jsonError(404, 'Assessment not found')
 
-    if (assessmentError || !assessment) {
-      return new Response(JSON.stringify({ error: 'Assessment not found' }), {
-        status: 404,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
-    }
-
-    // Buscar contexto de score/vistos em assessment_results
     const { data: assessmentResult } = await supabaseClient
       .from('assessment_results')
       .select('score_numeric, score_category, suggested_visa_types')
       .eq('assessment_id', assessmentId)
       .single()
 
-    // TASK-006: Carregar histórico de mensagens
     const { data: history } = await supabaseClient
       .from('messages')
       .select('role, content')
@@ -83,20 +58,14 @@ serve(async (req) => {
       content: m.content,
     }))
 
-    // TASK-007: Persistir mensagem do utilizador
-    await supabaseClient
-      .from('messages')
-      .insert({
-        assessment_id: assessmentId,
-        user_id: user.id,
-        role: 'user',
-        content: message,
-      })
+    await supabaseClient.from('messages').insert({
+      assessment_id: assessmentId,
+      user_id: user.id,
+      role: 'user',
+      content: message,
+    })
 
-    // Construir system prompt
     const systemPrompt = buildSystemPrompt(assessment, assessmentResult)
-
-    // Chamar OpenAI
     const openaiKey = Deno.env.get('OPENAI_API_KEY')
     if (!openaiKey) throw new Error('OPENAI_API_KEY not configured')
 
@@ -108,6 +77,7 @@ serve(async (req) => {
       },
       body: JSON.stringify({
         model: 'gpt-4o-mini',
+        stream: true,
         messages: [
           { role: 'system', content: systemPrompt },
           ...historyMessages,
@@ -118,42 +88,88 @@ serve(async (req) => {
       }),
     })
 
-    if (!openAIResponse.ok) {
+    if (!openAIResponse.ok || !openAIResponse.body) {
       throw new Error(`OpenAI error: ${openAIResponse.status}`)
     }
 
-    const openAIData = await openAIResponse.json()
-    const aiReply = openAIData.choices?.[0]?.message?.content ?? ''
+    let fullText = ''
+    const encoder = new TextEncoder()
+    const decoder = new TextDecoder()
 
-    // TASK-007: Persistir resposta da IA
-    const { data: assistantMessage } = await supabaseClient
-      .from('messages')
-      .insert({
-        assessment_id: assessmentId,
-        user_id: user.id,
-        role: 'assistant',
-        content: aiReply,
-      })
-      .select('id')
-      .single()
+    const stream = new ReadableStream({
+      async start(controller) {
+        const reader = openAIResponse.body!.getReader()
+        let buffer = ''
+        try {
+          while (true) {
+            const { done, value } = await reader.read()
+            if (done) break
+            buffer += decoder.decode(value, { stream: true })
+            const lines = buffer.split('\n')
+            buffer = lines.pop() ?? ''
 
-    return new Response(
-      JSON.stringify({ reply: aiReply, messageId: assistantMessage?.id }),
-      { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
-    )
+            for (const line of lines) {
+              if (!line.startsWith('data:')) continue
+              const data = line.slice(5).trim()
+              if (data === '[DONE]') {
+                controller.enqueue(encoder.encode('event: done\ndata: [DONE]\n\n'))
+                continue
+              }
+              try {
+                const json = JSON.parse(data)
+                const delta = json.choices?.[0]?.delta?.content
+                if (delta) {
+                  fullText += delta
+                  controller.enqueue(
+                    encoder.encode(`data: ${JSON.stringify({ delta })}\n\n`),
+                  )
+                }
+              } catch {
+                // ignore malformed chunks
+              }
+            }
+          }
 
+          // Persist full assistant reply after stream completes
+          await supabaseClient.from('messages').insert({
+            assessment_id: assessmentId,
+            user_id: user.id,
+            role: 'assistant',
+            content: fullText,
+          })
+
+          controller.close()
+        } catch (err) {
+          console.error('stream error:', err)
+          controller.error(err)
+        }
+      },
+    })
+
+    return new Response(stream, {
+      headers: {
+        ...corsHeaders,
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+      },
+    })
   } catch (error) {
     console.error('chat-completion error:', error)
-    return new Response(
-      JSON.stringify({ error: 'Internal server error' }),
-      { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
-    )
+    return jsonError(500, 'Internal server error')
   }
 })
 
+function jsonError(status: number, error: string) {
+  return new Response(JSON.stringify({ error }), {
+    status,
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  })
+}
+
 function buildSystemPrompt(
   assessment: { answers: unknown },
-  result: { score_numeric: number | null; score_category: string | null; suggested_visa_types: unknown } | null
+  result: { score_numeric: number | null; score_category: string | null; suggested_visa_types: unknown } | null,
 ): string {
   return `Você é o Doutor Imigrante, um assistente especializado em imigração para Portugal.
 Está a ajudar um utilizador com base no seu diagnóstico de elegibilidade.

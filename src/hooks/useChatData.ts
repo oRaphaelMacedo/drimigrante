@@ -1,8 +1,8 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useState, useCallback } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/hooks/useAuth'
 
-// Shape returned by the messages table (not yet in generated types)
 export interface ChatMessage {
   id: string
   role: 'user' | 'assistant' | 'system'
@@ -10,67 +10,43 @@ export interface ChatMessage {
   created_at: string
 }
 
-interface StoredQuizResult {
-  assessmentId: string | null
-  sessionId: string | null
-}
-
-// Read both assessmentId and sessionId stored by the quiz on completion.
-// sessionId is required to fall back to get_anon_assessment RPC when the
-// assessment has not yet been linked to the authenticated user (B02-A21).
-function getStoredQuizResult(): StoredQuizResult {
+function getStoredAssessmentId(): string | null {
   try {
     const raw = localStorage.getItem('dr_imigrante_quiz_result')
-    if (!raw) return { assessmentId: null, sessionId: null }
-    const parsed = JSON.parse(raw)
-    return {
-      assessmentId: (parsed?.assessmentId as string | null) ?? null,
-      sessionId: (parsed?.sessionId as string | null) ?? null,
-    }
+    return raw ? (JSON.parse(raw)?.assessmentId as string | null) ?? null : null
   } catch {
-    return { assessmentId: null, sessionId: null }
+    return null
   }
 }
+
+const FUNCTIONS_URL =
+  (import.meta.env.VITE_SUPABASE_FUNCTIONS_URL as string | undefined) ??
+  `${import.meta.env.VITE_SUPABASE_URL}/functions/v1`
 
 export function useChatData() {
   const { authUser } = useAuth()
   const queryClient = useQueryClient()
   const userId = authUser?.user.id
   const userEmail = authUser?.user.email
-  const { assessmentId: storedAssessmentId, sessionId: storedSessionId } = getStoredQuizResult()
+  const storedAssessmentId = getStoredAssessmentId()
 
-  const {
-    data: assessment,
-    isLoading: isLoadingAssessment,
-  } = useQuery({
+  // Streaming UI state
+  const [streamingText, setStreamingText] = useState('')
+  const [pendingUserMessage, setPendingUserMessage] = useState<string | null>(null)
+  const [isStreaming, setIsStreaming] = useState(false)
+  const [sendError, setSendError] = useState<Error | null>(null)
+
+  const { data: assessment, isLoading: isLoadingAssessment } = useQuery({
     queryKey: ['chat-assessment', storedAssessmentId ?? userId ?? userEmail],
     queryFn: async () => {
-      // 1. Prefer localStorage ID — direct REST works ONLY if assessment is
-      //    already linked to the authenticated user (RLS: user_id = auth.uid()).
-      //    AuthContext does this linking on SIGNED_IN, so this is the fast path.
       if (storedAssessmentId) {
         const { data, error } = await supabase
           .from('assessments')
           .select('id, answers')
           .eq('id', storedAssessmentId)
-          .maybeSingle()
+          .single()
         if (!error && data) return data
-
-        // 1b. Linking may have failed or not happened yet — fall back to
-        //     the anon RPC which validates session_id ownership server-side.
-        if (storedSessionId) {
-          const { data: rpcData, error: rpcError } = await supabase.rpc('get_anon_assessment', {
-            p_id: storedAssessmentId,
-            p_session_id: storedSessionId,
-          })
-          if (!rpcError && rpcData && (rpcData as Array<{ id: string; answers: unknown }>).length > 0) {
-            const row = (rpcData as Array<{ id: string; answers: unknown }>)[0]
-            return { id: row.id, answers: row.answers }
-          }
-        }
       }
-
-      // 2. Try by user_id for assessments linked post-auth
       if (userId) {
         const { data } = await supabase
           .from('assessments')
@@ -81,8 +57,6 @@ export function useChatData() {
           .maybeSingle()
         if (data) return data
       }
-
-      // 3. Try by email — anonymous quiz assessments are saved with email only
       if (userEmail) {
         const { data, error } = await supabase
           .from('assessments')
@@ -94,20 +68,15 @@ export function useChatData() {
         if (error) throw error
         return data
       }
-
       throw new Error('No assessment found')
     },
     enabled: !!storedAssessmentId || !!userId || !!userEmail,
     staleTime: 5 * 60 * 1000,
   })
 
-  const {
-    data: messagesData,
-    isLoading: isLoadingMessages,
-  } = useQuery({
+  const { data: messagesData, isLoading: isLoadingMessages } = useQuery({
     queryKey: ['chat-messages', assessment?.id],
     queryFn: async () => {
-      // Cast to `any` because `messages` table was added after types were generated
       const { data, error } = await (supabase as any)
         .from('messages')
         .select('id, role, content, created_at')
@@ -121,18 +90,71 @@ export function useChatData() {
     staleTime: 30 * 1000,
   })
 
-  const sendMessage = useMutation({
-    mutationFn: async (message: string) => {
-      const { data, error } = await supabase.functions.invoke('chat-completion', {
-        body: { message, assessmentId: assessment!.id },
-      })
-      if (error) throw error
-      return data as { reply: string; messageId: string }
+  const sendMessage = useCallback(
+    async (message: string) => {
+      if (!assessment?.id) return
+      setSendError(null)
+      setPendingUserMessage(message)
+      setStreamingText('')
+      setIsStreaming(true)
+
+      try {
+        const { data: { session } } = await supabase.auth.getSession()
+        const token = session?.access_token
+        if (!token) throw new Error('Não autenticado')
+
+        const response = await fetch(`${FUNCTIONS_URL}/chat-completion`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ message, assessmentId: assessment.id }),
+        })
+
+        if (!response.ok || !response.body) {
+          throw new Error(`Erro ${response.status}`)
+        }
+
+        const reader = response.body.getReader()
+        const decoder = new TextDecoder()
+        let buffer = ''
+        let accumulated = ''
+
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buffer += decoder.decode(value, { stream: true })
+          const lines = buffer.split('\n')
+          buffer = lines.pop() ?? ''
+          for (const line of lines) {
+            if (!line.startsWith('data:')) continue
+            const data = line.slice(5).trim()
+            if (data === '[DONE]' || !data) continue
+            try {
+              const parsed = JSON.parse(data)
+              if (parsed.delta) {
+                accumulated += parsed.delta
+                setStreamingText(accumulated)
+              }
+            } catch {
+              // ignore
+            }
+          }
+        }
+
+        // Stream complete — refresh persisted messages from DB
+        await queryClient.invalidateQueries({ queryKey: ['chat-messages', assessment.id] })
+      } catch (err) {
+        setSendError(err instanceof Error ? err : new Error(String(err)))
+      } finally {
+        setIsStreaming(false)
+        setStreamingText('')
+        setPendingUserMessage(null)
+      }
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['chat-messages', assessment?.id] })
-    },
-  })
+    [assessment?.id, queryClient],
+  )
 
   return {
     assessment,
@@ -140,5 +162,9 @@ export function useChatData() {
     messages: messagesData ?? [],
     isLoadingMessages,
     sendMessage,
+    isStreaming,
+    streamingText,
+    pendingUserMessage,
+    sendError,
   }
 }
