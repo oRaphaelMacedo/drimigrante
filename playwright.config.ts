@@ -6,6 +6,10 @@ import { config as loadEnv } from 'dotenv'
 // reads these on its own, but the test process does not).
 loadEnv({ path: '.env.local' })
 
+// Use `||` (not `??`) so empty strings — which is what GitHub Actions injects
+// when an unset secret is referenced — fall back to the local dev defaults.
+const E2E_BASE_URL = process.env.E2E_BASE_URL || ''
+
 export default defineConfig({
   testDir: './e2e/tests',
   timeout: 30_000,
@@ -15,7 +19,7 @@ export default defineConfig({
   workers: process.env.CI ? 4 : '50%',
   reporter: process.env.CI ? [['html'], ['github']] : 'list',
   use: {
-    baseURL: process.env.E2E_BASE_URL ?? 'http://localhost:5173',
+    baseURL: E2E_BASE_URL || 'http://localhost:5173',
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
@@ -26,7 +30,7 @@ export default defineConfig({
     { name: 'chromium', use: devices['Desktop Chrome'] },
     { name: 'mobile', use: devices['iPhone 14'] },
   ],
-  webServer: process.env.E2E_BASE_URL
+  webServer: E2E_BASE_URL
     ? undefined
     : {
         command: 'npm run dev',
