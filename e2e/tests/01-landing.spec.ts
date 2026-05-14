@@ -14,6 +14,16 @@ test.describe('Landing page', () => {
   test('footer com links legais', async ({ page }) => {
     await page.goto('/')
 
+    // Dismiss the cookie banner — on mobile viewports it overlays the footer
+    // and intercepts link clicks. Cookie behaviour is covered by
+    // 02-cookie-consent.spec.ts; here we only care about the legal routes.
+    await page
+      .getByTestId('cookie-accept')
+      .click({ timeout: 5_000 })
+      .catch(() => {
+        /* banner may already be dismissed */
+      })
+
     for (const [path, h1Text] of [
       ['/termos', /Termos/],
       ['/privacidade', /Privacidade/],
