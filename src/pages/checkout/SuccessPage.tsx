@@ -71,7 +71,7 @@ export function SuccessPage() {
         <CheckCircle2 className="h-14 w-14 text-emerald-500" strokeWidth={1.5} />
       </div>
 
-      <h1 className="mb-2 text-center text-3xl font-extrabold text-gray-900 sm:text-4xl">
+      <h1 data-testid="checkout-success" className="mb-2 text-center text-3xl font-extrabold text-gray-900 sm:text-4xl">
         Pagamento confirmado! 🎉
       </h1>
       <p className="mb-10 max-w-md text-center text-gray-500">

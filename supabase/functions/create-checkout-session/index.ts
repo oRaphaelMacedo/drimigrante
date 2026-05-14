@@ -139,7 +139,8 @@ serve(async (req) => {
     })
   } catch (err) {
     console.error('create-checkout-session error:', err)
-    return new Response(JSON.stringify({ error: String(err) }), {
+    // B03-A07: never leak internal error details to the caller
+    return new Response(JSON.stringify({ error: 'Internal server error' }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })

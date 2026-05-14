@@ -12,6 +12,31 @@ export type Database = {
   __InternalSupabase: {
     PostgrestVersion: "14.5"
   }
+  graphql_public: {
+    Tables: {
+      [_ in never]: never
+    }
+    Views: {
+      [_ in never]: never
+    }
+    Functions: {
+      graphql: {
+        Args: {
+          extensions?: Json
+          operationName?: string
+          query?: string
+          variables?: Json
+        }
+        Returns: Json
+      }
+    }
+    Enums: {
+      [_ in never]: never
+    }
+    CompositeTypes: {
+      [_ in never]: never
+    }
+  }
   public: {
     Tables: {
       ai_configurations: {
@@ -129,6 +154,7 @@ export type Database = {
           completion_percentage: number | null
           country_origin_id: string | null
           created_at: string | null
+          crm_stage: string
           current_question_id: string | null
           email: string | null
           expires_at: string | null
@@ -159,6 +185,7 @@ export type Database = {
           completion_percentage?: number | null
           country_origin_id?: string | null
           created_at?: string | null
+          crm_stage?: string
           current_question_id?: string | null
           email?: string | null
           expires_at?: string | null
@@ -189,6 +216,7 @@ export type Database = {
           completion_percentage?: number | null
           country_origin_id?: string | null
           created_at?: string | null
+          crm_stage?: string
           current_question_id?: string | null
           email?: string | null
           expires_at?: string | null
@@ -1180,6 +1208,41 @@ export type Database = {
         }
         Relationships: []
       }
+      messages: {
+        Row: {
+          assessment_id: string
+          content: string
+          created_at: string | null
+          id: string
+          role: string
+          user_id: string
+        }
+        Insert: {
+          assessment_id: string
+          content: string
+          created_at?: string | null
+          id?: string
+          role: string
+          user_id: string
+        }
+        Update: {
+          assessment_id?: string
+          content?: string
+          created_at?: string | null
+          id?: string
+          role?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "messages_assessment_id_fkey"
+            columns: ["assessment_id"]
+            isOneToOne: false
+            referencedRelation: "assessments"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       payment_events: {
         Row: {
           amount: number | null
@@ -1229,6 +1292,68 @@ export type Database = {
             columns: ["subscription_id"]
             isOneToOne: false
             referencedRelation: "subscriptions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      payments: {
+        Row: {
+          amount_cents: number
+          assessment_id: string | null
+          created_at: string
+          currency: string
+          id: string
+          metadata: Json
+          paid_at: string | null
+          product: Database["public"]["Enums"]["payment_product"]
+          refunded_at: string | null
+          status: Database["public"]["Enums"]["payment_status"]
+          stripe_customer_id: string | null
+          stripe_payment_intent_id: string | null
+          stripe_subscription_id: string | null
+          updated_at: string
+          user_id: string | null
+        }
+        Insert: {
+          amount_cents: number
+          assessment_id?: string | null
+          created_at?: string
+          currency?: string
+          id?: string
+          metadata?: Json
+          paid_at?: string | null
+          product: Database["public"]["Enums"]["payment_product"]
+          refunded_at?: string | null
+          status?: Database["public"]["Enums"]["payment_status"]
+          stripe_customer_id?: string | null
+          stripe_payment_intent_id?: string | null
+          stripe_subscription_id?: string | null
+          updated_at?: string
+          user_id?: string | null
+        }
+        Update: {
+          amount_cents?: number
+          assessment_id?: string | null
+          created_at?: string
+          currency?: string
+          id?: string
+          metadata?: Json
+          paid_at?: string | null
+          product?: Database["public"]["Enums"]["payment_product"]
+          refunded_at?: string | null
+          status?: Database["public"]["Enums"]["payment_status"]
+          stripe_customer_id?: string | null
+          stripe_payment_intent_id?: string | null
+          stripe_subscription_id?: string | null
+          updated_at?: string
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payments_assessment_id_fkey"
+            columns: ["assessment_id"]
+            isOneToOne: false
+            referencedRelation: "assessments"
             referencedColumns: ["id"]
           },
         ]
@@ -1459,6 +1584,62 @@ export type Database = {
         }
         Relationships: []
       }
+      user_documents: {
+        Row: {
+          assessment_id: string | null
+          created_at: string
+          display_name: string
+          document_type: string
+          feedback: string | null
+          file_name: string
+          file_size: number | null
+          id: string
+          mime_type: string | null
+          status: string
+          storage_path: string
+          updated_at: string
+          user_id: string | null
+        }
+        Insert: {
+          assessment_id?: string | null
+          created_at?: string
+          display_name: string
+          document_type: string
+          feedback?: string | null
+          file_name: string
+          file_size?: number | null
+          id?: string
+          mime_type?: string | null
+          status?: string
+          storage_path: string
+          updated_at?: string
+          user_id?: string | null
+        }
+        Update: {
+          assessment_id?: string | null
+          created_at?: string
+          display_name?: string
+          document_type?: string
+          feedback?: string | null
+          file_name?: string
+          file_size?: number | null
+          id?: string
+          mime_type?: string | null
+          status?: string
+          storage_path?: string
+          updated_at?: string
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_documents_assessment_id_fkey"
+            columns: ["assessment_id"]
+            isOneToOne: false
+            referencedRelation: "assessments"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       user_roles: {
         Row: {
           expires_at: string | null
@@ -1608,6 +1789,46 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      get_anon_assessment: {
+        Args: { p_id: string; p_session_id: string }
+        Returns: {
+          answers: Json | null
+          completed_at: string | null
+          completion_percentage: number | null
+          country_origin_id: string | null
+          created_at: string | null
+          crm_stage: string
+          current_question_id: string | null
+          email: string | null
+          expires_at: string | null
+          first_page: string | null
+          form_version_id: string | null
+          full_name: string | null
+          id: string
+          ip_address: unknown
+          phone: string | null
+          questions_answered: number | null
+          referrer: string | null
+          session_id: string | null
+          started_at: string | null
+          status: Database["public"]["Enums"]["assessment_status"] | null
+          total_questions: number | null
+          updated_at: string | null
+          user_agent: string | null
+          user_id: string | null
+          utm_campaign: string | null
+          utm_content: string | null
+          utm_medium: string | null
+          utm_source: string | null
+          utm_term: string | null
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "assessments"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
       get_user_tenant_id: { Args: { _user_id: string }; Returns: string }
       has_role: {
         Args: {
@@ -1617,7 +1838,102 @@ export type Database = {
         }
         Returns: boolean
       }
+      is_hub_admin: { Args: never; Returns: boolean }
       is_hub_user: { Args: { _user_id: string }; Returns: boolean }
+      link_anon_assessment_to_user: {
+        Args: { p_id: string; p_session_id: string }
+        Returns: {
+          answers: Json | null
+          completed_at: string | null
+          completion_percentage: number | null
+          country_origin_id: string | null
+          created_at: string | null
+          crm_stage: string
+          current_question_id: string | null
+          email: string | null
+          expires_at: string | null
+          first_page: string | null
+          form_version_id: string | null
+          full_name: string | null
+          id: string
+          ip_address: unknown
+          phone: string | null
+          questions_answered: number | null
+          referrer: string | null
+          session_id: string | null
+          started_at: string | null
+          status: Database["public"]["Enums"]["assessment_status"] | null
+          total_questions: number | null
+          updated_at: string | null
+          user_agent: string | null
+          user_id: string | null
+          utm_campaign: string | null
+          utm_content: string | null
+          utm_medium: string | null
+          utm_source: string | null
+          utm_term: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "assessments"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      snapshot_quiz_version: { Args: { p_label?: string }; Returns: string }
+      upsert_anon_assessment: {
+        Args: {
+          p_answers: Json
+          p_completion_percentage?: number
+          p_email?: string
+          p_full_name?: string
+          p_phone?: string
+          p_questions_answered?: number
+          p_session_id: string
+          p_status?: string
+          p_total_questions?: number
+          p_utm_campaign?: string
+          p_utm_medium?: string
+          p_utm_source?: string
+        }
+        Returns: {
+          answers: Json | null
+          completed_at: string | null
+          completion_percentage: number | null
+          country_origin_id: string | null
+          created_at: string | null
+          crm_stage: string
+          current_question_id: string | null
+          email: string | null
+          expires_at: string | null
+          first_page: string | null
+          form_version_id: string | null
+          full_name: string | null
+          id: string
+          ip_address: unknown
+          phone: string | null
+          questions_answered: number | null
+          referrer: string | null
+          session_id: string | null
+          started_at: string | null
+          status: Database["public"]["Enums"]["assessment_status"] | null
+          total_questions: number | null
+          updated_at: string | null
+          user_agent: string | null
+          user_id: string | null
+          utm_campaign: string | null
+          utm_content: string | null
+          utm_medium: string | null
+          utm_source: string | null
+          utm_term: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "assessments"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
     }
     Enums: {
       ai_provider: "openai" | "gemini" | "anthropic"
@@ -1657,6 +1973,7 @@ export type Database = {
         | "number"
         | "email"
         | "phone"
+        | "multiselect"
       lead_status:
         | "novo"
         | "qualificado"
@@ -1669,6 +1986,14 @@ export type Database = {
         | "nutricao"
       lead_temperature: "frio" | "morno" | "quente"
       message_role: "user" | "assistant" | "system"
+      payment_product: "one_time_analysis" | "recurring_monthly"
+      payment_status:
+        | "pending"
+        | "processing"
+        | "succeeded"
+        | "failed"
+        | "refunded"
+        | "disputed"
       subscription_tier: "free" | "one_time" | "recurring"
       task_priority: "low" | "medium" | "high" | "urgent"
       task_status: "open" | "in_progress" | "done" | "cancelled"
@@ -1806,6 +2131,9 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
+  graphql_public: {
+    Enums: {},
+  },
   public: {
     Enums: {
       ai_provider: ["openai", "gemini", "anthropic"],
@@ -1848,6 +2176,7 @@ export const Constants = {
         "number",
         "email",
         "phone",
+        "multiselect",
       ],
       lead_status: [
         "novo",
@@ -1862,6 +2191,15 @@ export const Constants = {
       ],
       lead_temperature: ["frio", "morno", "quente"],
       message_role: ["user", "assistant", "system"],
+      payment_product: ["one_time_analysis", "recurring_monthly"],
+      payment_status: [
+        "pending",
+        "processing",
+        "succeeded",
+        "failed",
+        "refunded",
+        "disputed",
+      ],
       subscription_tier: ["free", "one_time", "recurring"],
       task_priority: ["low", "medium", "high", "urgent"],
       task_status: ["open", "in_progress", "done", "cancelled"],
@@ -1879,9 +2217,16 @@ export const Constants = {
   },
 } as const
 
-// Helper types for compatibility with existing code
-export type Assessment = Database['public']['Tables']['assessments']['Row']
-export type Profile = Database['public']['Tables']['profiles']['Row']
-export type Subscription = Database['public']['Tables']['subscriptions']['Row']
-export type AppRole = Database["public"]["Enums"]["app_role"]
-export type AIConfig = Database['public']['Tables']['ai_configurations']['Row']
+// ─── Helper types — compatibility aliases ──────────────────────────────────────
+export type Assessment    = Database['public']['Tables']['assessments']['Row']
+export type Profile       = Database['public']['Tables']['profiles']['Row']
+export type Subscription  = Database['public']['Tables']['subscriptions']['Row']
+export type AppRole       = Database['public']['Enums']['app_role']
+export type AIConfig      = Database['public']['Tables']['ai_configurations']['Row']
+export type CrmLead       = Database['public']['Tables']['crm_leads']['Row']
+export type Case          = Database['public']['Tables']['cases']['Row']
+export type UserRole      = Database['public']['Tables']['user_roles']['Row']
+export type Tenant        = Database['public']['Tables']['tenants']['Row']
+export type Payment       = Database['public']['Tables']['payments']['Row']
+export type PaymentStatus  = Database['public']['Enums']['payment_status']
+export type PaymentProduct = Database['public']['Enums']['payment_product']

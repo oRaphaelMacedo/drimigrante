@@ -34,6 +34,7 @@ export function LandingPage() {
             <div className="flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
               <Link
                 to="/quiz"
+                data-testid="cta-start-quiz-hero"
                 className="flex items-center gap-2 rounded-xl bg-white px-6 py-3.5 text-base font-semibold text-brand-700 shadow-lg hover:bg-blue-50 transition"
               >
                 Fazer Quiz Gratuito
@@ -110,7 +111,7 @@ export function LandingPage() {
                   </li>
                 ))}
               </ul>
-              <Link to="/quiz" className="block w-full rounded-lg bg-brand-700 py-2.5 text-center text-sm font-semibold text-white hover:bg-brand-800 transition">
+              <Link to="/quiz" data-testid="cta-pricing-onetime" className="block w-full rounded-lg bg-brand-700 py-2.5 text-center text-sm font-semibold text-white hover:bg-brand-800 transition">
                 Começar Quiz →
               </Link>
             </div>
@@ -132,7 +133,7 @@ export function LandingPage() {
                   </li>
                 ))}
               </ul>
-              <Link to="/quiz" className="block w-full rounded-lg bg-white py-2.5 text-center text-sm font-semibold text-brand-700 hover:bg-blue-50 transition">
+              <Link to="/quiz" data-testid="cta-pricing-subscription" className="block w-full rounded-lg bg-white py-2.5 text-center text-sm font-semibold text-brand-700 hover:bg-blue-50 transition">
                 Começar Quiz →
               </Link>
             </div>

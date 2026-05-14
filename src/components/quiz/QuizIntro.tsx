@@ -73,6 +73,7 @@ export function QuizIntro({ onStart }: QuizIntroProps) {
       <div className="text-center">
         <button
           id="quiz-start-btn"
+          data-testid="quiz-intro-start"
           onClick={onStart}
           className="group inline-flex items-center gap-2 rounded-xl bg-brand-700 px-8 py-4 text-base font-bold text-white shadow-lg shadow-brand-200 transition-all duration-200 hover:bg-brand-600 hover:shadow-xl hover:-translate-y-0.5 active:translate-y-0"
         >

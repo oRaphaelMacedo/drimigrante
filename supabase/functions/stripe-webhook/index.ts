@@ -30,15 +30,40 @@ serve(async (req) => {
     if (!signature) throw new Error('No stripe-signature header')
 
     const body = await req.text()
-    const event = stripe.webhooks.constructEvent(body, signature, webhookSecret)
+    // Deno runtime: must use async variant — sync constructEvent uses Node's
+    // crypto (HMAC) which isn't available in Deno's Web Crypto API.
+    const event = await stripe.webhooks.constructEventAsync(body, signature, webhookSecret)
 
-    // Log event
+    // B03-A08: idempotency guard — return 200 immediately if event already processed.
+    // Stripe retries on any non-2xx, so returning 200 for duplicates is correct.
+    const { data: existingEvent } = await supabase
+      .from('payment_events')
+      .select('id')
+      .eq('stripe_event_id', event.id)
+      .maybeSingle()
+
+    if (existingEvent) {
+      console.log(`Event ${event.id} already processed — skipping`)
+      return new Response(JSON.stringify({ received: true }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+
+    // Log event after idempotency check passes
     await supabase.from('payment_events').insert({
       stripe_event_id: event.id,
       stripe_event_type: event.type,
       payload: event as unknown as Record<string, unknown>,
       processed_at: new Date().toISOString(),
     })
+
+    // Helper: invoke send-email with the required internal secret (B03-A05)
+    const internalSecret = Deno.env.get('INTERNAL_SECRET') ?? ''
+    const sendEmail = (emailBody: Record<string, unknown>) =>
+      supabase.functions.invoke('send-email', {
+        body: emailBody,
+        headers: { 'x-internal-secret': internalSecret },
+      })
 
     switch (event.type) {
       case 'checkout.session.completed': {
@@ -81,14 +106,12 @@ serve(async (req) => {
           }, { onConflict: 'stripe_payment_intent_id' })
 
           // 3. Trigger welcome email
-          await supabase.functions.invoke('send-email', {
-            body: {
-              trigger_key: 'payment_confirmed',
-              user_id: userId,
-              variables: {
-                amount: `€${((session.amount_total ?? 0) / 100).toFixed(2)}`,
-                dashboard_link: `${Deno.env.get('APP_URL')}/dashboard`,
-              },
+          await sendEmail({
+            trigger_key: 'payment_confirmed',
+            user_id: userId,
+            variables: {
+              amount: `€${((session.amount_total ?? 0) / 100).toFixed(2)}`,
+              dashboard_link: `${Deno.env.get('APP_URL')}/dashboard`,
             },
           })
         }
@@ -108,7 +131,7 @@ serve(async (req) => {
             has_full_analysis: true,
           }, { onConflict: 'user_id' })
 
-          // 2. Record payment
+          // 2. Record initial payment
           await supabase.from('payments').insert({
             user_id: userId,
             assessment_id: assessmentId,
@@ -139,9 +162,63 @@ serve(async (req) => {
         break
       }
 
+      // B03-A12: suspend access when payment fails (e.g. card declined on renewal)
       case 'invoice.payment_failed': {
         const invoice = event.data.object as Stripe.Invoice
         console.warn('Payment failed for subscription:', invoice.subscription)
+
+        if (invoice.subscription) {
+          await supabase
+            .from('subscriptions')
+            .update({
+              recurring_active: false,
+              has_chat_access: false,
+            })
+            .eq('stripe_subscription_id', invoice.subscription as string)
+        }
+        break
+      }
+
+      // B03-A13: record renewal payments and re-activate suspended subscriptions
+      case 'invoice.payment_succeeded': {
+        const invoice = event.data.object as Stripe.Invoice
+
+        // Skip — initial subscription payment is already handled by checkout.session.completed
+        if (!invoice.subscription || invoice.billing_reason === 'subscription_create') break
+
+        // Look up the internal user linked to this Stripe subscription
+        const { data: sub } = await supabase
+          .from('subscriptions')
+          .select('user_id')
+          .eq('stripe_subscription_id', invoice.subscription as string)
+          .maybeSingle()
+
+        if (!sub?.user_id) {
+          console.warn('No subscription record found for invoice:', invoice.id)
+          break
+        }
+
+        // Record renewal payment
+        await supabase.from('payments').insert({
+          user_id: sub.user_id,
+          stripe_subscription_id: invoice.subscription as string,
+          stripe_customer_id: invoice.customer as string,
+          product: 'recurring_monthly',
+          amount_cents: invoice.amount_paid,
+          currency: invoice.currency,
+          status: 'succeeded',
+          paid_at: new Date(
+            (invoice.status_transitions?.paid_at ?? Math.floor(Date.now() / 1000)) * 1000,
+          ).toISOString(),
+          metadata: { invoice_id: invoice.id, billing_reason: invoice.billing_reason },
+        })
+
+        // Re-activate if the subscription was suspended due to a previous payment failure
+        await supabase
+          .from('subscriptions')
+          .update({ recurring_active: true, has_chat_access: true })
+          .eq('stripe_subscription_id', invoice.subscription as string)
+
         break
       }
 
@@ -154,7 +231,8 @@ serve(async (req) => {
     })
   } catch (err) {
     console.error('Webhook error:', err)
-    return new Response(JSON.stringify({ error: String(err) }), {
+    // B03-A07: never leak internal details — Stripe only needs a 4xx to retry
+    return new Response(JSON.stringify({ error: 'Internal server error' }), {
       status: 400,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })

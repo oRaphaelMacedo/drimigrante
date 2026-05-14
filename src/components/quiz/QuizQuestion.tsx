@@ -14,6 +14,7 @@ export function QuizQuestionCard({ question, answer, onChange, animationDirectio
   return (
     <div
       key={question.key}
+      data-testid="quiz-question"
       className={cn(
         'animate-in fade-in-0 slide-in-from-right-4 duration-300',
         animationDirection === 'backward' && 'slide-in-from-left-4',
@@ -109,6 +110,7 @@ function RadioGroup({
           <button
             key={opt.key}
             id={`option-${opt.key}`}
+            data-testid={`quiz-option-${opt.key}`}
             type="button"
             onClick={() => onChange(opt.key)}
             className={cn(
@@ -162,6 +164,7 @@ function MultiCheckbox({
           <button
             key={opt.key}
             id={`option-${opt.key}`}
+            data-testid={`quiz-option-${opt.key}`}
             type="button"
             onClick={() => toggle(opt.key)}
             className={cn(

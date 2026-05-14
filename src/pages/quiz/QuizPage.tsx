@@ -127,6 +127,7 @@ export function QuizPage() {
 
                 <button
                   id="quiz-next-btn"
+                  data-testid="quiz-next"
                   onClick={() => { if (canProceed) nextQuestion() }}
                   disabled={!canProceed}
                   className="flex-1 rounded-xl bg-brand-700 py-2.5 text-sm font-bold text-white shadow-sm transition-all hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-40 sm:flex-none sm:px-8"

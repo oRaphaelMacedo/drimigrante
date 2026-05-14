@@ -98,6 +98,7 @@ export function DashboardHomePage() {
             href="/dashboard/analysis"
             locked={!hasPaid}
             color="brand"
+            testid="dashboard-card-analysis"
           />
           <FeatureCard
             icon={MessageSquare}
@@ -106,6 +107,7 @@ export function DashboardHomePage() {
             href="/dashboard/chat"
             locked={!hasPaid}
             color="purple"
+            testid="dashboard-card-chat"
           />
           <FeatureCard
             icon={User}
@@ -249,6 +251,7 @@ function FeatureCard({
   href,
   locked,
   color,
+  testid,
 }: {
   icon: React.ElementType
   label: string
@@ -256,6 +259,7 @@ function FeatureCard({
   href: string
   locked: boolean
   color: 'brand' | 'purple' | 'gray'
+  testid?: string
 }) {
   const colorMap = {
     brand: 'bg-brand-50 border-brand-200 text-brand-700',
@@ -266,6 +270,7 @@ function FeatureCard({
   return (
     <Link
       to={locked ? '/checkout' : href}
+      data-testid={testid}
       className={cn(
         'group relative rounded-xl border p-5 transition hover:shadow-sm',
         locked ? 'opacity-70 hover:opacity-100' : '',

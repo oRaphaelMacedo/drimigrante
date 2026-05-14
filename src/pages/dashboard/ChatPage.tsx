@@ -41,7 +41,10 @@ function MessageSkeleton() {
 
 function MessageBubble({ msg }: { msg: LocalMessage }) {
   return (
-    <div className={cn('flex gap-4', msg.role === 'user' ? 'flex-row-reverse' : 'flex-row')}>
+    <div
+      data-testid={msg.role === 'user' ? 'chat-bubble-user' : 'chat-bubble-assistant'}
+      className={cn('flex gap-4', msg.role === 'user' ? 'flex-row-reverse' : 'flex-row')}
+    >
       <div
         className={cn(
           'flex h-8 w-8 shrink-0 items-center justify-center rounded-full',
@@ -61,7 +64,10 @@ function MessageBubble({ msg }: { msg: LocalMessage }) {
         <p className="whitespace-pre-wrap">
           {msg.content}
           {msg.isStreaming && (
-            <span className="ml-0.5 inline-block h-3 w-1.5 animate-pulse bg-brand-600 align-middle" />
+            <span
+              data-testid="chat-streaming-cursor"
+              className="ml-0.5 inline-block h-3 w-1.5 animate-pulse bg-brand-600 align-middle"
+            />
           )}
         </p>
         <span
@@ -222,6 +228,7 @@ export function ChatPage() {
       <div className="border-t border-gray-100 p-4">
         <div className="relative flex items-end gap-2 rounded-2xl border border-gray-300 bg-white p-2 shadow-sm focus-within:border-brand-500 focus-within:ring-1 focus-within:ring-brand-500">
           <textarea
+            data-testid="chat-input"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
@@ -231,6 +238,7 @@ export function ChatPage() {
             rows={1}
           />
           <button
+            data-testid="chat-send"
             onClick={handleSend}
             disabled={!input.trim() || isStreaming}
             className="flex h-[44px] w-[44px] shrink-0 items-center justify-center rounded-xl bg-brand-600 text-white transition hover:bg-brand-500 disabled:opacity-50"

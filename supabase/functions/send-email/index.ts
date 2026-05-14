@@ -17,12 +17,33 @@ function interpolate(template: string, vars: Record<string, string>): string {
   return template.replace(/\{\{(\w+)\}\}/g, (_, key) => vars[key] ?? `{{${key}}}`)
 }
 
+// B03-A06: escape user-supplied variables before injecting into HTML bodies
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#x27;')
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
 
   try {
+    // B03-A05: require internal secret — this function must only be called by other Edge Functions,
+    // never directly from the browser. Set INTERNAL_SECRET in Supabase Edge Function secrets.
+    const internalSecret = Deno.env.get('INTERNAL_SECRET')
+    const callerSecret = req.headers.get('x-internal-secret')
+    if (!internalSecret || callerSecret !== internalSecret) {
+      return new Response(JSON.stringify({ error: 'Forbidden' }), {
+        status: 403,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+
     const resendKey = Deno.env.get('RESEND_API_KEY')
     if (!resendKey) throw new Error('RESEND_API_KEY not configured')
 
@@ -73,8 +94,14 @@ serve(async (req) => {
     }
 
     const mergedVars = { name, ...variables }
+
+    // B03-A06: subject is plain text — use raw vars to avoid showing &amp; etc.
+    //          body is rendered HTML — escape vars to prevent XSS injection.
     const subject = interpolate(template.subject_pt, mergedVars)
-    const bodyHtml = interpolate(template.body_html_pt, mergedVars)
+    const safeVars = Object.fromEntries(
+      Object.entries(mergedVars).map(([k, v]) => [k, escapeHtml(v)]),
+    )
+    const bodyHtml = interpolate(template.body_html_pt, safeVars)
 
     // Send via Resend
     const resendRes = await fetch('https://api.resend.com/emails', {
@@ -118,7 +145,8 @@ serve(async (req) => {
     })
   } catch (err) {
     console.error(err)
-    return new Response(JSON.stringify({ error: String(err) }), {
+    // B03-A07: never leak internal error details to the caller
+    return new Response(JSON.stringify({ error: 'Internal server error' }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })

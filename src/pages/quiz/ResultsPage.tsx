@@ -113,7 +113,7 @@ function ScoreCard({ score, leadInfo }: { score: QuizResult['score']; leadInfo: 
   const firstName = leadInfo?.fullName?.split(' ')[0]
 
   return (
-    <div className={cn('rounded-2xl border p-6 text-center shadow-sm sm:p-8', score.bgColor)}>
+    <div data-testid="results-score" className={cn('rounded-2xl border p-6 text-center shadow-sm sm:p-8', score.bgColor)}>
       {/* Emoji + category */}
       <div className="mb-3 text-5xl">{score.emoji}</div>
       {firstName && (
@@ -269,6 +269,7 @@ function PaywallCard({ firstName, assessmentId }: { firstName?: string; assessme
         <div className="space-y-3">
           <Link
             id="results-unlock-btn"
+            data-testid="results-cta-paywall"
             to="/checkout"
             state={{ plan: 'one_time', assessmentId }}
             className="flex w-full items-center justify-center gap-2 rounded-xl bg-white py-3.5 text-base font-bold text-brand-700 shadow-md transition hover:bg-blue-50"

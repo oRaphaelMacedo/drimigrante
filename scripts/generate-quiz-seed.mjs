@@ -14,8 +14,8 @@ const themesMatch = tsSource.match(/export const QUIZ_THEMES = \[([\s\S]*?)\] as
 if (!themesMatch) throw new Error('QUIZ_THEMES not found')
 const themes = []
 for (const line of themesMatch[1].split('\n')) {
-  const m = line.match(/code:\s*'([^']+)',\s*name:\s*'([^']+)',\s*color:\s*'([^']+)',\s*icon:\s*'([^']+)'/)
-  if (m) themes.push({ code: m[1], name: m[2], color: m[3], icon: m[4] })
+  const m = line.match(/code:\s*'([^']+)',\s*name:\s*'([^']+)',\s*color:\s*'([^']+)'/)
+  if (m) themes.push({ code: m[1], name: m[2], color: m[3], icon: '' })
 }
 if (themes.length === 0) throw new Error('No themes parsed')
 
