@@ -19,6 +19,7 @@ import {
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/hooks/useAuth'
 import { toast } from 'sonner'
+import { track } from '@/lib/analytics'
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -117,6 +118,7 @@ export function CheckoutPage() {
     }
 
     setIsProcessing(true)
+    track('checkout_started', { plan: selectedPlan, assessment_id: assessmentId })
     try {
       const { data, error } = await supabase.functions.invoke('create-checkout-session', {
         body: {
@@ -248,6 +250,7 @@ export function CheckoutPage() {
                 {/* CTA */}
                 <button
                   id="checkout-pay-btn"
+                  data-testid="checkout-submit"
                   onClick={handleCheckout}
                   disabled={isProcessing}
                   className={cn(
@@ -309,9 +312,11 @@ function PlanCard({
   selected: boolean
   onSelect: () => void
 }) {
+  const testid = plan.id === 'one_time' ? 'checkout-plan-onetime' : 'checkout-plan-subscription'
   return (
     <button
       onClick={onSelect}
+      data-testid={testid}
       className={cn(
         'relative w-full rounded-2xl border-2 p-5 text-left transition-all',
         selected

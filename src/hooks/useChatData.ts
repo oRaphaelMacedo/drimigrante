@@ -10,13 +10,25 @@ export interface ChatMessage {
   created_at: string
 }
 
-// Read assessmentId stored by the quiz on completion
-function getStoredAssessmentId(): string | null {
+interface StoredQuizResult {
+  assessmentId: string | null
+  sessionId: string | null
+}
+
+// Read both assessmentId and sessionId stored by the quiz on completion.
+// sessionId is required to fall back to get_anon_assessment RPC when the
+// assessment has not yet been linked to the authenticated user (B02-A21).
+function getStoredQuizResult(): StoredQuizResult {
   try {
     const raw = localStorage.getItem('dr_imigrante_quiz_result')
-    return raw ? (JSON.parse(raw)?.assessmentId as string | null) ?? null : null
+    if (!raw) return { assessmentId: null, sessionId: null }
+    const parsed = JSON.parse(raw)
+    return {
+      assessmentId: (parsed?.assessmentId as string | null) ?? null,
+      sessionId: (parsed?.sessionId as string | null) ?? null,
+    }
   } catch {
-    return null
+    return { assessmentId: null, sessionId: null }
   }
 }
 
@@ -25,7 +37,7 @@ export function useChatData() {
   const queryClient = useQueryClient()
   const userId = authUser?.user.id
   const userEmail = authUser?.user.email
-  const storedAssessmentId = getStoredAssessmentId()
+  const { assessmentId: storedAssessmentId, sessionId: storedSessionId } = getStoredQuizResult()
 
   const {
     data: assessment,
@@ -33,14 +45,29 @@ export function useChatData() {
   } = useQuery({
     queryKey: ['chat-assessment', storedAssessmentId ?? userId ?? userEmail],
     queryFn: async () => {
-      // 1. Prefer localStorage ID — assessments are saved without user_id (anonymous quiz)
+      // 1. Prefer localStorage ID — direct REST works ONLY if assessment is
+      //    already linked to the authenticated user (RLS: user_id = auth.uid()).
+      //    AuthContext does this linking on SIGNED_IN, so this is the fast path.
       if (storedAssessmentId) {
         const { data, error } = await supabase
           .from('assessments')
           .select('id, answers')
           .eq('id', storedAssessmentId)
-          .single()
+          .maybeSingle()
         if (!error && data) return data
+
+        // 1b. Linking may have failed or not happened yet — fall back to
+        //     the anon RPC which validates session_id ownership server-side.
+        if (storedSessionId) {
+          const { data: rpcData, error: rpcError } = await supabase.rpc('get_anon_assessment', {
+            p_id: storedAssessmentId,
+            p_session_id: storedSessionId,
+          })
+          if (!rpcError && rpcData && (rpcData as Array<{ id: string; answers: unknown }>).length > 0) {
+            const row = (rpcData as Array<{ id: string; answers: unknown }>)[0]
+            return { id: row.id, answers: row.answers }
+          }
+        }
       }
 
       // 2. Try by user_id for assessments linked post-auth
