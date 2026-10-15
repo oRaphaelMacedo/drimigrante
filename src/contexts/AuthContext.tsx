@@ -215,9 +215,22 @@ function useAuthInternal(): UseAuthReturn {
 
   const hasAccess = useCallback(
     (feature: 'dashboard' | 'chat' | 'full_analysis') => {
+      // Staff users are always granted access and are immune to expiration.
       if (isStaffUser) return true
       const sub = authUser?.subscription
       if (!sub) return false
+
+      // P0 (2026-06-30): one-time access (€30) has an expiry. Once past it,
+      // access is revoked UNLESS the user has an active recurring subscription.
+      // recurring_active users (and staff above) are immune to this expiration.
+      if (
+        sub.one_time_access_expires_at &&
+        !sub.recurring_active &&
+        Date.now() > new Date(sub.one_time_access_expires_at).getTime()
+      ) {
+        return false
+      }
+
       if (feature === 'dashboard') return sub.has_dashboard_access ?? false
       if (feature === 'chat') return sub.has_chat_access ?? false
       if (feature === 'full_analysis') return sub.has_full_analysis ?? false

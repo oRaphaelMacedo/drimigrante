@@ -39,6 +39,9 @@ interface Plan {
 
 // ─── Plans ──────────────────────────────────────────────────────────────────
 
+// P0 (2026-06-30): pre-payment only shows the €30 one-time plan. The €4,90/mês
+// subscription moved to a dashboard-only upsell (sequential commercial model).
+// This page remains as a fallback checkout for authenticated users.
 const PLANS: Plan[] = [
   {
     id: 'one_time',
@@ -56,22 +59,6 @@ const PLANS: Plan[] = [
       'Acesso ao Dashboard pessoal por 30 dias',
       'Resultado em até 24h úteis',
       'Garantia de satisfação ou reembolso',
-    ],
-  },
-  {
-    id: 'recurring',
-    name: 'Acompanhamento Mensal',
-    price: '€4,90',
-    priceNote: '/mês · cancele a qualquer momento',
-    description: 'Tudo da Análise Completa + acompanhamento contínuo do seu processo.',
-    highlight: false,
-    features: [
-      'Tudo incluído na Análise Completa',
-      'Dashboard pessoal ilimitado',
-      'Chat IA com especialista em imigração',
-      'Alertas de alterações legislativas',
-      'Revisão do processo sempre que necessário',
-      'Suporte prioritário por email',
     ],
   },
 ]
@@ -93,8 +80,13 @@ export function CheckoutPage() {
   const navigate = useNavigate()
   const { authUser, hasAccess } = useAuth()
 
-  // Plan can be pre-selected from Results page link
-  const initialPlan = (location.state?.plan as PlanId) ?? 'one_time'
+  // Plan can be pre-selected from Results page link.
+  // Only one_time is sellable here now (recurring moved to dashboard upsell),
+  // so any other value falls back to one_time to avoid a missing-plan crash.
+  const requestedPlan = (location.state?.plan as PlanId) ?? 'one_time'
+  const initialPlan: PlanId = PLANS.some((p) => p.id === requestedPlan)
+    ? requestedPlan
+    : 'one_time'
   const [selectedPlan, setSelectedPlan] = useState<PlanId>(initialPlan)
   const [isProcessing, setIsProcessing] = useState(false)
 

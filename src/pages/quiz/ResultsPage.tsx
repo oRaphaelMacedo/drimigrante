@@ -1,12 +1,26 @@
 // ResultsPage.tsx — Day 2: Quiz Engine I — Pre-result + CTA
 // Day 3: Updated CTAs to route to /checkout
+// P0 (2026-06-30): "Desbloquear €30" calls create-checkout-session directly
+// (anonymous funnel) and redirects to Stripe. The €4,90 button was removed.
 import { useLocation, useNavigate, Link } from 'react-router-dom'
 import { useEffect, useState } from 'react'
-import { ArrowRight, CheckCircle, Lock, RotateCcw, Star, TrendingUp, Users, Zap } from 'lucide-react'
+import { ArrowRight, CheckCircle, Loader2, Lock, RotateCcw, Star, TrendingUp, Users } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { supabase } from '@/lib/supabase'
+import { toast } from 'sonner'
 import type { QuizResult } from '@/hooks/useQuiz'
 import type { VisaSuggestion } from '@/data/quiz-questions'
 import { track } from '@/lib/analytics'
+
+// Read sessionId from localStorage — set by useQuiz on submit.
+function getStoredSessionId(): string | null {
+  try {
+    const raw = localStorage.getItem('dr_imigrante_quiz_result')
+    return raw ? (JSON.parse(raw)?.sessionId as string | null) ?? null : null
+  } catch {
+    return null
+  }
+}
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
@@ -88,7 +102,11 @@ export function ResultsPage() {
           <VisaTeaserCard visas={visas} />
 
           {/* ── Paywall CTA ── */}
-          <PaywallCard firstName={leadInfo?.fullName?.split(' ')[0]} assessmentId={assessmentId} />
+          <PaywallCard
+            firstName={leadInfo?.fullName?.split(' ')[0]}
+            assessmentId={assessmentId}
+            email={leadInfo?.email ?? null}
+          />
 
           {/* ── Restart ── */}
           <div className="text-center">
@@ -225,13 +243,55 @@ function VisaTeaserCard({ visas }: { visas: VisaSuggestion[] }) {
   )
 }
 
-function PaywallCard({ firstName, assessmentId }: { firstName?: string; assessmentId?: string | null }) {
+function PaywallCard({
+  firstName,
+  assessmentId,
+  email,
+}: {
+  firstName?: string
+  assessmentId?: string | null
+  email?: string | null
+}) {
+  const [isProcessing, setIsProcessing] = useState(false)
+
   const features = [
     { icon: Star, text: 'Análise jurídica completa personalizada' },
     { icon: CheckCircle, text: 'Top 3 vistos detalhados com requisitos exactos' },
     { icon: Users, text: 'Lista completa de documentos necessários' },
-    { icon: Zap, text: 'Dashboard pessoal com acompanhamento do processo' },
+    { icon: CheckCircle, text: 'Dashboard pessoal com acompanhamento do processo' },
   ]
+
+  const handleUnlock = async () => {
+    const sessionId = getStoredSessionId()
+    if (!assessmentId || !sessionId || !email) {
+      toast.error('Não foi possível iniciar o pagamento', {
+        description: 'Faltam dados do quiz. Por favor, refaça o quiz.',
+        duration: 6000,
+      })
+      return
+    }
+
+    setIsProcessing(true)
+    track('checkout_started', { plan: 'one_time', assessment_id: assessmentId })
+    try {
+      const { data, error } = await supabase.functions.invoke('create-checkout-session', {
+        body: { plan: 'one_time', assessmentId, sessionId, email },
+      })
+
+      if (error) throw error
+      if (!data?.url) throw new Error('Stripe session URL não recebida.')
+
+      // Redirect to Stripe Hosted Checkout (anonymous funnel — account created post-payment)
+      window.location.href = data.url
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err)
+      toast.error('Erro ao iniciar pagamento', {
+        description: message,
+        duration: 6000,
+      })
+      setIsProcessing(false)
+    }
+  }
 
   return (
     <div className="overflow-hidden rounded-2xl border-2 border-brand-600 bg-brand-700 text-white shadow-xl">
@@ -265,27 +325,27 @@ function PaywallCard({ firstName, assessmentId }: { firstName?: string; assessme
           <span className="text-blue-300">pagamento único</span>
         </div>
 
-        {/* CTA buttons */}
+        {/* CTA button — calls create-checkout-session directly (anon funnel) */}
         <div className="space-y-3">
-          <Link
+          <button
             id="results-unlock-btn"
             data-testid="results-cta-paywall"
-            to="/checkout"
-            state={{ plan: 'one_time', assessmentId }}
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-white py-3.5 text-base font-bold text-brand-700 shadow-md transition hover:bg-blue-50"
+            onClick={handleUnlock}
+            disabled={isProcessing}
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-white py-3.5 text-base font-bold text-brand-700 shadow-md transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            Desbloquear por €30
-            <ArrowRight className="h-4 w-4" />
-          </Link>
-
-          <Link
-            id="results-subscribe-btn"
-            to="/checkout"
-            state={{ plan: 'recurring', assessmentId }}
-            className="block w-full rounded-xl border-2 border-white/30 py-3 text-center text-sm font-semibold text-white transition hover:border-white/60"
-          >
-            Ou acompanhamento mensal por €4,90/mês →
-          </Link>
+            {isProcessing ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                A processar...
+              </>
+            ) : (
+              <>
+                Desbloquear por €30
+                <ArrowRight className="h-4 w-4" />
+              </>
+            )}
+          </button>
         </div>
 
         {/* Trust */}

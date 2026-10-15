@@ -68,16 +68,81 @@ serve(async (req) => {
     switch (event.type) {
       case 'checkout.session.completed': {
         const session = event.data.object as Stripe.Checkout.Session
-        const userId = session.metadata?.user_id
+        let userId = session.metadata?.user_id
         const productType = session.metadata?.product_type // 'one_time' | 'subscription'
-        const assessmentId = session.metadata?.assessment_id ?? null
+        const assessmentId = session.metadata?.assessment_id || null
+        const anonSessionId = session.metadata?.session_id || null
+        const anonEmail = session.metadata?.email || null
 
+        // P0 funnel (2026-06-30): anonymous one-time checkout has no user_id yet.
+        // Resolve (or create) the account here, then link the assessment.
+        // IDEMPOTENCY: this whole handler is guarded by the payment_events table
+        // above; additionally we always look up the user by email BEFORE creating,
+        // so a webhook retry never creates a duplicate account.
         if (!userId) {
-          console.error('No user_id in session metadata')
-          break
+          if (!anonEmail) {
+            console.error('No user_id and no email in session metadata')
+            break
+          }
+
+          // (a) Find existing user by email; create only if absent.
+          let resolvedUserId: string | null = null
+          const { data: existingProfile } = await supabase
+            .from('profiles')
+            .select('id')
+            .eq('email', anonEmail)
+            .maybeSingle()
+
+          if (existingProfile?.id) {
+            resolvedUserId = existingProfile.id
+          } else {
+            const { data: created, error: createErr } = await supabase.auth.admin.createUser({
+              email: anonEmail,
+              email_confirm: true,
+            })
+            if (createErr) {
+              // Likely "already registered" on a race/retry — look the user up again.
+              const { data: retryProfile } = await supabase
+                .from('profiles')
+                .select('id')
+                .eq('email', anonEmail)
+                .maybeSingle()
+              if (retryProfile?.id) {
+                resolvedUserId = retryProfile.id
+              } else {
+                console.error('Failed to create or find user for anon checkout:', createErr)
+                break
+              }
+            } else {
+              resolvedUserId = created.user?.id ?? null
+            }
+          }
+
+          if (!resolvedUserId) {
+            console.error('Could not resolve user_id for anon checkout')
+            break
+          }
+          userId = resolvedUserId
+
+          // (b) Link the anonymous assessment to the new/resolved user.
+          // Service role bypasses RLS. Match on id + session_id to prove ownership.
+          if (assessmentId && anonSessionId) {
+            const { error: linkErr } = await supabase
+              .from('assessments')
+              .update({ user_id: userId, updated_at: new Date().toISOString() })
+              .eq('id', assessmentId)
+              .eq('session_id', anonSessionId)
+              .is('user_id', null)
+            if (linkErr) console.warn('Failed to link assessment to user:', linkErr)
+          }
         }
 
         if (productType === 'one_time' || session.mode === 'payment') {
+          // Acesso one-time com PRAZO: now + 30 dias (decisão Raphael 2026-06-30).
+          const oneTimeExpiresAt = new Date(
+            Date.now() + 30 * 24 * 60 * 60 * 1000,
+          ).toISOString()
+
           // 1. Update subscription access flags
           await supabase.from('subscriptions').upsert({
             user_id: userId,
@@ -85,6 +150,7 @@ serve(async (req) => {
             one_time_paid: true,
             one_time_paid_at: new Date().toISOString(),
             one_time_payment_amount: session.amount_total ? session.amount_total / 100 : null,
+            one_time_access_expires_at: oneTimeExpiresAt,
             stripe_customer_id: session.customer as string,
             stripe_payment_intent_id: session.payment_intent as string,
             has_dashboard_access: true,

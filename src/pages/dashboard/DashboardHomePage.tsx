@@ -1,5 +1,6 @@
 // DashboardHomePage.tsx — Supabase + localStorage hybrid data loading
 
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 
 interface CachedResult {
@@ -20,9 +21,14 @@ import {
   BarChart3,
   Zap,
   User,
+  Loader2,
+  Sparkles,
 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useAssessmentResult } from '@/hooks/useAssessmentResult'
+import { supabase } from '@/lib/supabase'
+import { toast } from 'sonner'
+import { track } from '@/lib/analytics'
 import { cn } from '@/lib/utils'
 
 export function DashboardHomePage() {
@@ -34,6 +40,12 @@ export function DashboardHomePage() {
 
   const hasPaid = hasAccess('dashboard')
   const hasQuizResult = !!assessmentResult
+
+  // P0 (2026-06-30): €4,90/mês is a dashboard-only upsell, shown to one-time
+  // payers who don't yet have an active recurring subscription.
+  const subscription = authUser?.subscription
+  const showSubscriptionUpsell =
+    subscription?.one_time_paid === true && !subscription?.recurring_active
 
   // Adapt to the shape the existing sub-components expect
   const cachedResult = assessmentResult
@@ -84,6 +96,9 @@ export function DashboardHomePage() {
       ) : (
         <NoQuizBanner />
       )}
+
+      {/* ── Subscription upsell (€4,90/mês) — only for one-time payers ── */}
+      {showSubscriptionUpsell && <SubscriptionUpsellCard />}
 
       {/* ── Feature Cards ── */}
       <div>
@@ -138,6 +153,75 @@ export function DashboardHomePage() {
 
       {/* ── Timeline / Status ── */}
       <ProcessTimeline hasPaid={hasPaid} hasQuizResult={hasQuizResult} />
+    </div>
+  )
+}
+
+// ── SubscriptionUpsellCard ───────────────────────────────────────────────────
+// Sells the €4,90/mês recurring plan to users who already paid the one-time €30.
+// Calls create-checkout-session authenticated (JWT auto-attached by supabase-js).
+
+function SubscriptionUpsellCard() {
+  const [isProcessing, setIsProcessing] = useState(false)
+
+  const handleSubscribe = async () => {
+    setIsProcessing(true)
+    track('checkout_started', { plan: 'recurring' })
+    try {
+      const { data, error } = await supabase.functions.invoke('create-checkout-session', {
+        body: { plan: 'recurring' },
+      })
+      if (error) throw error
+      if (!data?.url) throw new Error('Stripe session URL não recebida.')
+      window.location.href = data.url
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err)
+      toast.error('Erro ao iniciar a subscrição', { description: message, duration: 6000 })
+      setIsProcessing(false)
+    }
+  }
+
+  return (
+    <div className="overflow-hidden rounded-2xl border-2 border-brand-600 bg-gradient-to-br from-brand-700 to-brand-600 p-6 text-white shadow-lg">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-start gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/15">
+            <Sparkles className="h-5 w-5 text-gold-400" />
+          </div>
+          <div>
+            <div className="mb-1 inline-flex items-center gap-1.5 rounded-full bg-gold-500 px-2.5 py-0.5 text-[10px] font-bold text-white">
+              Acompanhamento contínuo
+            </div>
+            <h3 className="text-lg font-extrabold leading-tight">
+              Acompanhe o seu processo por €4,90/mês
+            </h3>
+            <p className="mt-1 max-w-md text-sm text-blue-100">
+              Chat IA ilimitado, alertas de alterações legislativas e revisão do processo
+              sempre que precisar. Cancele a qualquer momento.
+            </p>
+          </div>
+        </div>
+
+        <button
+          id="dashboard-subscribe-btn"
+          data-testid="dashboard-subscribe-btn"
+          onClick={handleSubscribe}
+          disabled={isProcessing}
+          className="flex shrink-0 items-center justify-center gap-2 rounded-xl bg-white px-5 py-3 text-sm font-bold text-brand-700 shadow-md transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {isProcessing ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin" />
+              A processar...
+            </>
+          ) : (
+            <>
+              Activar por €4,90/mês
+              <ArrowRight className="h-4 w-4" />
+            </>
+          )}
+        </button>
+      </div>
     </div>
   )
 }

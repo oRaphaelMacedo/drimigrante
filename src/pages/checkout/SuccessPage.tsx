@@ -3,9 +3,11 @@
 // Reads Stripe session_id from URL, shows personalised success state
 // and redirects the user to the dashboard after a delay.
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useSearchParams, Link } from 'react-router-dom'
 import { track } from '@/lib/analytics'
+import { supabase } from '@/lib/supabase'
+import { useAuth } from '@/hooks/useAuth'
 import {
   CheckCircle2,
   ArrowRight,
@@ -40,8 +42,11 @@ function useCountUp(target: number, duration = 1200) {
 export function SuccessPage() {
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
+  const { authUser } = useAuth()
   const sessionId = searchParams.get('session_id')
   const [countdown, setCountdown] = useState(8)
+  // Guard so the auto-login claim runs at most once per mount.
+  const claimedRef = useRef(false)
 
   const percentage = useCountUp(100, 1500)
 
@@ -49,6 +54,37 @@ export function SuccessPage() {
   useEffect(() => {
     track('checkout_completed', { session_id: sessionId })
   }, [sessionId])
+
+  // P0 funnel (2026-06-30): post-payment auto-login for the anonymous flow.
+  // If there's no authenticated user but we have a Stripe session_id, exchange it
+  // for a Supabase session via claim-session → verifyOtp, then go to /dashboard.
+  // On any failure we fall back to the countdown/CTA below (non-breaking).
+  useEffect(() => {
+    if (authUser || !sessionId || claimedRef.current) return
+    claimedRef.current = true
+
+    ;(async () => {
+      try {
+        const { data, error } = await supabase.functions.invoke('claim-session', {
+          body: { session_id: sessionId },
+        })
+        if (error) throw error
+        const tokenHash = data?.token_hash as string | undefined
+        if (!tokenHash) return
+
+        const { error: verifyErr } = await supabase.auth.verifyOtp({
+          type: 'magiclink',
+          token_hash: tokenHash,
+        })
+        if (verifyErr) throw verifyErr
+
+        navigate('/dashboard', { replace: true })
+      } catch {
+        // Non-fatal: keep showing the success page and let the user navigate
+        // manually (CTA) or wait for the countdown fallback.
+      }
+    })()
+  }, [authUser, sessionId, navigate])
 
   // Auto-redirect to dashboard
   useEffect(() => {

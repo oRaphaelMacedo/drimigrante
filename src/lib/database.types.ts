@@ -1471,6 +1471,7 @@ export type Database = {
           has_dashboard_access: boolean | null
           has_full_analysis: boolean | null
           id: string
+          one_time_access_expires_at: string | null
           one_time_paid: boolean | null
           one_time_paid_at: string | null
           one_time_payment_amount: number | null
@@ -1491,6 +1492,7 @@ export type Database = {
           has_dashboard_access?: boolean | null
           has_full_analysis?: boolean | null
           id?: string
+          one_time_access_expires_at?: string | null
           one_time_paid?: boolean | null
           one_time_paid_at?: string | null
           one_time_payment_amount?: number | null
@@ -1511,6 +1513,7 @@ export type Database = {
           has_dashboard_access?: boolean | null
           has_full_analysis?: boolean | null
           id?: string
+          one_time_access_expires_at?: string | null
           one_time_paid?: boolean | null
           one_time_paid_at?: string | null
           one_time_payment_amount?: number | null
