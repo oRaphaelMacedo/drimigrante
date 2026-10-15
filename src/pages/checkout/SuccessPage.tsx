@@ -47,6 +47,8 @@ export function SuccessPage() {
   const [countdown, setCountdown] = useState(8)
   // Guard so the auto-login claim runs at most once per mount.
   const claimedRef = useRef(false)
+  // True when claim-session sent a login link by email instead of auto-login.
+  const [emailSent, setEmailSent] = useState(false)
 
   const percentage = useCountUp(100, 1500)
 
@@ -69,6 +71,11 @@ export function SuccessPage() {
           body: { session_id: sessionId },
         })
         if (error) throw error
+        // Existing account (already used before): no auto-login, link sent by email.
+        if (data?.status === 'email_sent') {
+          setEmailSent(true)
+          return
+        }
         const tokenHash = data?.token_hash as string | undefined
         if (!tokenHash) return
 
@@ -87,14 +94,16 @@ export function SuccessPage() {
   }, [authUser, sessionId, navigate])
 
   // Auto-redirect to dashboard
+  // (paused when the login link was emailed — /dashboard would bounce to /login)
   useEffect(() => {
+    if (emailSent) return
     if (countdown === 0) {
       navigate('/dashboard', { replace: true })
       return
     }
     const t = setTimeout(() => setCountdown((c) => c - 1), 1000)
     return () => clearTimeout(t)
-  }, [countdown, navigate])
+  }, [countdown, navigate, emailSent])
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-gradient-to-br from-emerald-50 via-white to-brand-50 px-4 py-16">
@@ -173,6 +182,19 @@ export function SuccessPage() {
         ))}
       </div>
 
+      {emailSent && (
+        <div
+          data-testid="checkout-success-email-sent"
+          className="mb-6 flex w-full max-w-md items-start gap-3 rounded-xl border border-brand-100 bg-brand-50 p-4 text-sm text-brand-800"
+        >
+          <Mail className="mt-0.5 h-4 w-4 shrink-0" />
+          <p>
+            Este email já tem conta no Doutor Imigrante. Enviámos-lhe um{' '}
+            <strong>link de acesso</strong> — abra-o para entrar no seu dashboard.
+          </p>
+        </div>
+      )}
+
       {/* CTA */}
       <Link
         to="/dashboard"
@@ -184,10 +206,12 @@ export function SuccessPage() {
       </Link>
 
       {/* Auto-redirect notice */}
-      <p className="mt-4 flex items-center gap-1.5 text-sm text-gray-400">
-        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-        Redirecionando automaticamente em {countdown}s...
-      </p>
+      {!emailSent && (
+        <p className="mt-4 flex items-center gap-1.5 text-sm text-gray-400">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          Redirecionando automaticamente em {countdown}s...
+        </p>
+      )}
 
       {/* Debug session id */}
       {sessionId && (

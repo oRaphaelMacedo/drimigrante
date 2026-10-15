@@ -25,6 +25,10 @@ serve(async (req) => {
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
   )
 
+  // Set once the event is logged in payment_events, so a processing failure can
+  // un-log it and let Stripe's retry reprocess it (instead of being skipped).
+  let loggedEventId: string | null = null
+
   try {
     const signature = req.headers.get('stripe-signature')
     if (!signature) throw new Error('No stripe-signature header')
@@ -56,6 +60,7 @@ serve(async (req) => {
       payload: event as unknown as Record<string, unknown>,
       processed_at: new Date().toISOString(),
     })
+    loggedEventId = event.id
 
     // Helper: invoke send-email with the required internal secret (B03-A05)
     const internalSecret = Deno.env.get('INTERNAL_SECRET') ?? ''
@@ -72,7 +77,7 @@ serve(async (req) => {
         const productType = session.metadata?.product_type // 'one_time' | 'subscription'
         const assessmentId = session.metadata?.assessment_id || null
         const anonSessionId = session.metadata?.session_id || null
-        const anonEmail = session.metadata?.email || null
+        const anonEmail = session.metadata?.email?.trim().toLowerCase() || null
 
         // P0 funnel (2026-06-30): anonymous one-time checkout has no user_id yet.
         // Resolve (or create) the account here, then link the assessment.
@@ -110,8 +115,8 @@ serve(async (req) => {
               if (retryProfile?.id) {
                 resolvedUserId = retryProfile.id
               } else {
-                console.error('Failed to create or find user for anon checkout:', createErr)
-                break
+                // Throw (not break) so the event is un-logged and Stripe retries.
+                throw new Error(`Failed to create or find user for anon checkout: ${createErr.message}`)
               }
             } else {
               resolvedUserId = created.user?.id ?? null
@@ -119,8 +124,7 @@ serve(async (req) => {
           }
 
           if (!resolvedUserId) {
-            console.error('Could not resolve user_id for anon checkout')
-            break
+            throw new Error('Could not resolve user_id for anon checkout')
           }
           userId = resolvedUserId
 
@@ -143,8 +147,8 @@ serve(async (req) => {
             Date.now() + 30 * 24 * 60 * 60 * 1000,
           ).toISOString()
 
-          // 1. Update subscription access flags
-          await supabase.from('subscriptions').upsert({
+          // 1. Update subscription access flags (failure → throw → Stripe retries)
+          const { error: subErr } = await supabase.from('subscriptions').upsert({
             user_id: userId,
             tier: 'one_time',
             one_time_paid: true,
@@ -156,6 +160,7 @@ serve(async (req) => {
             has_dashboard_access: true,
             has_full_analysis: true,
           }, { onConflict: 'user_id' })
+          if (subErr) throw new Error(`subscriptions upsert failed: ${subErr.message}`)
 
           // 2. Record payment
           await supabase.from('payments').upsert({
@@ -297,6 +302,10 @@ serve(async (req) => {
     })
   } catch (err) {
     console.error('Webhook error:', err)
+    // Un-log the event so the idempotency guard doesn't swallow Stripe's retry.
+    if (loggedEventId) {
+      await supabase.from('payment_events').delete().eq('stripe_event_id', loggedEventId)
+    }
     // B03-A07: never leak internal details — Stripe only needs a 4xx to retry
     return new Response(JSON.stringify({ error: 'Internal server error' }), {
       status: 400,

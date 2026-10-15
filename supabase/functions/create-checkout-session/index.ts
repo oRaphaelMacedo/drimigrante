@@ -57,7 +57,12 @@ serve(async (req) => {
   } catch {
     return jsonResponse({ error: 'Invalid JSON' }, 400)
   }
-  const { plan, assessmentId, sessionId, email } = bodyRaw
+  const { plan, assessmentId, sessionId } = bodyRaw
+  // Auth stores emails lowercased; normalise so the webhook lookup by email matches.
+  const email = bodyRaw.email?.trim().toLowerCase() || null
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return jsonResponse({ error: 'Invalid email' }, 400)
+  }
 
   // Service-role client (ignores RLS) — used for assessment validation + customer lookup.
   const supabase = createClient(

@@ -66,12 +66,36 @@ serve(async (req) => {
     }
 
     // 2. Resolve buyer email (customer_details first, then customer_email fallback).
-    const email = session.customer_details?.email ?? session.customer_email ?? null
-    if (!email) {
+    const rawEmail = session.customer_details?.email ?? session.customer_email ?? null
+    if (!rawEmail) {
       return jsonResponse({ error: 'No email on checkout session' }, 400)
     }
+    const email = rawEmail.trim().toLowerCase()
 
-    // 3. Mint a one-shot magic-link token for this email.
+    // 3. Anti-takeover: the checkout email is NOT verified, so we only auto-login
+    //    accounts that have never signed in (i.e. created by this purchase).
+    //    Accounts already used before get a magic link by email instead — the
+    //    owner of the inbox proves ownership. This also makes each session_id
+    //    single-use: after the first verifyOtp, last_sign_in_at is set.
+    const { data: profile } = await admin
+      .from('profiles')
+      .select('id')
+      .eq('email', email)
+      .maybeSingle()
+    if (profile?.id) {
+      const { data: existing } = await admin.auth.admin.getUserById(profile.id)
+      if (existing?.user?.last_sign_in_at) {
+        const appUrl = Deno.env.get('APP_URL') ?? ''
+        const { error: otpErr } = await admin.auth.signInWithOtp({
+          email,
+          options: { shouldCreateUser: false, emailRedirectTo: `${appUrl}/auth/callback` },
+        })
+        if (otpErr) throw otpErr
+        return jsonResponse({ status: 'email_sent' })
+      }
+    }
+
+    // 4. Mint a one-shot magic-link token for this email.
     //    The account is created by stripe-webhook; if the webhook hasn't landed
     //    yet, generateLink for a magiclink also provisions the user, so this is
     //    resilient to ordering.
@@ -86,7 +110,7 @@ serve(async (req) => {
       throw new Error('generateLink returned no hashed_token')
     }
 
-    return jsonResponse({ token_hash: tokenHash, email })
+    return jsonResponse({ status: 'token', token_hash: tokenHash })
   } catch (err) {
     console.error('claim-session error:', err)
     // Do not leak internal details to the caller.
