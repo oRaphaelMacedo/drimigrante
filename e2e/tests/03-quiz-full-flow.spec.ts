@@ -28,4 +28,7 @@ test('quiz completo do início ao /results', async ({ page }) => {
   await expect(page).toHaveURL(/\/results/)
   await expect(page.getByTestId('results-score')).toBeVisible()
   await expect(page.getByTestId('results-cta-paywall')).toBeVisible()
+  // P0 (modelo sequencial): o €4,90/mês não é vendido antes do pagamento de €30.
+  await expect(page.locator('#results-subscribe-btn')).toHaveCount(0)
+  await expect(page.getByText('€4,90')).toHaveCount(0)
 })

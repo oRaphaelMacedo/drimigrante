@@ -77,7 +77,11 @@ authTest('checkout autenticado (fallback) → success page', async ({ authedPage
     })
   })
 
+  // Wait for AuthContext to hydrate (profile + subscription loaded); clicking
+  // before that sees authUser=null and CheckoutPage redirects to /login.
+  const authHydrated = page.waitForResponse((r) => r.url().includes('/rest/v1/subscriptions'))
   await page.goto('/checkout')
+  await authHydrated
   await page.getByTestId('checkout-plan-onetime').click()
   await page.getByTestId('checkout-submit').click()
 
