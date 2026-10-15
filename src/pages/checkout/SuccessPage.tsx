@@ -49,6 +49,9 @@ export function SuccessPage() {
   const claimedRef = useRef(false)
   // True when claim-session sent a login link by email instead of auto-login.
   const [emailSent, setEmailSent] = useState(false)
+  // Set after verifyOtp succeeds; we navigate only once AuthContext has loaded
+  // the user, otherwise ProtectedRoute sees authUser=null and bounces to /login.
+  const [claimed, setClaimed] = useState(false)
 
   const percentage = useCountUp(100, 1500)
 
@@ -85,13 +88,17 @@ export function SuccessPage() {
         })
         if (verifyErr) throw verifyErr
 
-        navigate('/dashboard', { replace: true })
+        setClaimed(true)
       } catch {
         // Non-fatal: keep showing the success page and let the user navigate
         // manually (CTA) or wait for the countdown fallback.
       }
     })()
   }, [authUser, sessionId, navigate])
+
+  useEffect(() => {
+    if (claimed && authUser) navigate('/dashboard', { replace: true })
+  }, [claimed, authUser, navigate])
 
   // Auto-redirect to dashboard
   // (paused when the login link was emailed — /dashboard would bounce to /login)

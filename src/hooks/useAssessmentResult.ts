@@ -2,6 +2,7 @@
 // Falls back to localStorage so the UI never breaks even if DB call fails.
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
+import { useAuth } from '@/hooks/useAuth'
 
 export interface AssessmentResult {
   assessmentId: string
@@ -50,23 +51,35 @@ const CATEGORY_LABEL: Record<string, string> = {
 
 export function useAssessmentResult() {
   const local = getLocalData()
-  const assessmentId = local.assessmentId
+  const { authUser } = useAuth()
+  const userId = authUser?.user.id ?? null
+  // localStorage first (same browser as the quiz). Otherwise fall back to the
+  // user's latest linked assessment — e.g. login via email link on another
+  // device/domain, where localStorage is empty.
+  const localId = local.assessmentId
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ['assessment-result', assessmentId],
+    queryKey: ['assessment-result', localId ?? `user:${userId}`],
     queryFn: async () => {
-      const { data, error } = await supabase
+      const base = supabase
         .from('assessments')
         .select('id, full_name, email, completed_at, assessment_results(*)')
-        .eq('id', assessmentId!)
-        .single()
+      const { data, error } = localId
+        ? await base.eq('id', localId).single()
+        : await base
+            .eq('user_id', userId!)
+            .order('completed_at', { ascending: false, nullsFirst: false })
+            .limit(1)
+            .maybeSingle()
       if (error) throw error
       return data
     },
-    enabled: !!assessmentId,
+    enabled: !!localId || !!userId,
     staleTime: 5 * 60 * 1000,
     retry: 1,
   })
+
+  const assessmentId = localId ?? data?.id ?? null
 
   // Merge DB result with localStorage fallback
   const dbResult = data?.assessment_results
@@ -116,7 +129,7 @@ export function useAssessmentResult() {
 
   return {
     result: result ?? fallbackResult,
-    isLoading: isLoading && !!assessmentId,
+    isLoading: isLoading && (!!localId || !!userId),
     hasDbResult: !!dbResult,
     error,
   }
