@@ -29,6 +29,21 @@ interface RequestBody {
   email?: string | null
 }
 
+// Return URLs follow the caller's Origin only when it is one of our own
+// frontends (Vercel previews of this project, localhost); otherwise APP_URL.
+// Lets preview deployments complete the checkout round-trip without an open redirect.
+const ALLOWED_ORIGIN_PATTERNS = [
+  /^https:\/\/dr-imigrante-[a-z0-9-]+-oraphaelmacedo-3991s-projects\.vercel\.app$/,
+  /^http:\/\/localhost:\d+$/,
+]
+
+function resolveAppUrl(req: Request): string {
+  const appUrl = Deno.env.get('APP_URL') ?? 'http://localhost:5173'
+  const origin = req.headers.get('Origin')
+  if (origin && ALLOWED_ORIGIN_PATTERNS.some((re) => re.test(origin))) return origin
+  return appUrl
+}
+
 // Subscription cap: 12 monthly cycles ≈ 365 days (decisão Raphael 2026-06-30)
 const RECURRING_CAP_DAYS = 365
 
@@ -45,7 +60,7 @@ serve(async (req) => {
   }
 
   const stripeKey = Deno.env.get('STRIPE_SECRET_KEY')
-  const appUrl = Deno.env.get('APP_URL') ?? 'http://localhost:5173'
+  const appUrl = resolveAppUrl(req)
 
   if (!stripeKey) {
     return jsonResponse({ error: 'Stripe not configured' }, 500)
