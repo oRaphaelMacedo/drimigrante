@@ -1,39 +1,49 @@
-// Gera migration SQL a partir de src/data/quiz-questions.ts
-// Output: supabase/migrations/20260509000002_seed_quiz_v1.sql
-import { readFile, writeFile } from 'node:fs/promises'
-import { fileURLToPath } from 'node:url'
+// Gera o SQL de seed do quiz a partir de src/data/quiz-questions.ts.
+//
+// Uso:
+//   node scripts/generate-quiz-seed.mjs                 → imprime o SQL no stdout
+//   node scripts/generate-quiz-seed.mjs --out <arquivo> → grava o SQL no arquivo
+//
+// Requer Node ≥ 22.18 (importa os .ts direto, com remoção de tipos nativa).
+// Em versões anteriores: node --experimental-strip-types scripts/generate-quiz-seed.mjs
+//
+// IMPORTANTE: o SQL faz TRUNCATE das tabelas do quiz. Serve para ambientes novos
+// (local/staging). NÃO reescreva migrations já aplicadas (ex.:
+// 20260509000002_seed_quiz_v1.sql); para corrigir dados de produção, crie uma
+// migration nova (ex.: 20261016000200_fix_quiz_display_conditions.sql).
+//
+// display_conditions usa o mesmo conversor do app (src/lib/quiz-conditions.ts),
+// então answer_contains e any/all são preservados.
+import { writeFile } from 'node:fs/promises'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { dirname, resolve } from 'node:path'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const root = resolve(__dirname, '..')
 
-const tsSource = await readFile(resolve(root, 'src/data/quiz-questions.ts'), 'utf8')
-
-// Extract THEMES via regex (top of file)
-const themesMatch = tsSource.match(/export const QUIZ_THEMES = \[([\s\S]*?)\] as const/)
-if (!themesMatch) throw new Error('QUIZ_THEMES not found')
-const themes = []
-for (const line of themesMatch[1].split('\n')) {
-  const m = line.match(/code:\s*'([^']+)',\s*name:\s*'([^']+)',\s*color:\s*'([^']+)'/)
-  if (m) themes.push({ code: m[1], name: m[2], color: m[3], icon: '' })
+async function importTs(relPath) {
+  try {
+    return await import(pathToFileURL(resolve(root, relPath)).href)
+  } catch (err) {
+    if (err?.code === 'ERR_UNKNOWN_FILE_EXTENSION') {
+      console.error(
+        'Este Node não importa .ts. Use Node ≥ 22.18 ou rode com: node --experimental-strip-types scripts/generate-quiz-seed.mjs',
+      )
+      process.exit(1)
+    }
+    throw err
+  }
 }
-if (themes.length === 0) throw new Error('No themes parsed')
 
-// To extract questions reliably, dynamically import the .ts via tsx-style transpile is complex.
-// Instead: use eval-based approach by copying the QUIZ_QUESTIONS array and converting "as const" patterns.
-// The questions file is plain enough — use node --import to register tsx, OR just regex out the relevant pieces.
-//
-// Simpler: spawn `npx tsx --eval` to print JSON
-import { spawnSync } from 'node:child_process'
-const out = spawnSync('npx', ['-y', 'tsx', '--eval',
-  `import { QUIZ_THEMES, QUIZ_QUESTIONS } from '${resolve(root, 'src/data/quiz-questions.ts')}'; console.log(JSON.stringify({ themes: QUIZ_THEMES, questions: QUIZ_QUESTIONS }))`,
-], { encoding: 'utf8' })
+const { QUIZ_THEMES, QUIZ_QUESTIONS } = await importTs('src/data/quiz-questions.ts')
+const { toDisplayConditions, parseDisplayConditions } = await importTs('src/lib/quiz-conditions.ts')
 
-if (out.status !== 0) {
-  console.error('tsx failed:', out.stderr)
+const outIdx = process.argv.indexOf('--out')
+const outArg = outIdx !== -1 ? process.argv[outIdx + 1] : null
+if (outIdx !== -1 && !outArg) {
+  console.error('Informe o arquivo depois de --out.')
   process.exit(1)
 }
-const { themes: themesJson, questions } = JSON.parse(out.stdout.trim().split('\n').pop())
 
 // SQL escaping helper
 const sql = (v) => {
@@ -44,11 +54,23 @@ const sql = (v) => {
   return `'${String(v).replace(/'/g, "''")}'`
 }
 
+// Confere as condições antes de gerar: nada de {question_key} sozinho ou {}.
+const problems = []
+for (const q of QUIZ_QUESTIONS) {
+  const dc = toDisplayConditions(q.showIf)
+  const parsed = parseDisplayConditions(dc)
+  if (q.showIf && parsed.kind !== 'rule') problems.push(`${q.key}: ${parsed.reason ?? parsed.kind}`)
+}
+if (problems.length) {
+  console.error('display_conditions inválidas:\n  ' + problems.join('\n  '))
+  process.exit(1)
+}
+
 const lines = []
 lines.push('-- =====================================================')
-lines.push('-- 20260509000002 — Seed quiz v1.0 (real questions from src/data/quiz-questions.ts)')
-lines.push('-- Replaces the placeholder seed from initial migration.')
-lines.push('-- Idempotent: TRUNCATEs form_themes/questions/options before re-seeding.')
+lines.push('-- Seed do quiz gerado por scripts/generate-quiz-seed.mjs')
+lines.push('-- a partir de src/data/quiz-questions.ts.')
+lines.push('-- ATENÇÃO: faz TRUNCATE de form_themes/questions/options antes de semear.')
 lines.push('-- =====================================================')
 lines.push('')
 lines.push('BEGIN;')
@@ -59,19 +81,17 @@ lines.push('')
 
 // Insert themes
 lines.push('-- THEMES')
-themesJson.forEach((t, i) => {
+QUIZ_THEMES.forEach((t, i) => {
   lines.push(
-    `INSERT INTO form_themes (code, name_pt, color, icon, sort_order, is_active) VALUES (${sql(t.code)}, ${sql(t.name)}, ${sql(t.color)}, ${sql(t.icon)}, ${i}, TRUE);`,
+    `INSERT INTO form_themes (code, name_pt, color, icon, sort_order, is_active) VALUES (${sql(t.code)}, ${sql(t.name)}, ${sql(t.color)}, ${sql('')}, ${i}, TRUE);`,
   )
 })
 lines.push('')
 
 // Insert questions
 lines.push('-- QUESTIONS')
-questions.forEach((q, i) => {
-  const displayConditions = q.showIf
-    ? { question_key: q.showIf.questionKey, answer_key: q.showIf.answerKey }
-    : null
+QUIZ_QUESTIONS.forEach((q, i) => {
+  const displayConditions = toDisplayConditions(q.showIf)
   const validation = {}
   if (typeof q.min === 'number') validation.min = q.min
   if (typeof q.max === 'number') validation.max = q.max
@@ -85,7 +105,7 @@ lines.push('')
 
 // Insert options
 lines.push('-- OPTIONS')
-questions.forEach((q) => {
+QUIZ_QUESTIONS.forEach((q) => {
   if (!q.options) return
   q.options.forEach((opt, i) => {
     lines.push(
@@ -99,10 +119,15 @@ lines.push('')
 lines.push('COMMIT;')
 lines.push('')
 
-const outFile = resolve(root, 'supabase/migrations/20260509000002_seed_quiz_v1.sql')
-await writeFile(outFile, lines.join('\n'), 'utf8')
-console.log(`Wrote ${outFile}`)
-console.log(`  ${themesJson.length} themes`)
-console.log(`  ${questions.length} questions`)
-const optCount = questions.reduce((sum, q) => sum + (q.options?.length ?? 0), 0)
-console.log(`  ${optCount} options`)
+const output = lines.join('\n')
+const optCount = QUIZ_QUESTIONS.reduce((sum, q) => sum + (q.options?.length ?? 0), 0)
+const summary = `${QUIZ_THEMES.length} temas, ${QUIZ_QUESTIONS.length} perguntas, ${optCount} opções`
+
+if (outArg) {
+  const outFile = resolve(process.cwd(), outArg)
+  await writeFile(outFile, output, 'utf8')
+  console.error(`Gravado em ${outFile} (${summary})`)
+} else {
+  process.stdout.write(output)
+  console.error(`-- ${summary}`)
+}
