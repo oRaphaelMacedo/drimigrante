@@ -34,15 +34,20 @@ ser adicionada aqui e ao processo de deploy (`docs/operacao/release.md`).
 | `compute-eligibility` | `true` | Quiz (chave anon) |
 | `create-checkout-session` | `false` | Resultado do quiz (checkout anônimo), página de checkout e painel |
 | `create-portal-session` | `true` | Painel, aba "Meu plano" (usuário logado) |
+| `delete-account` | `true` | Conta, aba "Privacidade" (usuário logado) |
+| `export-my-data` | `true` | Conta, aba "Privacidade" (usuário logado) |
 | `generate-explanation` | `true` | Quiz (chave anon) |
+| `lifecycle-emails` | `false` | Agendador (pg_net) ou dono, com `x-internal-secret`; dry-run por padrão |
 | `send-email` | `true` | Outras functions, com `x-internal-secret` |
 | `stripe-webhook` | `false` | Stripe (valida `stripe-signature`) |
+| `unsubscribe` | `false` | Link de descadastro dos e-mails (valida a assinatura do token) |
 
 **Fora da lista:** `e2e-login` (só local/staging).
 
-As três functions com `verify_jwt = false` estão declaradas no
+As cinco functions com `verify_jwt = false` estão declaradas no
 `supabase/config.toml`; as demais usam o padrão `true`. Assim um deploy sem a
-flag `--no-verify-jwt` não quebra o webhook do Stripe nem o checkout anônimo.
+flag `--no-verify-jwt` não quebra o webhook do Stripe, o checkout anônimo nem o
+descadastro.
 
 ## Comandos
 

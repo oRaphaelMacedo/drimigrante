@@ -94,8 +94,8 @@ enabled = false
 # verify_jwt = false SÓ onde quem chama não tem JWT de usuário. Sem estas
 # entradas, um `supabase functions deploy` sem a flag --no-verify-jwt quebraria
 # o webhook do Stripe e o checkout anônimo. As demais funções (chat-completion,
-# compute-eligibility, generate-explanation, send-email) usam o padrão
-# verify_jwt = true.
+# compute-eligibility, create-portal-session, delete-account, export-my-data,
+# generate-explanation, send-email) usam o padrão verify_jwt = true.
 
 # Stripe chama sem Authorization; a função valida a assinatura stripe-signature.
 [functions.stripe-webhook]
@@ -107,6 +107,16 @@ verify_jwt = false
 
 # Login automático pós-pagamento: o comprador ainda não tem sessão.
 [functions.claim-session]
+verify_jwt = false
+
+# E-mails do ciclo de vida (DI-077): chamada pelo agendador (pg_net) ou pelo dono;
+# a função confere o segredo sozinha (x-internal-secret ou service role).
+[functions.lifecycle-emails]
+verify_jwt = false
+
+# Descadastro (DI-077): quem clica no link do e-mail não tem JWT; a autenticidade
+# vem da assinatura do token.
+[functions.unsubscribe]
 verify_jwt = false
 
 # e2e-login é SÓ para testes E2E contra Supabase local/staging e NUNCA entra em

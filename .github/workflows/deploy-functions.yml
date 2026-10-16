@@ -9,7 +9,8 @@
 #   e2e-login nunca entra. Function nova só entra depois de ir para aquela lista
 #   e para PROD_FUNCTIONS abaixo.
 # - verify_jwt vem do supabase/config.toml: quem tem `verify_jwt = false` lá
-#   recebe --no-verify-jwt (stripe-webhook, create-checkout-session, claim-session).
+#   recebe --no-verify-jwt (stripe-webhook, create-checkout-session, claim-session,
+#   lifecycle-emails, unsubscribe).
 # - Não aplica migration. A ordem migration ↔ function de cada release está em
 #   docs/operacao/release.md (ex.: chat-completion nova ANTES da 20261016000300).
 # - dry_run (padrão) só valida a lista, roda os testes Deno e mostra o plano.
@@ -47,6 +48,10 @@ env:
     claim-session
     stripe-webhook
     create-portal-session
+    export-my-data
+    delete-account
+    lifecycle-emails
+    unsubscribe
 
 jobs:
   plan:

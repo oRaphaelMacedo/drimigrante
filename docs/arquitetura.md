@@ -95,6 +95,10 @@ Módulos de `src/lib/` que são contrato entre as telas:
 | `claim-session` | `false` | `/checkout/success` | Entrada automática pós-pagamento |
 | `chat-completion` | `true` | Painel | Chat com IA, conferindo o acesso no servidor |
 | `send-email` | `true` | Outras functions (`x-internal-secret`) | E-mails transacionais (Resend) |
+| `lifecycle-emails` | `false` | Agendador (pg_net) ou dono (`x-internal-secret`) | E-mails do ciclo de vida (nutrição com opt-in, avisos de prazo, lista de espera); dry-run por padrão |
+| `unsubscribe` | `false` | Link dos e-mails | Descadastro por token assinado (guarda só o hash do e-mail) |
+| `export-my-data` | `true` | Conta, aba "Privacidade" | Exporta em JSON os dados da própria conta (análise completa só com acesso vigente) |
+| `delete-account` | `true` | Conta, aba "Privacidade" | Apaga a conta (cancela a assinatura, remove arquivos, `lgpd_erase_user`); pagamentos ficam guardados sem vínculo |
 | `e2e-login` | `false` | Só testes E2E | **Nunca vai para produção** (desligada no `config.toml` e recusa o projeto de produção) |
 
 `verify_jwt` fica no [`supabase/config.toml`](../supabase/config.toml). A lógica

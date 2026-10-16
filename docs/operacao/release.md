@@ -24,8 +24,9 @@ os ambientes e o CI.
   resultado (seção 3, passo 2).
 - **Functions de produção** (lista de [docs/testes.md](../testes.md)):
   `compute-eligibility`, `send-email`, `chat-completion`, `generate-explanation`,
-  `create-checkout-session`, `claim-session`, `stripe-webhook` e
-  `create-portal-session`. A `e2e-login`
+  `create-checkout-session`, `claim-session`, `stripe-webhook`,
+  `create-portal-session`, `export-my-data`, `delete-account`, `lifecycle-emails`
+  e `unsubscribe`. A `e2e-login`
   nunca vai para produção. Function nova só entra depois de ir para aquela
   lista e para `PROD_FUNCTIONS` no workflow.
 - **Nunca:** `supabase functions deploy` sem nome, `--prune`, `supabase db reset`
@@ -56,7 +57,7 @@ os ambientes e o CI.
 
    ```bash
    git fetch origin
-   git tag -a v2026.10.25 origin/<branch-do-pr> -m "Release ondas 1–3"   # use a data do dia
+   git tag -a v2026.10.25 origin/<branch-do-pr> -m "Release ondas 1–4"   # use a data do dia
    git push origin v2026.10.25
    git switch --detach v2026.10.25
    ```
@@ -73,7 +74,7 @@ os ambientes e o CI.
 6. Anote as versões atuais das functions (para o rollback):
    `supabase functions list --project-ref krjirhlmdnxqqrpzmowz`.
 
-## 3. Ordem deste release (ondas 1 a 3)
+## 3. Ordem deste release (ondas 1 a 4)
 
 Produção tem as migrations até `20260630000000`. Tudo abaixo está pendente.
 
@@ -81,7 +82,7 @@ Produção tem as migrations até `20260630000000`. Tudo abaixo está pendente.
 
 | Function | Por quê |
 |---|---|
-| `compute-eligibility` | Não depende de migration (o motor corrige as condições incompletas). |
+| `compute-eligibility` | Não depende de migration (o motor corrige as condições incompletas). A versão da W4-02 manda as boas-vindas (`welcome_free_v2`) em dry-run por padrão: nada sai até o dono desligar o dry-run (seção 7, item 7). |
 | `send-email` | Não depende de migration. |
 | `chat-completion` | **Precisa estar no ar antes da `20261016000300`**: a versão nova grava as mensagens com a service role; a antiga grava com o JWT do cliente, e a 000300 tira esse INSERT. Até a `20261016000150` rodar (passo 2, minutos depois), quem pagou o €30 antes desta versão pode ficar sem chat. |
 | `create-portal-session` | Não depende de migration. Precisa estar no ar antes do front (passo 4): o botão do portal na aba "Meu plano" (W3-04, DI-052) chama esta function. |
@@ -107,7 +108,9 @@ Aplica todas, nesta ordem (timestamp). Cada uma tem o detalhe no cabeçalho.
 | `20261025000000_db_hardening_advisors` | DI-081 | Depois de todas as anteriores. Helpers de RLS para `private`, `anon` só lê o quiz, EXECUTE com allowlist. O front antigo continua funcionando. |
 | `20261025000100_anon_rpc_limits` | DI-081 | Depois da 000000. Limites nas RPCs do quiz anônimo; aceita os session_id antigos. |
 | `20261025000200_resume_token` | W3-01 | Conferir o cabeçalho na integração. Se recriar `upsert_anon_assessment`, tem de manter as validações da 000100; policies e funções citam `private.*`. |
-| Outras migrations da onda 3 | — | Conferir o cabeçalho de cada uma antes do `db push` e acrescentar aqui. |
+| `20261030000000_lifecycle_emails` | DI-077 | Depois da `20261025000200` (o timestamp garante). Não muda o código no ar: o modelo `welcome_free` antigo continua igual. Libera `lifecycle-emails` e `unsubscribe` (passo 3). |
+| `20261030000100_retention_lgpd` | DI-083 | Libera `delete-account` (passo 3): sem a RPC `lgpd_erase_user`, ela responde 500 e não apaga nada. Tenta ligar o pg_cron e agendar a retenção diária; sem pg_cron só avisa (NOTICE). |
+| `20261030000200_caso_tipo_nenhum` | DI-075, DI-074 | Só dados. O cabeçalho pede aplicar **depois do front novo**, mas o `db push` aplica tudo aqui: até o passo 4, o front antigo mostra "Nenhuma destas situações" como checkbox comum (dá para marcar junto com A–F; a opção não soma pontos). Faça o passo 4 logo em seguida. |
 
 ```bash
 supabase db push        # confirma com "y"; para no primeiro erro
@@ -123,12 +126,16 @@ partir do passo 2.
 
 | Function | Depende de |
 |---|---|
-| `generate-explanation` | `20261020000000` (a versão da W3-05 chama `rpc('has_active_access')` na geração sob demanda). A `20261016000350` é recomendada junto, mas não obrigatória. |
+| `generate-explanation` | `20261020000000` (a versão da W3-05 chama `rpc('has_active_access')` na geração sob demanda). A `20261016000350` é recomendada junto, mas não obrigatória. A versão da W4-02 não manda mais o `welcome_free`: com o dry-run padrão, o e-mail de boas-vindas para de sair até o dono desligar o dry-run. |
 | `create-checkout-session` | `20261016000100`. `verify_jwt = false`. |
 | `claim-session` | `20261016000100` e `20261016000400`. `verify_jwt = false`. |
 | `stripe-webhook` | `20261016000100` e `20261016000150`. `verify_jwt = false`. |
+| `export-my-data` | `20261020000000` (`has_active_access`; sem ela a análise completa fica fora do arquivo). Antes do front (passo 4): a aba "Privacidade" chama esta function. |
+| `delete-account` | `20261030000100` (`lgpd_erase_user`). Antes do front (passo 4), pelo mesmo motivo. |
+| `lifecycle-emails` | `20261030000000`. `verify_jwt = false`. Dry-run por padrão; nada fica agendado neste release. |
+| `unsubscribe` | `20261030000000`. `verify_jwt = false`. |
 
-Workflow: `functions = generate-explanation,create-checkout-session,claim-session,stripe-webhook`.
+Workflow: `functions = generate-explanation,create-checkout-session,claim-session,stripe-webhook,export-my-data,delete-account,lifecycle-emails,unsubscribe`.
 
 **Passo 4 — front:** merge do PR na `main` (*merge commit*; a Vercel publica
 sozinha). Acompanhe no [painel da Vercel](https://vercel.com/dashboard) → projeto
@@ -145,7 +152,7 @@ do Doutor Imigrante → *Deployments* até o status *Ready*.
 1. *Use workflow from*: a tag do release (ou a `main`, para um redeploy depois
    do merge; outra branch é recusada).
 2. *functions*: a lista do passo (ex.: `compute-eligibility,send-email,chat-completion`).
-   `todas` publica as 8 na ordem da lista.
+   `todas` publica as 12 na ordem da lista.
 3. Primeiro com *dry_run* marcado: o job `plan` valida a lista, roda os testes
    Deno e mostra o plano (ordem e `verify_jwt` de cada uma) no resumo da execução.
 4. Rode de novo com *dry_run* desmarcado. O job `deploy` espera a aprovação no
@@ -153,25 +160,25 @@ do Doutor Imigrante → *Deployments* até o status *Ready*.
    liberado e as functions são publicadas, uma por uma, pelo nome.
 
 **Pelo CLI (alternativa do dono).** No checkout da tag (seção 2), sempre pelo
-nome; o `verify_jwt` vem do `supabase/config.toml`, e as três abaixo levam
-`--no-verify-jwt` por segurança:
+nome; o `verify_jwt` vem do `supabase/config.toml`, e as cinco do segundo laço
+levam `--no-verify-jwt` por segurança:
 
 ```bash
-for fn in compute-eligibility send-email chat-completion generate-explanation create-portal-session; do
+for fn in compute-eligibility send-email chat-completion generate-explanation create-portal-session export-my-data delete-account; do
   supabase functions deploy "$fn" --project-ref krjirhlmdnxqqrpzmowz
 done
-for fn in create-checkout-session claim-session stripe-webhook; do
+for fn in create-checkout-session claim-session stripe-webhook lifecycle-emails unsubscribe; do
   supabase functions deploy "$fn" --project-ref krjirhlmdnxqqrpzmowz --no-verify-jwt
 done
 ```
 
-(No release das ondas 1–3, respeite a divisão entre os passos 1 e 3.)
+(No release das ondas 1–4, respeite a divisão entre os passos 1 e 3.)
 
 ## 5. Checklist pós-deploy
 
 Rode logo depois do passo 4. Nenhum item gasta dinheiro.
 
-- [ ] `supabase functions list --project-ref krjirhlmdnxqqrpzmowz`: as 8 com a
+- [ ] `supabase functions list --project-ref krjirhlmdnxqqrpzmowz`: as 12 com a
       versão nova e sem `e2e-login`.
 - [ ] CORS: origem de terceiro recebe 403 e o site oficial recebe 204.
 
@@ -291,3 +298,15 @@ pagamento e os e-mails do período anotados.
    [Settings → Billing → Customer portal](https://dashboard.stripe.com/settings/billing/portal).
    Sem isso, a `create-portal-session` responde 502 e a aba "Meu plano"
    mostra a mensagem de erro com o e-mail do suporte.
+7. **E-mails do ciclo de vida (DI-077).** Ficam em dry-run até o secret
+   `LIFECYCLE_EMAILS_DRY_RUN=false`. Antes de desligar: `generate-explanation`
+   novo no ar (senão saem duas boas-vindas), domínio verificado no Resend,
+   secret `EMAIL_UNSUBSCRIBE_SECRET` (`openssl rand -hex 32`, nunca trocar
+   depois), textos e frequência aprovados, pg_cron/pg_net e o agendamento
+   (exemplo no fim da `20261030000000`) e a página de descadastro (cabeçalho de
+   `supabase/functions/unsubscribe/index.ts`). Num release seguinte, desativar o
+   modelo `welcome_free` antigo com uma migration nova.
+8. **Prazos de retenção (DI-083).** Confirmar os prazos da `20261030000100`
+   (90 dias sem conta, 365 dias da lista de espera, 30 e 90 dias dos e-mails) e
+   o prazo legal de guarda dos registros de pagamento. A Política de Privacidade
+   espelha esses números.
