@@ -1,312 +1,914 @@
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowLeft, CheckCircle2, Lock, FileText, Briefcase, Plane, AlertTriangle, Sparkles, Loader2 } from 'lucide-react'
+import { useQuery } from '@tanstack/react-query'
+import {
+  AlertTriangle,
+  ArrowLeft,
+  Baby,
+  CheckCircle2,
+  ChevronDown,
+  Clock,
+  Compass,
+  FileText,
+  Globe2,
+  Heart,
+  Home,
+  Info,
+  ListChecks,
+  Lock,
+  Mail,
+  MessageSquare,
+  Printer,
+  RefreshCw,
+  RotateCcw,
+  Search,
+  Users,
+  type LucideIcon,
+} from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
-import { useAssessmentResult } from '@/hooks/useAssessmentResult'
+import { useAssessmentResult, type ResultPathway } from '@/hooks/useAssessmentResult'
+import { fetchFullAnalysis, getFullAnalysisErrorKind } from '@/hooks/useAssessment'
+import { Badge, Button, Card } from '@/components/ui'
+import { MarkdownText } from '@/components/MarkdownText'
+import {
+  getNationalityPath,
+  getPathDocuments,
+  getPathSteps,
+  getPathTimeline,
+  type NationalityPathCode,
+} from '@/data/nationality-paths'
+import { splitMarkdownSections, type MarkdownSection } from '@/lib/markdown-sections'
+import { OFFER } from '@/lib/offer'
+import { SUPPORT_EMAIL, mailtoHref } from '@/config/contact'
+import { isInAppBrowser } from '@/lib/in-app-browser'
+import { track } from '@/lib/analytics'
 import { cn } from '@/lib/utils'
 
-interface VisaOption {
-  code: string
-  name: string
-  match: string // 'high' | 'medium' | 'low'
-  description?: string
-  documents?: string[]
+// ── Constantes de apresentação ───────────────────────────────────────────────
+
+const PATH_ICONS: Record<NationalityPathCode, LucideIcon> = {
+  nacionalidade_descendencia_1: Users,
+  nacionalidade_descendencia_2: Users,
+  pesquisa_genealogica: Search,
+  nacionalidade_casamento: Heart,
+  nacionalidade_nascimento: Baby,
+  naturalizacao_residencia: Home,
+  reaquisicao_nacionalidade: RotateCcw,
+  nacionalidade_ex_colonias: Globe2,
+  analise_personalizada: Compass,
 }
 
-interface CachedResult {
-  score: { percentage: number; category: string; label: string }
-  visas: VisaOption[]
-  leadInfo: { fullName: string; email: string } | null
-  completedAt: string
-  assessmentId?: string | null
+const MATCH_ORDER: Record<ResultPathway['match'], number> = { strong: 0, possible: 1, weak: 2 }
+
+const MATCH_BADGE: Record<ResultPathway['match'], { label: string; variant: 'success' | 'warning' | 'neutral' }> = {
+  strong: { label: 'Alta compatibilidade', variant: 'success' },
+  possible: { label: 'Compatibilidade média', variant: 'warning' },
+  weak: { label: 'Compatibilidade baixa', variant: 'neutral' },
 }
 
-const visaDetails: Record<string, { description: string, docs: string[], icon: React.ElementType, timeline: string }> = {
-  'D7': {
-    description: 'O Visto D7 é destinado a quem tem rendimentos próprios (reformas, rendas, dividendos) e deseja residir em Portugal.',
-    timeline: '3 a 6 meses',
-    icon: Briefcase,
-    docs: [
-      'Passaporte válido',
-      'Comprovativo de rendimentos passivos regulares',
-      'Comprovativo de alojamento em Portugal',
-      'Registo criminal',
-      'Seguro de saúde ou PB4',
-      'NIF e conta bancária em Portugal com fundos suficientes'
-    ]
-  },
-  'D2': {
-    description: 'Para empreendedores ou profissionais independentes que pretendam abrir atividade ou empresa em Portugal.',
-    timeline: '4 a 8 meses',
-    icon: Briefcase,
-    docs: [
-      'Passaporte válido',
-      'Plano de Negócios detalhado',
-      'Comprovativo de capital para investimento',
-      'Constituição da empresa (se aplicável)',
-      'Registo criminal',
-      'Seguro de saúde'
-    ]
-  },
-  'CPLP': {
-    description: 'Autorização de Residência com regras facilitadas para cidadãos da CPLP (Comunidade dos Países de Língua Portuguesa).',
-    timeline: '1 a 3 meses',
-    icon: Plane,
-    docs: [
-      'Passaporte válido (cidadão CPLP)',
-      'Registo criminal',
-      'Comprovativo de meios de subsistência',
-      'Comprovativo de morada'
-    ]
-  },
-  'Reagrupamento Familiar': {
-    description: 'Para familiares de um cidadão residente legalmente em Portugal ou cidadão português.',
-    timeline: '3 a 6 meses',
-    icon: FileText,
-    docs: [
-      'Passaporte válido',
-      'Comprovativo de laço familiar (certidão casamento/nascimento)',
-      'Comprovativo de residência do familiar em Portugal',
-      'Comprovativo de alojamento e meios de subsistência',
-      'Registo criminal'
-    ]
-  },
-  'D8': {
-    description: 'Visto para Nómadas Digitais — permite viver em Portugal trabalhando remotamente para fora do país.',
-    timeline: '3 a 6 meses',
-    icon: Plane,
-    docs: [
-      'Passaporte válido',
-      'Contrato de trabalho ou prestação de serviços remoto',
-      'Comprovativos de rendimentos médios (últimos 3 meses)',
-      'Alojamento em Portugal',
-      'Registo criminal'
-    ]
+const SCORE_COLOR: Record<string, string> = {
+  alta: 'text-[hsl(var(--success))]',
+  media: 'text-[hsl(var(--warning))]',
+  baixa: 'text-primary',
+}
+
+/** Polling leve (só leitura) enquanto a análise completa ainda não existe: ~4 min. */
+const PREPARING_POLL_MS = 20_000
+const PREPARING_POLL_MAX = 12
+
+/** Seção da análise com requisitos e documentos (ver ANALYSIS_SECTIONS em _shared/prompts.ts). */
+const REQUIREMENTS_TITLE = /^requisitos/i
+
+const PATHS_ANCHOR = 'caminhos'
+const ANALYSIS_ANCHOR = 'analise-detalhada'
+
+/**
+ * Impressão / "Salvar em PDF" (DI-050): só o conteúdo da análise, sem
+ * navegação, barras fixas, banners nem botões; todas as seções do acordeão
+ * abertas. Os ancestrais do conteúdo perdem altura fixa, overflow e recuos do
+ * layout (sidebar, barra inferior) para o texto não ser cortado na 1.ª página.
+ */
+const PRINT_CSS = `
+@media print {
+  @page { margin: 14mm 12mm; }
+  html, body { background: #fff !important; }
+  aside, nav, header, footer, .fixed, .sticky, [data-sonner-toaster], [data-print-hide] { display: none !important; }
+  :has([data-print-root]) {
+    display: block !important;
+    position: static !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    box-shadow: none !important;
+    background: #fff !important;
   }
+  [data-accordion-panel] { display: block !important; }
+  [data-print-root] { max-width: none !important; padding: 0 !important; }
+  [data-print-root] section, [data-print-root] li { break-inside: avoid; }
+  [data-print-root] h2, [data-print-root] h3 { break-after: avoid; }
 }
+@media print {
+  body *:not([data-print-root]):not([data-print-root] *):not(:has([data-print-root])) { display: none !important; }
+}
+`
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function formatDate(iso: string | null | undefined): string | null {
+  if (!iso) return null
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return null
+  return new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' }).format(date)
+}
+
+function sortPathways(pathways: ResultPathway[]): ResultPathway[] {
+  return pathways
+    .map((p, index) => ({ p, index }))
+    .sort((a, b) => MATCH_ORDER[a.p.match] - MATCH_ORDER[b.p.match] || a.index - b.index)
+    .map(({ p }) => p)
+}
+
+function pathTitle(pathway: ResultPathway): string {
+  return getNationalityPath(pathway.code)?.title ?? pathway.name
+}
+
+function canPrint(): boolean {
+  if (typeof window === 'undefined' || typeof window.print !== 'function') return false
+  // Navegadores embutidos (Instagram, Facebook, TikTok) costumam ignorar window.print().
+  return !isInAppBrowser(typeof navigator !== 'undefined' ? navigator.userAgent : null)
+}
+
+function scrollToId(id: string) {
+  const el = document.getElementById(id)
+  if (!el) return
+  const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+  el.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' })
+}
+
+// ── Página ───────────────────────────────────────────────────────────────────
 
 export function AnalysisPage() {
-  const { hasAccess } = useAuth()
-  const { result: assessmentResult, isLoading, hasDbResult } = useAssessmentResult()
+  const { hasAccess, access, refreshUser } = useAuth()
+  const { result, isLoading, error: resultError, refetch: refetchResult, isFetching: refetchingResult } = useAssessmentResult()
   const hasFullAccess = hasAccess('full_analysis')
+  const canChat = hasAccess('chat')
+  const assessmentId = result?.assessmentId || null
 
-  // Adapt to the shape the rest of the component expects
-  const result: CachedResult | null = assessmentResult
-    ? {
-        score: {
-          percentage: assessmentResult.scorePercentage,
-          category: assessmentResult.scoreCategory,
-          label: assessmentResult.scoreLabel,
-        },
-        visas: assessmentResult.localVisas.map((v) => ({
-          code: v.code,
-          name: v.name,
-          match: v.match === 'strong' ? 'high' : v.match === 'possible' ? 'medium' : 'low',
-        })),
-        leadInfo: assessmentResult.leadName
-          ? { fullName: assessmentResult.leadName, email: assessmentResult.leadEmail ?? '' }
-          : null,
-        completedAt: assessmentResult.completedAt ?? '',
-        assessmentId: assessmentResult.assessmentId || null,
-      }
-    : null
+  const fullQuery = useQuery({
+    queryKey: ['full-analysis', assessmentId],
+    queryFn: () => fetchFullAnalysis(assessmentId as string),
+    enabled: hasFullAccess && !!assessmentId,
+    staleTime: 5 * 60 * 1000,
+    retry: (count, error) => getFullAnalysisErrorKind(error) === 'other' && count < 1,
+    refetchInterval: (query) => {
+      const ready = !!query.state.data?.ia_explanation_full?.trim()
+      if (query.state.status !== 'success' || ready) return false
+      return query.state.dataUpdateCount < PREPARING_POLL_MAX ? PREPARING_POLL_MS : false
+    },
+  })
+
+  const pathways = useMemo(() => sortPathways(result?.pathways ?? []), [result?.pathways])
+  const topPathway = pathways[0] ?? null
+
+  const fullText = fullQuery.data?.ia_explanation_full?.trim() || null
+  const analysis = useMemo(() => splitMarkdownSections(fullText), [fullText])
+  // null = ainda não mexeu: só a primeira seção aberta.
+  const [openIds, setOpenIds] = useState<ReadonlySet<string> | null>(null)
+  const firstSectionId = analysis.sections[0]?.id
+  const effectiveOpen = useMemo(
+    () => openIds ?? new Set(firstSectionId ? [firstSectionId] : []),
+    [openIds, firstSectionId],
+  )
+  const setSectionOpen = (id: string, open: boolean) => {
+    const next = new Set(effectiveOpen)
+    if (open) next.add(id)
+    else next.delete(id)
+    setOpenIds(next)
+  }
+
+  const fullErrorKind = fullQuery.isError ? getFullAnalysisErrorKind(fullQuery.error) : null
+  const requirementsSection = analysis.sections.find((section) => REQUIREMENTS_TITLE.test(section.title)) ?? null
+
+  // Evento uma vez por visita, quando há conteúdo pago para mostrar.
+  const viewedRef = useRef(false)
+  useEffect(() => {
+    if (viewedRef.current || !hasFullAccess || !result) return
+    viewedRef.current = true
+    track('analysis_viewed', { pathway: topPathway?.code })
+  }, [hasFullAccess, result, topPathway?.code])
+
+  // O servidor é a autoridade (DI-016): se ele diz que não há acesso ativo,
+  // recarrega a assinatura uma vez para a tela mostrar o estado certo
+  // (acesso expirado ou oferta de €30) em vez de confiar no cache do cliente.
+  const refreshedRef = useRef(false)
+  useEffect(() => {
+    if (fullErrorKind !== 'payment_required' || refreshedRef.current) return
+    refreshedRef.current = true
+    void refreshUser()
+  }, [fullErrorKind, refreshUser])
 
   if (!hasFullAccess) {
-    return (
-      <div className="flex h-[80vh] flex-col items-center justify-center space-y-4">
-        <Lock className="h-16 w-16 text-gray-300" />
-        <h2 className="text-xl font-bold text-gray-700">Acesso Restrito</h2>
-        <p className="text-center text-gray-500">
-          A análise completa é exclusiva para quem desbloqueou o diagnóstico.
-        </p>
-        <Link
-          to="/checkout"
-          state={{ plan: 'one_time', assessmentId: assessmentResult?.assessmentId }}
-          className="mt-4 flex items-center gap-2 rounded-xl bg-brand-700 px-5 py-2.5 text-sm font-bold text-white shadow-sm transition hover:bg-brand-600"
-        >
-          Desbloquear por €30
-        </Link>
-        <Link to="/dashboard" className="mt-2 text-sm text-gray-500 hover:text-brand-600">
-          Voltar ao Dashboard
-        </Link>
-      </div>
-    )
+    return <NoAccess expired={access.state === 'expired'} assessmentId={assessmentId} />
   }
 
   if (isLoading) {
     return (
-      <div className="flex h-[60vh] flex-col items-center justify-center gap-3">
-        <Loader2 className="h-8 w-8 animate-spin text-brand-600" />
-        <p className="text-sm text-gray-500">A carregar a sua análise…</p>
+      <div className="flex min-h-[50dvh] flex-col items-center justify-center gap-3" role="status">
+        <RefreshCw className="h-7 w-7 animate-spin text-primary" aria-hidden="true" />
+        <p className="text-base text-muted-foreground">Carregando sua análise…</p>
       </div>
+    )
+  }
+
+  if (!result && resultError) {
+    return (
+      <StateMessage
+        icon={AlertTriangle}
+        title="Não foi possível carregar seu diagnóstico"
+        description="Verifique sua conexão e tente de novo."
+        action={
+          <Button loading={refetchingResult} onClick={() => void refetchResult()}>
+            Tentar de novo
+          </Button>
+        }
+        secondary={<SupportLink subject="Não consigo ver minha análise completa" className="self-center" />}
+      />
     )
   }
 
   if (!result) {
     return (
-      <div className="flex h-[80vh] flex-col items-center justify-center space-y-4">
-        <AlertTriangle className="h-16 w-16 text-amber-300" />
-        <h2 className="text-xl font-bold text-gray-700">Sem Diagnóstico</h2>
-        <p className="text-center text-gray-500">
-          Não encontrámos o seu diagnóstico de elegibilidade.
-        </p>
-        <Link
-          to="/quiz"
-          className="mt-4 flex items-center gap-2 rounded-xl bg-brand-700 px-5 py-2.5 text-sm font-bold text-white shadow-sm transition hover:bg-brand-600"
-        >
-          Fazer o Quiz
-        </Link>
-      </div>
+      <StateMessage
+        icon={AlertTriangle}
+        title="Ainda não encontramos seu diagnóstico"
+        description="Faça o diagnóstico gratuito para ver os caminhos para a nacionalidade portuguesa que combinam com o seu perfil."
+        action={
+          <Button asChild>
+            <Link to="/quiz">Fazer o diagnóstico</Link>
+          </Button>
+        }
+      />
     )
   }
 
+  const diagnosedAt = formatDate(result.completedAt)
+
   return (
-    <div className="mx-auto max-w-4xl space-y-8">
-      {/* Header */}
-      <div>
-        <Link to="/dashboard" className="mb-4 inline-flex items-center text-sm font-medium text-gray-500 hover:text-gray-900">
-          <ArrowLeft className="mr-1 h-4 w-4" />
-          Voltar ao Dashboard
-        </Link>
-        <h1 className="text-3xl font-bold text-gray-900">Análise Jurídica Completa</h1>
-        <p className="mt-2 text-gray-500">
-          Abaixo estão detalhados os resultados baseados nas suas respostas, com todas as opções de vistos disponíveis e os documentos necessários.
-        </p>
+    <article data-print-root className="mx-auto w-full max-w-3xl space-y-6 text-foreground sm:space-y-8">
+      <style>{PRINT_CSS}</style>
+
+      {/* Cabeçalho */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between gap-3" data-print-hide>
+          <Link
+            to="/dashboard"
+            className="-ml-2 inline-flex min-h-11 items-center gap-1.5 rounded-lg px-2 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+          >
+            <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+            Voltar ao painel
+          </Link>
+          {canPrint() && (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                track('analysis_pdf_clicked')
+                window.print()
+              }}
+            >
+              <Printer aria-hidden="true" />
+              Salvar em PDF
+            </Button>
+          )}
+        </div>
+        <p className="hidden text-sm text-muted-foreground print:block">Doutor Imigrante</p>
+        <div className="space-y-1.5">
+          <h1 className="font-display text-[1.75rem] font-semibold leading-tight [text-wrap:balance] sm:text-4xl">
+            Sua análise completa
+          </h1>
+          <p className="text-base text-muted-foreground [text-wrap:pretty]">
+            {diagnosedAt ? `Diagnóstico de ${diagnosedAt}.` : 'Feita a partir das suas respostas no diagnóstico.'}
+          </p>
+        </div>
       </div>
 
-      {/* Score Overview */}
-      <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm sm:p-8">
-        <h2 className="text-lg font-bold text-gray-900">Probabilidade de Sucesso</h2>
-        <div className="mt-6 flex flex-col items-center sm:flex-row sm:gap-12">
-          {/* Circular Progress */}
-          <div className="relative flex h-32 w-32 shrink-0 items-center justify-center rounded-full bg-gray-50">
-            <svg className="absolute h-full w-full -rotate-90 transform" viewBox="0 0 36 36">
-              <path
-                className="text-gray-200"
-                d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="3"
-              />
-              <path
-                className={cn(
-                  result.score.category === 'alta' ? 'text-emerald-500' :
-                  result.score.category === 'media' ? 'text-amber-500' : 'text-blue-500'
-                )}
-                strokeDasharray={`${result.score.percentage}, 100`}
-                d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="3"
-                strokeLinecap="round"
-              />
-            </svg>
-            <div className="absolute flex flex-col items-center">
-              <span className="text-2xl font-bold text-gray-900">{result.score.percentage}%</span>
-            </div>
-          </div>
-          
-          <div className="mt-6 text-center sm:mt-0 sm:text-left">
-            <p className="text-xl font-bold text-gray-900">{result.score.label}</p>
-            <p className="mt-2 text-sm text-gray-600">
-              Com base no seu perfil financeiro, qualificações e nacionalidade, a nossa análise preliminar indica que o seu processo tem {result.score.category === 'alta' ? 'ótimas' : result.score.category === 'media' ? 'boas' : 'algumas'} chances de sucesso, dependendo da via escolhida.
+      {/* Resumo: índice de elegibilidade + 3 pontos */}
+      <SummaryCard
+        score={{ percentage: result.scorePercentage, category: result.scoreCategory, label: result.scoreLabel }}
+        pathway={topPathway}
+        others={pathways.slice(1)}
+        canChat={canChat}
+      />
+
+      {/* Atalhos */}
+      <SectionChips
+        sections={fullText ? analysis.sections : []}
+        onOpenSection={(id) => {
+          if (analysis.sections.some((s) => s.id === id)) setSectionOpen(id, true)
+        }}
+      />
+
+      {/* Caminhos para a nacionalidade */}
+      <section id={PATHS_ANCHOR} aria-labelledby={`${PATHS_ANCHOR}-title`} className="scroll-mt-20 space-y-4">
+        <div className="space-y-1">
+          <h2 id={`${PATHS_ANCHOR}-title`} className="font-display text-[1.375rem] font-semibold leading-snug sm:text-2xl">
+            Caminhos para a nacionalidade
+          </h2>
+          {pathways.length > 1 && (
+            <p className="text-base text-muted-foreground [text-wrap:pretty]">Em ordem de compatibilidade com as suas respostas.</p>
+          )}
+        </div>
+        {pathways.length > 0 ? (
+          <ul className="space-y-3">
+            {pathways.map((pathway) => (
+              <li key={pathway.code}>
+                <PathwayCard pathway={pathway} />
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <Card variant="muted">
+            <p className="text-base">
+              Suas respostas não indicaram um caminho específico. A análise detalhada abaixo explica as possibilidades do
+              seu caso.
             </p>
-          </div>
+          </Card>
+        )}
+        {pathways.length > 0 && pathways.every((p) => getPathDocuments(getNationalityPath(p.code)).length === 0) && (
+          <p className="flex gap-2 text-sm text-muted-foreground">
+            <Info className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+            {requirementsSection ? (
+              <span>
+                Requisitos e documentos de cada caminho: veja{' '}
+                <a
+                  href={`#${requirementsSection.id}`}
+                  data-print-hide
+                  onClick={(event) => {
+                    event.preventDefault()
+                    setSectionOpen(requirementsSection.id, true)
+                    requestAnimationFrame(() => scrollToId(requirementsSection.id))
+                  }}
+                  className="py-[14px] font-medium text-primary underline decoration-primary/40 underline-offset-2 hover:decoration-primary"
+                >
+                  {requirementsSection.title}
+                </a>
+                <span className="hidden print:inline">“{requirementsSection.title}”</span> na análise detalhada.
+              </span>
+            ) : (
+              <span>Requisitos e documentos de cada caminho: veja a análise detalhada abaixo.</span>
+            )}
+          </p>
+        )}
+      </section>
+
+      {/* Análise detalhada (IA) */}
+      <section id={ANALYSIS_ANCHOR} aria-labelledby={`${ANALYSIS_ANCHOR}-title`} className="scroll-mt-20 space-y-4">
+        <h2 id={`${ANALYSIS_ANCHOR}-title`} className="font-display text-[1.375rem] font-semibold leading-snug sm:text-2xl">
+          Análise detalhada
+        </h2>
+        {!assessmentId ? (
+          <Card variant="muted">
+            <p className="text-base [text-wrap:pretty]">
+              A análise detalhada aparece aqui assim que o seu diagnóstico estiver salvo na sua conta.
+              {SUPPORT_EMAIL ? ' Se ela não aparecer, fale com o suporte.' : ''}
+            </p>
+            <div className="mt-3" data-print-hide>
+              <SupportLink subject="Minha análise completa não apareceu" />
+            </div>
+          </Card>
+        ) : fullQuery.isPending ? (
+          <AnalysisSkeleton />
+        ) : fullErrorKind === 'payment_required' ? (
+          <AccessEndedCard />
+        ) : fullErrorKind === 'auth_required' ? (
+          <SessionExpiredCard />
+        ) : fullErrorKind ? (
+          <AnalysisError
+            notFound={fullErrorKind === 'not_found'}
+            onRetry={() => fullQuery.refetch()}
+            retrying={fullQuery.isFetching}
+          />
+        ) : fullText ? (
+          <AnalysisAccordion
+            intro={analysis.intro}
+            sections={analysis.sections}
+            openIds={effectiveOpen}
+            onToggle={(id) => setSectionOpen(id, !effectiveOpen.has(id))}
+          />
+        ) : (
+          <AnalysisPreparing onRefresh={() => fullQuery.refetch()} refreshing={fullQuery.isFetching} />
+        )}
+      </section>
+
+      {/* Próximos passos (some quando o servidor nega o acesso: a ação é a do card acima) */}
+      {fullErrorKind !== 'payment_required' && <NextStepsCard canChat={canChat} />}
+
+      <p className="border-t pt-4 text-sm leading-relaxed text-muted-foreground [text-wrap:pretty]">
+        Análise informativa, gerada por IA a partir das suas respostas. Não constitui aconselhamento jurídico. Antes de
+        dar entrada no pedido, confirme os requisitos atuais nas fontes oficiais, como o IRN.
+      </p>
+    </article>
+  )
+}
+
+// ── Blocos ───────────────────────────────────────────────────────────────────
+
+function joinTitles(titles: string[]): string {
+  if (titles.length <= 1) return titles[0] ?? ''
+  return `${titles.slice(0, -1).join(', ')} e ${titles[titles.length - 1]}`
+}
+
+function SummaryCard({
+  score,
+  pathway,
+  others,
+  canChat,
+}: {
+  score: { percentage: number; category: string; label: string }
+  pathway: ResultPathway | null
+  others: ResultPathway[]
+  canChat: boolean
+}) {
+  const path = pathway ? getNationalityPath(pathway.code) : null
+  const firstStep = getPathSteps(path)[0]
+  const badge = pathway ? MATCH_BADGE[pathway.match] : null
+  const value = Math.max(0, Math.min(100, Math.round(score.percentage)))
+  return (
+    <Card variant="elevated">
+      <h2 id="resumo-title" className="sr-only">
+        Resumo
+      </h2>
+      <div className="flex items-center gap-4">
+        <div className="relative flex h-16 w-16 shrink-0 items-center justify-center" aria-hidden="true">
+          <svg className="absolute h-full w-full -rotate-90" viewBox="0 0 36 36">
+            <circle cx="18" cy="18" r="15.9155" fill="none" stroke="hsl(var(--muted))" strokeWidth="3.2" />
+            <circle
+              cx="18"
+              cy="18"
+              r="15.9155"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="3.2"
+              strokeLinecap="round"
+              strokeDasharray={`${value} 100`}
+              className={SCORE_COLOR[score.category] ?? 'text-primary'}
+            />
+          </svg>
+          <span className="text-lg font-bold">{value}%</span>
+        </div>
+        <div className="min-w-0 space-y-0.5">
+          <p className="text-sm font-medium text-muted-foreground">Índice de elegibilidade</p>
+          <p className="text-lg font-semibold leading-snug">
+            <span className="sr-only">{value}%, </span>
+            {score.label}
+          </p>
         </div>
       </div>
 
-      {/* Vistos Detalhados */}
-      <div>
-        <h2 className="mb-4 text-xl font-bold text-gray-900">Opções de Vistos Adequados</h2>
-        <div className="grid gap-6">
-          {result.visas.map((visa, idx) => {
-            const details = visaDetails[visa.name] || {
-              description: 'Opção de visto com base no seu perfil.',
-              timeline: 'Variável',
-              icon: FileText,
-              docs: ['Passaporte válido', 'Registo criminal', 'Alojamento'],
-            }
-            const Icon = details.icon
+      <ul className="mt-4 space-y-3 border-t pt-4 text-base">
+        <li className="flex gap-3">
+          <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-primary" aria-hidden="true" />
+          <span className="[text-wrap:pretty]">
+            {pathway && badge ? (
+              <>
+                Caminho mais compatível: <strong className="font-semibold">{pathTitle(pathway)}</strong>{' '}
+                <span className="text-muted-foreground">({badge.label.toLowerCase()})</span>.
+              </>
+            ) : (
+              'Suas respostas não indicaram um caminho específico: a análise detalhada explica as possibilidades.'
+            )}
+          </span>
+        </li>
+        {others.length > 0 ? (
+          <li className="flex gap-3">
+            <Compass className="mt-0.5 h-5 w-5 shrink-0 text-primary" aria-hidden="true" />
+            <span className="[text-wrap:pretty]">
+              {others.length === 1 ? 'Outro caminho possível: ' : 'Outros caminhos possíveis: '}
+              {joinTitles(others.map(pathTitle))}.
+            </span>
+          </li>
+        ) : (
+          pathway?.reason && (
+            <li className="flex gap-3">
+              <Info className="mt-0.5 h-5 w-5 shrink-0 text-primary" aria-hidden="true" />
+              <span className="[text-wrap:pretty]">{pathway.reason}</span>
+            </li>
+          )
+        )}
+        <li className="flex gap-3">
+          <ListChecks className="mt-0.5 h-5 w-5 shrink-0 text-primary" aria-hidden="true" />
+          <span className="[text-wrap:pretty]">
+            {firstStep
+              ? `Primeiro passo: ${firstStep.label}.`
+              : canChat
+                ? 'Veja os requisitos na análise detalhada e tire dúvidas no chat IA.'
+                : 'Veja os requisitos na análise detalhada.'}
+          </span>
+        </li>
+      </ul>
 
-            return (
-              <div key={idx} className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
-                <div className="border-b border-gray-100 bg-gray-50/50 p-6">
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-center gap-4">
-                      <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-brand-100 text-brand-700">
-                        <Icon className="h-6 w-6" />
-                      </div>
-                      <div>
-                        <h3 className="text-lg font-bold text-gray-900">{visa.name}</h3>
-                        <div className="mt-1 flex items-center gap-2 text-sm">
-                          <span className={cn(
-                            'rounded-full px-2.5 py-0.5 font-medium',
-                            visa.match === 'high' ? 'bg-emerald-100 text-emerald-700' :
-                            visa.match === 'medium' ? 'bg-amber-100 text-amber-700' :
-                            'bg-blue-100 text-blue-700'
-                          )}>
-                            {visa.match === 'high' ? 'Alta Correspondência' :
-                             visa.match === 'medium' ? 'Boa Correspondência' : 'Possibilidade'}
-                          </span>
-                          <span className="text-gray-400">•</span>
-                          <span className="text-gray-500">Tempo estimado: {details.timeline}</span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                  <p className="mt-4 text-sm text-gray-600">{details.description}</p>
-                </div>
-                
-                <div className="p-6">
-                  <h4 className="mb-3 text-sm font-semibold uppercase tracking-wider text-gray-500">Documentação Principal Exigida</h4>
-                  <ul className="grid gap-2 sm:grid-cols-2">
-                    {details.docs.map((doc, docIdx) => (
-                      <li key={docIdx} className="flex items-start gap-2 text-sm text-gray-700">
-                        <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-brand-500" />
-                        <span>{doc}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              </div>
-            )
-          })}
+      <p className="mt-4 text-sm leading-relaxed text-muted-foreground [text-wrap:pretty]">
+        O índice resume as suas respostas e não é garantia de aprovação.
+      </p>
+    </Card>
+  )
+}
+
+function SectionChips({
+  sections,
+  onOpenSection,
+}: {
+  sections: MarkdownSection[]
+  onOpenSection: (id: string) => void
+}) {
+  const chips = [
+    { id: PATHS_ANCHOR, label: 'Caminhos' },
+    ...(sections.length > 1 ? sections.map((s) => ({ id: s.id, label: s.title })) : [{ id: ANALYSIS_ANCHOR, label: 'Análise detalhada' }]),
+  ]
+  return (
+    <nav aria-label="Atalhos da análise" data-print-hide>
+      {/*
+        w-0 + min-w-full: a fileira rola na horizontal sem alargar o layout
+        (sem isso, a largura dos chips vira a largura mínima da página no celular).
+      */}
+      <ul className="flex w-0 min-w-full gap-2 overflow-x-auto py-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {chips.map((chip) => (
+          <li key={chip.id} className="shrink-0">
+            <a
+              href={`#${chip.id}`}
+              onClick={(event) => {
+                event.preventDefault()
+                // Abre a seção do acordeão (se for uma) e rola até ela.
+                onOpenSection(chip.id)
+                requestAnimationFrame(() => scrollToId(chip.id))
+              }}
+              className="inline-flex min-h-11 items-center whitespace-nowrap rounded-xl border bg-card px-4 text-sm font-medium text-foreground hover:bg-muted"
+            >
+              {chip.label}
+            </a>
+          </li>
+        ))}
+      </ul>
+    </nav>
+  )
+}
+
+function PathwayCard({ pathway }: { pathway: ResultPathway }) {
+  const path = getNationalityPath(pathway.code)
+  const Icon = path ? PATH_ICONS[path.code] : FileText
+  const badge = MATCH_BADGE[pathway.match]
+  const timeline = getPathTimeline(path)
+  const documents = getPathDocuments(path)
+  const steps = getPathSteps(path)
+
+  return (
+    <Card className="space-y-3">
+      <div className="flex items-start gap-3">
+        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary/[.08] text-primary">
+          <Icon className="h-5 w-5" aria-hidden="true" />
+        </div>
+        <div className="min-w-0 space-y-1.5">
+          <h3 className="text-lg font-semibold leading-snug [text-wrap:balance]">
+            {pathTitle(pathway)}
+          </h3>
+          <Badge variant={badge.variant} size="sm">
+            {badge.label}
+          </Badge>
         </div>
       </div>
 
-      {/* IA Full Explanation (shown when generate-explanation has run) */}
-      {hasDbResult && assessmentResult?.iaExplanationFull && (
-        <div className="rounded-2xl border border-purple-100 bg-white p-6 shadow-sm sm:p-8">
-          <div className="mb-4 flex items-center gap-2">
-            <Sparkles className="h-5 w-5 text-purple-500" />
-            <h2 className="text-lg font-bold text-gray-900">Análise Jurídica IA</h2>
-          </div>
-          <div className="prose prose-sm max-w-none text-gray-700 whitespace-pre-line">
-            {assessmentResult.iaExplanationFull}
-          </div>
+      {pathway.reason ? (
+        <p className="text-base leading-relaxed [text-wrap:pretty]">{pathway.reason}</p>
+      ) : (
+        path?.summary && <p className="text-base leading-relaxed text-muted-foreground [text-wrap:pretty]">{path.summary}</p>
+      )}
+
+      {timeline && (
+        <p className="flex items-start gap-2 text-sm">
+          <Clock className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+          <span>
+            <span className="font-medium">Prazo típico:</span> {timeline}
+          </span>
+        </p>
+      )}
+
+      {documents.length > 0 && (
+        <div>
+          <h4 className="text-sm font-semibold">Documentos principais</h4>
+          <ul className="mt-2 grid gap-2 sm:grid-cols-2">
+            {documents.map((doc) => (
+              <li key={doc.key} className="flex items-start gap-2 text-sm">
+                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+                <span>
+                  {doc.label}
+                  {doc.hint && <span className="block text-muted-foreground">{doc.hint}</span>}
+                </span>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 
-      {/* Next Steps CTA */}
-      <div className="rounded-2xl border border-brand-100 bg-brand-50 p-6 sm:p-8">
-        <h2 className="text-lg font-bold text-brand-900">Próximos Passos</h2>
-        <p className="mt-2 text-sm text-brand-700">
-          Recomendamos que inicie a recolha da documentação e utilize o nosso Chat IA para esclarecer dúvidas específicas sobre cada tipo de documento ou exigência legal.
-        </p>
-        <div className="mt-6 flex flex-col gap-3 sm:flex-row">
-          <Link
-            to="/dashboard/chat"
-            className="inline-flex justify-center rounded-xl bg-brand-600 px-5 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-brand-500"
-          >
-            Falar com a IA
-          </Link>
-          <a
-            href="mailto:suporte@doutorimigrante.com"
-            className="inline-flex justify-center rounded-xl bg-white px-5 py-3 text-sm font-bold text-brand-700 shadow-sm transition hover:bg-gray-50"
-          >
-            Contactar Equipa Jurídica
-          </a>
+      {steps.length > 0 && (
+        <div>
+          <h4 className="text-sm font-semibold">Próximos passos</h4>
+          <ol className="mt-2 list-decimal space-y-1.5 pl-5 text-sm marker:font-semibold marker:text-primary">
+            {steps.map((step) => (
+              <li key={step.key} className="pl-1">
+                {step.label}
+                {step.detail && <span className="block text-muted-foreground">{step.detail}</span>}
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
+    </Card>
+  )
+}
+
+function AnalysisAccordion({
+  intro,
+  sections,
+  openIds,
+  onToggle,
+}: {
+  intro: string
+  sections: MarkdownSection[]
+  openIds: ReadonlySet<string>
+  onToggle: (id: string) => void
+}) {
+  return (
+    <div className="space-y-3">
+      {intro && (
+        <Card variant="muted">
+          <MarkdownText minHeadingLevel={4}>{intro}</MarkdownText>
+        </Card>
+      )}
+      <div className="divide-y overflow-hidden rounded-lg border bg-card shadow-[var(--shadow-sm)]">
+        {sections.map((section) => (
+          <AccordionItem
+            key={section.id}
+            section={section}
+            open={openIds.has(section.id)}
+            onToggle={() => onToggle(section.id)}
+          />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function AccordionItem({ section, open, onToggle }: { section: MarkdownSection; open: boolean; onToggle: () => void }) {
+  const panelId = `${section.id}-painel`
+  const buttonId = `${section.id}-botao`
+  return (
+    <section id={section.id} className="scroll-mt-20">
+      <h3>
+        <button
+          id={buttonId}
+          type="button"
+          aria-expanded={open}
+          aria-controls={panelId}
+          onClick={onToggle}
+          className="flex min-h-14 w-full items-center justify-between gap-3 px-5 py-3 text-left text-lg font-semibold leading-snug hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:px-6"
+        >
+          <span className="[text-wrap:balance]">{section.title}</span>
+          <ChevronDown
+            className={cn(
+              'h-5 w-5 shrink-0 text-muted-foreground transition-transform duration-200 ease-[cubic-bezier(.25,1,.5,1)] print:hidden',
+              open && 'rotate-180',
+            )}
+            aria-hidden="true"
+          />
+        </button>
+      </h3>
+      <div
+        id={panelId}
+        role="region"
+        aria-labelledby={buttonId}
+        hidden={!open}
+        data-accordion-panel
+        className="px-5 pb-5 sm:px-6"
+      >
+        {section.body ? (
+          <MarkdownText minHeadingLevel={4}>{section.body}</MarkdownText>
+        ) : (
+          <p className="text-base text-muted-foreground">Sem conteúdo nesta seção.</p>
+        )}
+      </div>
+    </section>
+  )
+}
+
+function AnalysisSkeleton() {
+  return (
+    <Card role="status" aria-label="Carregando a análise detalhada">
+      <div className="animate-pulse space-y-3" aria-hidden="true">
+        <div className="h-5 w-2/3 rounded bg-muted" />
+        <div className="h-4 w-full rounded bg-muted" />
+        <div className="h-4 w-11/12 rounded bg-muted" />
+        <div className="h-4 w-4/5 rounded bg-muted" />
+      </div>
+    </Card>
+  )
+}
+
+function AnalysisPreparing({ onRefresh, refreshing }: { onRefresh: () => void; refreshing: boolean }) {
+  return (
+    <Card variant="muted" role="status">
+      <div className="flex gap-3">
+        <RefreshCw className="mt-0.5 h-5 w-5 shrink-0 text-primary" aria-hidden="true" />
+        <div className="space-y-1">
+          <p className="text-base font-semibold">Sua análise detalhada está sendo preparada</p>
+          <p className="text-sm leading-relaxed text-muted-foreground">
+            Esta página confere de novo sozinha por alguns minutos. Você também pode atualizar agora.
+            {SUPPORT_EMAIL ? ' Se ela não aparecer, fale com o suporte.' : ''}
+          </p>
         </div>
       </div>
+      <div className="mt-4 flex flex-col gap-2 sm:flex-row" data-print-hide>
+        <Button variant="secondary" loading={refreshing} onClick={onRefresh}>
+          Atualizar
+        </Button>
+        <SupportLink subject="Minha análise completa não apareceu" />
+      </div>
+    </Card>
+  )
+}
+
+function AnalysisError({ notFound, onRetry, retrying }: { notFound: boolean; onRetry: () => void; retrying: boolean }) {
+  return (
+    <Card variant="muted" role="alert">
+      <div className="flex gap-3">
+        <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" aria-hidden="true" />
+        <div className="space-y-1">
+          <p className="text-base font-semibold">
+            {notFound ? 'Não encontramos a análise deste diagnóstico na sua conta' : 'Não foi possível carregar a análise'}
+          </p>
+          <p className="text-sm leading-relaxed text-muted-foreground">
+            {notFound
+              ? 'Confira se você entrou com o mesmo e-mail usado no diagnóstico e na compra.'
+              : 'Verifique sua conexão e tente de novo.'}
+          </p>
+        </div>
+      </div>
+      <div className="mt-4 flex flex-col gap-2 sm:flex-row" data-print-hide>
+        {!notFound && (
+          <Button variant="secondary" loading={retrying} onClick={onRetry}>
+            Tentar de novo
+          </Button>
+        )}
+        <SupportLink subject="Não consigo ver minha análise completa" />
+      </div>
+    </Card>
+  )
+}
+
+/** O servidor recusou a análise (PT402): sem acesso ativo nesta conta. */
+function AccessEndedCard() {
+  return (
+    <Card variant="muted" role="status">
+      <div className="flex gap-3">
+        <Lock className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" aria-hidden="true" />
+        <div className="space-y-1">
+          <p className="text-base font-semibold">Seu acesso à análise completa não está ativo</p>
+          <p className="text-sm leading-relaxed text-muted-foreground">
+            O acesso dura {OFFER.accessDays} dias depois do pagamento. Veja no painel as opções para continuar.
+          </p>
+        </div>
+      </div>
+      <Button asChild className="mt-4 w-full sm:w-auto" data-print-hide>
+        <Link to="/dashboard?acesso=expirado">Ver opções no painel</Link>
+      </Button>
+    </Card>
+  )
+}
+
+/** Sessão expirada no meio da visita (PT401): entrar de novo e voltar para cá. */
+function SessionExpiredCard() {
+  return (
+    <Card variant="muted" role="alert">
+      <div className="flex gap-3">
+        <Lock className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" aria-hidden="true" />
+        <div className="space-y-1">
+          <p className="text-base font-semibold">Sua sessão expirou</p>
+          <p className="text-sm leading-relaxed text-muted-foreground">
+            Entre de novo com o seu e-mail para ver a análise detalhada.
+          </p>
+        </div>
+      </div>
+      <Button asChild className="mt-4 w-full sm:w-auto" data-print-hide>
+        <Link to={`/login?next=${encodeURIComponent('/dashboard/analysis')}`}>Entrar de novo</Link>
+      </Button>
+    </Card>
+  )
+}
+
+function NextStepsCard({ canChat }: { canChat: boolean }) {
+  return (
+    <section aria-labelledby="continuar-title" data-print-hide className="print:hidden">
+      <h2 id="continuar-title" className="text-lg font-semibold leading-snug">
+        {canChat ? 'Tire dúvidas e organize seus documentos' : 'Organize seus documentos'}
+      </h2>
+      <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+        {canChat && (
+          <Button asChild>
+            <Link to="/dashboard/chat">
+              <MessageSquare aria-hidden="true" />
+              Tirar dúvidas no chat IA
+            </Link>
+          </Button>
+        )}
+        <Button asChild variant={canChat ? 'secondary' : 'primary'}>
+          <Link to="/dashboard/documents">
+            <FileText aria-hidden="true" />
+            Meus documentos
+          </Link>
+        </Button>
+      </div>
+      {SUPPORT_EMAIL && (
+        <div className="mt-3">
+          <SupportLink subject="Dúvida sobre minha análise" />
+        </div>
+      )}
+    </section>
+  )
+}
+
+function SupportLink({ subject, className }: { subject: string; className?: string }) {
+  if (!SUPPORT_EMAIL) return null
+  return (
+    <Button asChild variant="link" size="sm" className={cn('self-start px-0', className)}>
+      <a href={mailtoHref(SUPPORT_EMAIL, subject)}>
+        <Mail aria-hidden="true" />
+        Falar com o suporte
+      </a>
+    </Button>
+  )
+}
+
+function NoAccess({ expired, assessmentId }: { expired: boolean; assessmentId: string | null }) {
+  if (expired) {
+    return (
+      <StateMessage
+        icon={Lock}
+        title="Seu acesso à análise completa terminou"
+        description={`O acesso de ${OFFER.accessDays} dias depois do pagamento chegou ao fim. Veja no painel as opções para continuar.`}
+        action={
+          <Button asChild>
+            <Link to="/dashboard?acesso=expirado">Ver opções no painel</Link>
+          </Button>
+        }
+      />
+    )
+  }
+  return (
+    <StateMessage
+      icon={Lock}
+      title="A análise completa é para quem desbloqueou o diagnóstico"
+      description={`Por ${OFFER.priceLabel}, você recebe a análise do seu caminho, os requisitos e documentos de cada caminho e os próximos passos, com acesso por ${OFFER.accessDays} dias.`}
+      action={
+        <Button asChild variant="pay" size="lg">
+          <Link to="/checkout" state={{ plan: 'one_time', assessmentId }}>
+            Desbloquear por {OFFER.priceLabel}
+          </Link>
+        </Button>
+      }
+      secondary={
+        <Button asChild variant="link" size="sm">
+          <Link to="/dashboard">Voltar ao painel</Link>
+        </Button>
+      }
+    />
+  )
+}
+
+function StateMessage({
+  icon: Icon,
+  title,
+  description,
+  action,
+  secondary,
+}: {
+  icon: LucideIcon
+  title: string
+  description: string
+  action?: React.ReactNode
+  secondary?: React.ReactNode
+}) {
+  return (
+    <div className="mx-auto flex min-h-[60dvh] max-w-md flex-col items-center justify-center gap-4 text-center">
+      <div className="flex h-14 w-14 items-center justify-center rounded-full bg-muted">
+        <Icon className="h-7 w-7 text-muted-foreground" aria-hidden="true" />
+      </div>
+      <h1 className="font-display text-2xl font-semibold leading-tight [text-wrap:balance]">{title}</h1>
+      <p className="text-base leading-relaxed text-muted-foreground [text-wrap:pretty]">{description}</p>
+      {action && <div className="mt-2 flex w-full flex-col items-center gap-2">{action}</div>}
+      {secondary}
     </div>
   )
 }

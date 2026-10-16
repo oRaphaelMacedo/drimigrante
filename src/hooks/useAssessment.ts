@@ -6,7 +6,27 @@
 
 import { useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
-import type { Assessment } from '@/lib/database.types'
+import type { Assessment, AssessmentResultClientRow, FullAnalysisRow } from '@/lib/database.types'
+
+/**
+ * Colunas de assessment_results que o cliente pode ler (DI-016).
+ * Nunca use `select('*')` nem `assessment_results(*)`: o papel `authenticated`
+ * não tem SELECT em ia_explanation_full (a consulta inteira falharia com
+ * "permission denied"). A análise completa vem da RPC `get_full_analysis`.
+ */
+export const ASSESSMENT_RESULT_CLIENT_COLUMNS =
+  'assessment_id, score_numeric, score_category, suggested_visa_types, ia_explanation_short, computed_at'
+
+/** Campos de ASSESSMENT_RESULT_CLIENT_COLUMNS. */
+export type AssessmentResultClient = Pick<
+  AssessmentResultClientRow,
+  | 'assessment_id'
+  | 'score_numeric'
+  | 'score_category'
+  | 'suggested_visa_types'
+  | 'ia_explanation_short'
+  | 'computed_at'
+>
 
 export interface PersistAssessmentParams {
   sessionId: string
@@ -108,18 +128,42 @@ export async function linkAnonAssessmentToUser(
 }
 
 /**
- * Fetches the assessment result for a given assessment_id.
+ * Fetches the assessment result for a given assessment_id (sem a análise completa).
  * Called after compute-eligibility edge function returns.
  */
-export async function fetchAssessmentResult(assessmentId: string) {
+export async function fetchAssessmentResult(assessmentId: string): Promise<AssessmentResultClient | null> {
   const { data, error } = await supabase
     .from('assessment_results')
-    .select('*')
+    .select(ASSESSMENT_RESULT_CLIENT_COLUMNS)
     .eq('assessment_id', assessmentId)
-    .single()
+    .maybeSingle()
 
   if (error) return null
   return data
+}
+
+/**
+ * Análise completa do assessment via RPC `get_full_analysis` (DI-016).
+ * O servidor confere posse e acesso vigente; erros com `code`:
+ * PT401 (sem sessão), PT404 (não existe ou não é seu), PT402 (sem pagamento ou expirado).
+ * `null` = ainda não há resultado para este assessment.
+ */
+export async function fetchFullAnalysis(assessmentId: string): Promise<FullAnalysisRow | null> {
+  const { data, error } = await supabase.rpc('get_full_analysis', { p_assessment_id: assessmentId })
+  if (error) throw error
+  return data?.[0] ?? null
+}
+
+export type FullAnalysisErrorKind = 'payment_required' | 'not_found' | 'auth_required' | 'other'
+
+/** Classifica o erro de get_full_analysis (SQLSTATE PTxxx da migration 20261020000000). */
+export function getFullAnalysisErrorKind(error: unknown): FullAnalysisErrorKind {
+  const { code, message } = (error ?? {}) as { code?: unknown; message?: unknown }
+  const text = typeof message === 'string' ? message : ''
+  if (code === 'PT402' || /payment required/i.test(text)) return 'payment_required'
+  if (code === 'PT404' || /^not found$/i.test(text)) return 'not_found'
+  if (code === 'PT401' || /authentication required/i.test(text)) return 'auth_required'
+  return 'other'
 }
 
 /**
@@ -130,12 +174,12 @@ export function useAssessment() {
   const getUserLatestAssessment = useCallback(async (email: string) => {
     const { data } = await supabase
       .from('assessments')
-      .select('*, assessment_results(*)')
+      .select(`id, full_name, email, status, completed_at, answers, assessment_results(${ASSESSMENT_RESULT_CLIENT_COLUMNS})`)
       .eq('email', email)
       .eq('status', 'completed')
       .order('completed_at', { ascending: false })
       .limit(1)
-      .single()
+      .maybeSingle()
 
     return data ?? null
   }, [])
