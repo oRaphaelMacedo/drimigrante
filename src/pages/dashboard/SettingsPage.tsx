@@ -1,8 +1,10 @@
 /**
- * Conta — perfil, "Meu plano", notificações e segurança (DI-052, DI-072).
+ * Conta — perfil, "Meu plano", notificações, segurança e privacidade
+ * (DI-052, DI-072, DI-083).
  *
  * - Abas (Radix Tabs, acessíveis por teclado) com a aba na URL: `?aba=perfil|
- *   plano|notificacoes|seguranca` (o portal do Stripe volta para `?aba=plano`).
+ *   plano|notificacoes|seguranca|privacidade` (o portal do Stripe volta para
+ *   `?aba=plano`).
  * - "Meu plano" a partir de getAccessState: pagamento único (fim do acesso, sem
  *   renovação automática), expirado, assinatura (próxima cobrança prevista,
  *   12ª e última cobrança, data de término) e o botão do portal do cliente
@@ -11,6 +13,8 @@
  * - "Sair dos outros aparelhos" usa signOut({ scope: 'others' }) — este
  *   aparelho continua conectado.
  * - Depois de salvar o perfil, refreshUser() atualiza o nome no painel.
+ * - "Privacidade" (LGPD/RGPD): baixar os dados (export-my-data) e apagar a conta
+ *   com confirmação digitando o e-mail (delete-account) — ver PrivacyPanel.
  * - Eventos: settings_plan_viewed e portal_clicked (sem PII).
  */
 import { useEffect, useId, useState, type FormEvent, type ReactNode } from 'react'
@@ -26,10 +30,12 @@ import {
   CreditCard,
   ExternalLink,
   KeyRound,
+  Lock,
   ShieldCheck,
   UserRound,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { PrivacyPanel } from '@/components/dashboard/PrivacyPanel'
 import { SignOutButton } from '@/components/dashboard/SignOutButton'
 import { SubscriptionUpsellCard } from '@/components/dashboard/SubscriptionUpsellCard'
 import { ONE_TIME_CTA_LABEL, daysRemainingLabel } from '@/components/dashboard/dashboard-access'
@@ -47,13 +53,14 @@ import { cn } from '@/lib/utils'
 
 const EMAIL_CODE_ENABLED = import.meta.env.VITE_AUTH_EMAIL_CODE === 'true'
 
-type TabId = 'profile' | 'plan' | 'notifications' | 'security'
+type TabId = 'profile' | 'plan' | 'notifications' | 'security' | 'privacy'
 
 const TABS: ReadonlyArray<{ id: TabId; param: string; label: string; icon: typeof UserRound }> = [
   { id: 'profile', param: 'perfil', label: 'Perfil', icon: UserRound },
   { id: 'plan', param: 'plano', label: 'Meu plano', icon: CreditCard },
   { id: 'notifications', param: 'notificacoes', label: 'Notificações', icon: Bell },
   { id: 'security', param: 'seguranca', label: 'Segurança', icon: ShieldCheck },
+  { id: 'privacy', param: 'privacidade', label: 'Privacidade', icon: Lock },
 ]
 
 function tabFromParam(value: string | null): TabId {
@@ -82,7 +89,7 @@ export function SettingsPage() {
       <header>
         <h1 className="text-[1.75rem] font-bold leading-tight text-foreground [text-wrap:balance] sm:text-3xl">Conta</h1>
         <p className="mt-1 text-base text-muted-foreground [text-wrap:pretty]">
-          Seu perfil, seu plano e a segurança do seu acesso.
+          Seu perfil, seu plano, a segurança do seu acesso e os seus dados.
         </p>
       </header>
 
@@ -103,6 +110,8 @@ export function SettingsPage() {
               data-testid={`settings-tab-${id}`}
               className={cn(
                 'inline-flex min-h-11 min-w-0 items-center justify-center gap-2 rounded-xl border px-3 text-base font-medium transition-colors duration-150 md:justify-start md:border-transparent md:px-4',
+                // 5 abas em 2 colunas no celular: a última ocupa a linha inteira.
+                'last:col-span-2 md:last:col-span-1',
                 'bg-card text-muted-foreground hover:bg-muted hover:text-foreground md:bg-transparent',
                 'data-[state=active]:border-primary/30',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
@@ -127,6 +136,9 @@ export function SettingsPage() {
           </Tabs.Content>
           <Tabs.Content value="security" className="focus-visible:outline-none">
             <SecurityPanel />
+          </Tabs.Content>
+          <Tabs.Content value="privacy" className="focus-visible:outline-none">
+            <PrivacyPanel />
           </Tabs.Content>
         </div>
       </Tabs.Root>
