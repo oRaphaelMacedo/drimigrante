@@ -7,6 +7,10 @@ import { initAnalytics, startPageviewTracking } from '@/lib/analytics'
 import { captureAttribution } from '@/lib/attribution'
 import { installPreloadErrorHandler } from '@/lib/chunk-reload'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
+// Fontes da marca (DI-062): Figtree na interface e Literata nos títulos,
+// self-hosted a partir de @fontsource-variable/figtree e
+// @fontsource-variable/literata (só o subset latino, font-display: swap).
+import './styles/fonts.css'
 import './index.css'
 
 // 1. UTMs da URL de entrada, antes de qualquer navegação limpar a query.
