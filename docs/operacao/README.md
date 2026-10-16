@@ -37,8 +37,8 @@ variável no código, rode `npm run check-env`.
   (aprovação no environment `production`) ou pelo dono com o Supabase CLI,
   sempre pelo nome. O `verify_jwt` de cada uma vem do `supabase/config.toml`.
   Functions de produção: `chat-completion`, `claim-session`,
-  `compute-eligibility`, `create-checkout-session`, `generate-explanation`,
-  `send-email` e `stripe-webhook`. **A `e2e-login` nunca vai para produção.**
+  `compute-eligibility`, `create-checkout-session`, `create-portal-session`,
+  `generate-explanation`, `send-email` e `stripe-webhook`. **A `e2e-login` nunca vai para produção.**
 - **Migrations:** aplicadas pelo dono com `supabase db push`, depois de testadas
   no Supabase local (`npm run supabase:reset`). O cabeçalho de cada migration diz
   de qual function ela depende. Nenhum workflow aplica migration.

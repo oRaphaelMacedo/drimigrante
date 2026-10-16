@@ -24,7 +24,8 @@ os ambientes e o CI.
   resultado (seção 3, passo 2).
 - **Functions de produção** (lista de [docs/testes.md](../testes.md)):
   `compute-eligibility`, `send-email`, `chat-completion`, `generate-explanation`,
-  `create-checkout-session`, `claim-session` e `stripe-webhook`. A `e2e-login`
+  `create-checkout-session`, `claim-session`, `stripe-webhook` e
+  `create-portal-session`. A `e2e-login`
   nunca vai para produção. Function nova só entra depois de ir para aquela
   lista e para `PROD_FUNCTIONS` no workflow.
 - **Nunca:** `supabase functions deploy` sem nome, `--prune`, `supabase db reset`
@@ -83,8 +84,9 @@ Produção tem as migrations até `20260630000000`. Tudo abaixo está pendente.
 | `compute-eligibility` | Não depende de migration (o motor corrige as condições incompletas). |
 | `send-email` | Não depende de migration. |
 | `chat-completion` | **Precisa estar no ar antes da `20261016000300`**: a versão nova grava as mensagens com a service role; a antiga grava com o JWT do cliente, e a 000300 tira esse INSERT. Até a `20261016000150` rodar (passo 2, minutos depois), quem pagou o €30 antes desta versão pode ficar sem chat. |
+| `create-portal-session` | Não depende de migration. Precisa estar no ar antes do front (passo 4): o botão do portal na aba "Meu plano" (W3-04, DI-052) chama esta function. |
 
-Workflow: `functions = compute-eligibility,send-email,chat-completion`.
+Workflow: `functions = compute-eligibility,send-email,chat-completion,create-portal-session`.
 
 **Passo 2 — migrations: `supabase db push`**
 
@@ -143,7 +145,7 @@ do Doutor Imigrante → *Deployments* até o status *Ready*.
 1. *Use workflow from*: a tag do release (ou a `main`, para um redeploy depois
    do merge; outra branch é recusada).
 2. *functions*: a lista do passo (ex.: `compute-eligibility,send-email,chat-completion`).
-   `todas` publica as 7 na ordem da lista.
+   `todas` publica as 8 na ordem da lista.
 3. Primeiro com *dry_run* marcado: o job `plan` valida a lista, roda os testes
    Deno e mostra o plano (ordem e `verify_jwt` de cada uma) no resumo da execução.
 4. Rode de novo com *dry_run* desmarcado. O job `deploy` espera a aprovação no
@@ -155,7 +157,7 @@ nome; o `verify_jwt` vem do `supabase/config.toml`, e as três abaixo levam
 `--no-verify-jwt` por segurança:
 
 ```bash
-for fn in compute-eligibility send-email chat-completion generate-explanation; do
+for fn in compute-eligibility send-email chat-completion generate-explanation create-portal-session; do
   supabase functions deploy "$fn" --project-ref krjirhlmdnxqqrpzmowz
 done
 for fn in create-checkout-session claim-session stripe-webhook; do
@@ -169,7 +171,7 @@ done
 
 Rode logo depois do passo 4. Nenhum item gasta dinheiro.
 
-- [ ] `supabase functions list --project-ref krjirhlmdnxqqrpzmowz`: as 7 com a
+- [ ] `supabase functions list --project-ref krjirhlmdnxqqrpzmowz`: as 8 com a
       versão nova e sem `e2e-login`.
 - [ ] CORS: origem de terceiro recebe 403 e o site oficial recebe 204.
 
@@ -285,3 +287,7 @@ pagamento e os e-mails do período anotados.
 5. **Depois do primeiro release com a DI-081:** regenerar os tipos
    (`supabase gen types typescript --project-id krjirhlmdnxqqrpzmowz > src/lib/database.types.ts`)
    para sumirem `is_hub_user` e os outros helpers apagados de `public`.
+6. **Customer Portal do Stripe (DI-052).** Ative o portal no modo live em
+   [Settings → Billing → Customer portal](https://dashboard.stripe.com/settings/billing/portal).
+   Sem isso, a `create-portal-session` responde 502 e a aba "Meu plano"
+   mostra a mensagem de erro com o e-mail do suporte.

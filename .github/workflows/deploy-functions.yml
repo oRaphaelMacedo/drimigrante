@@ -46,6 +46,7 @@ env:
     create-checkout-session
     claim-session
     stripe-webhook
+    create-portal-session
 
 jobs:
   plan:

@@ -90,6 +90,7 @@ Módulos de `src/lib/` que são contrato entre as telas:
 | `compute-eligibility` | `true` | Quiz | Pontua o assessment |
 | `generate-explanation` | `true` | Quiz | Gera o texto da análise (OpenAI), com teto por hora (`AI_HOURLY_CAP`) |
 | `create-checkout-session` | `false` | Resultado, `/checkout`, painel | Cria a sessão do Stripe (€30 anônimo ou €4,90 para quem já pagou) |
+| `create-portal-session` | `true` | Painel (aba "Meu plano") | Abre o Customer Portal do Stripe para o próprio usuário (customer lido do banco) |
 | `stripe-webhook` | `false` | Stripe | Libera ou revoga acesso a partir dos eventos de pagamento |
 | `claim-session` | `false` | `/checkout/success` | Entrada automática pós-pagamento |
 | `chat-completion` | `true` | Painel | Chat com IA, conferindo o acesso no servidor |

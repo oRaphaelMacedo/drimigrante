@@ -151,7 +151,7 @@ GRANT EXECUTE ON FUNCTION public.get_assessment_by_resume_token(text) TO anon, a
 --
 -- 4) Novo assessment recebe token automaticamente:
 --    SELECT resume_token FROM public.upsert_anon_assessment(
---      'local-check-0001', '{"processo_tipo":"nacionalidade"}'::jsonb,
+--      gen_random_uuid()::text, '{"processo_tipo":"nacionalidade"}'::jsonb,
 --      'Teste', 'teste@example.com', NULL, 1, 1, 100, 'completed');
 --
 -- 5) Privilégios: anon e authenticated executam; PUBLIC não.

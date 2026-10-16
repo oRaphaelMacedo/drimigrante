@@ -29,6 +29,7 @@ ser adicionada aqui e ao processo de deploy.
 | `claim-session` | `false` | Página de sucesso do checkout (comprador ainda sem sessão) |
 | `compute-eligibility` | `true` | Quiz (chave anon) |
 | `create-checkout-session` | `false` | Resultado do quiz (checkout anônimo), página de checkout e painel |
+| `create-portal-session` | `true` | Painel, aba "Meu plano" (usuário logado) |
 | `generate-explanation` | `true` | Quiz (chave anon) |
 | `send-email` | `true` | Outras functions, com `x-internal-secret` |
 | `stripe-webhook` | `false` | Stripe (valida `stripe-signature`) |
