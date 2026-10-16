@@ -141,9 +141,16 @@ interface ScrollSample {
   y: number
   scoreBottom: number
   barVisible: boolean
-  /** O botão da oferta aparece em alguma parte da tela, fora de baixo da barra. */
-  buttonVisible: boolean
+  /** Fração da altura do botão da oferta que aparece na tela, fora de baixo da barra (0–1). */
+  buttonRatio: number
 }
+
+// O StickyCTA considera o CTA inline "visível" só com metade dele na tela
+// (INLINE_VISIBLE_RATIO = 0.5 em src/components/ui/StickyCTA.tsx): um fiapo do
+// botão no topo da tela não é um CTA utilizável, então a barra aparece. A faixa
+// de tolerância absorve a assincronia do IntersectionObserver perto do limiar.
+const VISIBLE_RATIO = 0.5
+const TOLERANCE = 0.05
 
 /** Rola até `y`, espera os IntersectionObserver e o React, e mede a tela. */
 async function sampleAt(page: Page, y: number): Promise<ScrollSample> {
@@ -157,11 +164,12 @@ async function sampleAt(page: Page, y: number): Promise<ScrollSample> {
     const barVisible = bar.getAttribute('data-state') === 'visible'
     const freeBottom = vh - (barVisible ? bar.getBoundingClientRect().height : 0)
     const button = document.querySelector('[data-testid="results-cta-paywall"]')!.getBoundingClientRect()
+    const shown = Math.min(button.bottom, freeBottom) - Math.max(button.top, 0)
     return {
       y: Math.round(window.scrollY),
       scoreBottom: score.bottom,
       barVisible,
-      buttonVisible: button.bottom > 0 && button.top < freeBottom,
+      buttonRatio: button.height > 0 ? Math.max(0, shown) / button.height : 0,
     }
   }, y)
 }
@@ -180,12 +188,13 @@ for (const viewport of [
       await expect(page.getByTestId('results-cta-paywall')).toBeVisible()
 
       const maxY = await page.evaluate(() => document.documentElement.scrollHeight - window.innerHeight)
-      const gaps: number[] = []
-      const doubles: number[] = []
+      const gaps: string[] = []
+      const doubles: string[] = []
       for (let y = 0; ; y = Math.min(y + 40, maxY)) {
         const sample = await sampleAt(page, y)
-        if (sample.scoreBottom <= 0 && !sample.barVisible && !sample.buttonVisible) gaps.push(sample.y)
-        if (sample.barVisible && sample.buttonVisible) doubles.push(sample.y)
+        const at = `${sample.y}px (botão ${Math.round(sample.buttonRatio * 100)}% visível)`
+        if (sample.scoreBottom <= 0 && !sample.barVisible && sample.buttonRatio < VISIBLE_RATIO - TOLERANCE) gaps.push(at)
+        if (sample.barVisible && sample.buttonRatio >= VISIBLE_RATIO + TOLERANCE) doubles.push(at)
         if (y >= maxY) break
       }
       expect(gaps, 'posições sem nenhum CTA de compra na tela').toEqual([])
