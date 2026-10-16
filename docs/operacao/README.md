@@ -7,6 +7,8 @@ operação. Última revisão: 16/10/2026.
 
 | Documento | Assunto |
 |---|---|
+| [release.md](release.md) | Ordem de publicação (functions ↔ migrations ↔ front), checklist pós-deploy e rollback |
+| [runbook-pagamentos.md](runbook-pagamentos.md) | Incidentes de pagamento, webhook, concessão manual e backfill |
 | [dependencias.md](dependencias.md) | Node, npm, lockfile e auditoria de dependências |
 | [seguranca-headers.md](seguranca-headers.md) | Cabeçalhos de segurança e CSP (`vercel.json`) |
 | [../analytics.md](../analytics.md) | Eventos, consentimento, PostHog, GA4, Meta Pixel e Sentry |
@@ -30,19 +32,19 @@ variável no código, rode `npm run check-env`.
 
 - **Front:** merge na `main` → a Vercel roda `npm run build` e publica `dist/`.
   Cabeçalhos em `vercel.json`.
-- **Edge Functions:** publicadas à mão pelo dono com o Supabase CLI
-  (`supabase functions deploy <nome>`). O `verify_jwt` de cada uma vem do
-  `supabase/config.toml`. Functions de produção: `chat-completion`,
-  `claim-session`, `compute-eligibility`, `create-checkout-session`,
-  `generate-explanation`, `send-email` e `stripe-webhook`. **A `e2e-login`
-  nunca vai para produção.**
-- **Migrations:** aplicadas à mão pelo dono, em ordem de timestamp, depois de
-  testadas no Supabase local (`npm run supabase:reset`). O cabeçalho de cada
-  migration diz de qual function ela depende e se precisa vir antes ou depois do
-  deploy. Nenhum workflow do GitHub aplica migration nem publica function.
-  - `20261016000340_fix_ai_config_audit_record_id.sql` precisa ser aplicada
-    **antes** da `20261016000350_ai_config_prompts.sql`: sem ela, a 000350 falha
-    (e o salvamento em `/admin/ai-config` também).
+- **Edge Functions:** pelo workflow manual
+  [`deploy-functions.yml`](../../.github/workflows/deploy-functions.yml)
+  (aprovação no environment `production`) ou pelo dono com o Supabase CLI,
+  sempre pelo nome. O `verify_jwt` de cada uma vem do `supabase/config.toml`.
+  Functions de produção: `chat-completion`, `claim-session`,
+  `compute-eligibility`, `create-checkout-session`, `generate-explanation`,
+  `send-email` e `stripe-webhook`. **A `e2e-login` nunca vai para produção.**
+- **Migrations:** aplicadas pelo dono com `supabase db push`, depois de testadas
+  no Supabase local (`npm run supabase:reset`). O cabeçalho de cada migration diz
+  de qual function ela depende. Nenhum workflow aplica migration.
+- **Ordem, checklist e rollback de cada release:** [release.md](release.md)
+  (ex.: `chat-completion` nova antes da `20261016000300`; `20261016000340` antes
+  da `20261016000350`).
 
 ## CI (GitHub Actions)
 
@@ -69,3 +71,6 @@ variável no código, rode `npm run check-env`.
 3. **Proteger a `main`:** exigir PR e os checks `ci`, `functions` e
    `e2e / playwright`.
    GitHub → repositório → Settings → Branches.
+4. **Deploy das functions pelo GitHub:** criar o environment `production` com
+   aprovação e o secret `SUPABASE_ACCESS_TOKEN` (passo a passo em
+   [release.md, seção 7](release.md#7-ações-manuais-do-dono-uma-vez)).

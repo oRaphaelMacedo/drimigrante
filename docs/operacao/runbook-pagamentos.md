@@ -145,40 +145,22 @@ Use só quando o reenvio (seção 4) não resolver. Reproduz o que o webhook faz
 
 ## 6. Ordem de deploy (ação do dono)
 
-Deploy único de todas as functions de produção, uma por uma e sempre pelo nome (nunca `supabase functions deploy` sem nome):
-
-```bash
-for fn in compute-eligibility generate-explanation chat-completion send-email; do
-  supabase functions deploy "$fn"
-done
-for fn in stripe-webhook create-checkout-session claim-session; do
-  supabase functions deploy "$fn" --no-verify-jwt
-done
-```
-
-`e2e-login` fica de fora. Dependências de migration (detalhe no cabeçalho de cada `index.ts`): `20261016000100` e `20261016000150` antes do `stripe-webhook`; `20261016000100` antes do `create-checkout-session`; `20261016000100` e `20261016000400` antes do `claim-session`; o `chat-completion` novo **antes** da `20261016000300`. O `compute-eligibility` novo não depende de migration (funciona com as condições incompletas de hoje).
+A ordem de cada release (quais functions vão antes das migrations, quais vão
+depois e quando publicar o front), o workflow de deploy, o checklist pós-deploy
+(inclui a conferência de CORS) e o rollback estão em [release.md](release.md).
+Resumo das dependências destas functions: `20261016000100` e `20261016000150`
+antes do `stripe-webhook`; `20261016000100` antes do `create-checkout-session`;
+`20261016000100` e `20261016000400` antes do `claim-session`; a `chat-completion`
+nova **antes** da `20261016000300`. O `compute-eligibility` novo não depende de
+migration. A `e2e-login` fica sempre de fora.
 
 Todas as functions passam a importar `npm:@supabase/supabase-js@2.105.4` e `npm:stripe@14.14.0` (versões exatas) e a usar `Deno.serve`; não há mais imports de `esm.sh` nem de `deno.land/std` no código publicado.
-
-Depois do deploy, confira o CORS (OPTIONS não executa o handler):
-
-```bash
-# Origem de terceiro: esperado 403 e nenhum Access-Control-Allow-Origin
-curl -si -X OPTIONS https://krjirhlmdnxqqrpzmowz.supabase.co/functions/v1/compute-eligibility \
-  -H 'Origin: https://exemplo-invalido.com' -H 'Access-Control-Request-Method: POST' | head -5
-
-# Site oficial: esperado 204 com Access-Control-Allow-Origin: https://www.drimigrante.com
-curl -si -X OPTIONS https://krjirhlmdnxqqrpzmowz.supabase.co/functions/v1/compute-eligibility \
-  -H 'Origin: https://www.drimigrante.com' -H 'Access-Control-Request-Method: POST' | head -8
-```
-
-E faça um quiz completo em <https://www.drimigrante.com/quiz>: o resultado gravado deve ter a mesma categoria mostrada na tela.
 
 ## 7. Backfill dos scores (DI-006)
 
 Até o deploy do `compute-eligibility` novo, todo resultado foi gravado como 0 / "baixa". O script `scripts/backfill-scores.mjs` recalcula **só** `score_numeric` e `score_category` com o mesmo motor do servidor. Ele não chama nenhuma function, não usa OpenAI e não regenera análises: as análises já geradas continuam com o texto que a IA escreveu com o score antigo (o script lista quais são).
 
-1. Faça o deploy do `compute-eligibility` novo (seção 6), para não surgirem novos resultados errados.
+1. Faça o deploy do `compute-eligibility` novo ([release.md](release.md), passo 1), para não surgirem novos resultados errados.
 2. Crie um arquivo **fora do git** (ex.: `~/drimigrante-backfill.env`) com:
 
    ```
