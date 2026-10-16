@@ -72,10 +72,11 @@ export function DocumentsPage() {
       const ext = file.name.split('.').pop()
       const storagePath = `${userId}/${assessmentId ?? 'general'}/${docType}/${Date.now()}.${ext}`
 
-      // 1. Upload to Supabase Storage
+      // 1. Upload to Supabase Storage. upsert:false — the bucket has no UPDATE
+      //    policy (DI-023) and every upload uses a new path anyway.
       const { error: uploadErr } = await supabase.storage
         .from('user-documents')
-        .upload(storagePath, file, { upsert: true, contentType: file.type })
+        .upload(storagePath, file, { upsert: false, contentType: file.type })
       if (uploadErr) throw uploadErr
 
       // 2. Record in user_documents table (new table, cast via any)
