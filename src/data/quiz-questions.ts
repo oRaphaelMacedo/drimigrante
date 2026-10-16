@@ -6,13 +6,14 @@ export type FieldType = 'radio' | 'multiselect' | 'select' | 'number' | 'text'
 export interface QuizOption {
   key: string
   label: string
+  labelEn?: string
   score: number
   isEliminatory?: boolean
   aiNote?: string // instrução para a IA ao gerar o relatório
 }
 
 // Condição de exibição condicional
-interface ShowIfCondition {
+export interface ShowIfCondition {
   questionKey: string
   answerKey?: string | string[]  // resposta igual a / dentro de
   answerContains?: string         // para multi-select: resposta CSV contém este valor
@@ -28,8 +29,10 @@ export interface QuizQuestion {
   themeCode: string
   themeName: string
   themeColor: string
+  themeIcon?: string
   fieldType: FieldType
   text: string
+  textEn?: string
   helpText?: string
   options?: QuizOption[]
   min?: number
@@ -37,6 +40,11 @@ export interface QuizQuestion {
   placeholder?: string
   isRequired: boolean
   showIf?: ShowIfRule
+  /**
+   * true quando a condição gravada no banco estava incompleta e foi trocada
+   * pela regra padrão deste arquivo (ver src/lib/quiz-conditions.ts).
+   */
+  showIfRepaired?: boolean
 }
 
 export const QUIZ_THEMES = [
@@ -104,7 +112,7 @@ export const QUIZ_QUESTIONS: QuizQuestion[] = [
       { key: 'avo',     label: 'O meu avô ou a minha avó',                             score: 30, aiNote: 'descendência de 2.º grau — elegibilidade média-alta; laços com Portugal são importantes' },
       { key: 'bisavo',  label: 'O meu bisavô ou a minha bisavó',                       score: 20, aiNote: 'descendência de 3.º grau — elegibilidade média; laços com Portugal são determinantes' },
       { key: 'trisavo', label: 'Trisavô/Trisavó ou parentes ainda mais distantes',    score: 5,  aiNote: 'descendência muito distante — não elegível para nacionalidade; sugerir pesquisa genealógica para resgate histórico' },
-      { key: 'nao_sei', label: 'Não sei ao certo',                                     score: 0,  aiNote: 'incerteza sobre antepassados — trazer estatísticas de antepassados portugueses no Brasil e oferecer serviço de genealogia' },
+      { key: 'nao_sei', label: 'Não sei ao certo',                                     score: 0,  aiNote: 'incerteza sobre antepassados — explicar como começar uma pesquisa genealógica (registros de família, certidões, arquivos) e quando vale procurar um profissional' },
     ],
   },
   {
@@ -129,11 +137,11 @@ export const QUIZ_QUESTIONS: QuizQuestion[] = [
     themeColor: '#8b5cf6',
     fieldType: 'radio',
     text: 'Tem interesse em pesquisar e obter esses documentos em Portugal?',
-    helpText: 'Podemos fazer esse levantamento documental por você em Portugal.',
+    helpText: 'Isso ajuda a indicar os próximos passos para conseguir os documentos.',
     isRequired: true,
     showIf: { questionKey: 'a2_documento', answerKey: 'nao' },
     options: [
-      { key: 'sim', label: 'Sim, tenho interesse',   score: 8, aiNote: 'interessado em levantar documentos — sugerir serviço de pesquisa documental e genealógica' },
+      { key: 'sim', label: 'Sim, tenho interesse',   score: 8, aiNote: 'interessado em levantar documentos — explicar onde esses documentos costumam ser pedidos e quando vale procurar um profissional' },
       { key: 'nao', label: 'Não tenho interesse',    score: 0 },
     ],
   },
@@ -163,7 +171,7 @@ export const QUIZ_QUESTIONS: QuizQuestion[] = [
     isRequired: true,
     showIf: { questionKey: 'a1_antepassado', answerKey: 'nao_sei' },
     options: [
-      { key: 'sim', label: 'Sim, tenho interesse',   score: 5, aiNote: 'interessado em genealogia — apresentar estatísticas de antepassados portugueses no Brasil e oferecer o serviço de genealogia' },
+      { key: 'sim', label: 'Sim, tenho interesse',   score: 5, aiNote: 'interessado em genealogia — explicar como começar a pesquisa genealógica e quando vale procurar um profissional' },
       { key: 'nao', label: 'Não, por enquanto não',  score: 0 },
     ],
   },
@@ -278,11 +286,11 @@ export const QUIZ_QUESTIONS: QuizQuestion[] = [
     themeName: 'Residência',
     themeColor: '#ef4444',
     fieldType: 'radio',
-    text: 'Para regularizar a sua situação, precisará contratar um advogado. Está disposto(a) e preparado(a) financeiramente para essa contratação?',
+    text: 'Muitas pessoas contratam um advogado para regularizar a situação. Você está disposto(a) e preparado(a) financeiramente para isso, se for necessário?',
     isRequired: true,
     showIf: { questionKey: 'd1_situacao_legal', answerKey: 'nao' },
     options: [
-      { key: 'sim', label: 'Sim, estou preparado(a)',             score: 10, aiNote: 'pronto para contratar advogado — dirigir para o banco de advogados da plataforma' },
+      { key: 'sim', label: 'Sim, estou preparado(a)',             score: 10, aiNote: 'pronto para contratar advogado — explicar como escolher um profissional e o que levar a uma primeira consulta' },
       { key: 'nao', label: 'Não, ainda não estou preparado(a)',   score: 0,  aiNote: 'não preparado financeiramente — sugerir que organize finanças urgentemente; alertar que os prazos da AIMA são longos e a regularização é urgente' },
     ],
   },
@@ -311,9 +319,9 @@ export const QUIZ_QUESTIONS: QuizQuestion[] = [
     showIf: { questionKey: 'd4_consultou_advogado', answerKey: 'sim' },
     options: [
       { key: 'era_caro',    label: 'Era muito caro',                                               score: 0, aiNote: 'custo como barreira — perguntar se agora está mais preparado financeiramente' },
-      { key: 'sem_firmeza', label: 'Não senti firmeza / O advogado não pareceu competente',        score: 0, aiNote: 'insatisfeito com advogado anterior — promover banco de advogados experientes da plataforma' },
+      { key: 'sem_firmeza', label: 'Não senti firmeza / O advogado não pareceu competente',        score: 0, aiNote: 'insatisfeito com advogado anterior — explicar como avaliar um profissional antes de contratar' },
       { key: 'sozinho',     label: 'Quero resolver a minha situação sozinho(a)',                  score: 0, aiNote: 'perfil DIY — alertar sobre riscos e prazos longos da AIMA; sugerir pelo menos uma primeira consulta' },
-      { key: 'outros',      label: 'Outros motivos',                                              score: 0, aiNote: 'outros motivos — sugerir banco de advogados da plataforma' },
+      { key: 'outros',      label: 'Outros motivos',                                              score: 0, aiNote: 'outros motivos — indicar em que situações vale procurar um profissional' },
     ],
   },
   {
@@ -326,8 +334,8 @@ export const QUIZ_QUESTIONS: QuizQuestion[] = [
     isRequired: true,
     showIf: { questionKey: 'd5_motivo_nao_contratou', answerContains: 'era_caro' },
     options: [
-      { key: 'sim', label: 'Sim, agora consigo',   score: 10, aiNote: 'agora preparado — recomendar fortemente que regularize o quanto antes; sugerir advogados da plataforma com desconto' },
-      { key: 'nao', label: 'Ainda não consigo',    score: 0,  aiNote: 'ainda sem recursos — sugerir advogados com cobrança parcelada; reforçar urgência da regularização' },
+      { key: 'sim', label: 'Sim, agora consigo',   score: 10, aiNote: 'agora preparado — recomendar fortemente que regularize o quanto antes' },
+      { key: 'nao', label: 'Ainda não consigo',    score: 0,  aiNote: 'ainda sem recursos — reforçar a urgência da regularização e os passos que a pessoa pode adiantar sozinha' },
     ],
   },
   {
@@ -346,7 +354,7 @@ export const QUIZ_QUESTIONS: QuizQuestion[] = [
       ],
     },
     options: [
-      { key: 'sim', label: 'Sim, quero consultar um advogado', score: 10, aiNote: 'interessado em consulta jurídica — apresentar banco de advogados da plataforma' },
+      { key: 'sim', label: 'Sim, quero consultar um advogado', score: 10, aiNote: 'interessado em consulta jurídica — explicar como preparar a consulta (documentos e perguntas a levar)' },
       { key: 'nao', label: 'Não, por enquanto não',             score: 0  },
     ],
   },
@@ -412,32 +420,88 @@ export interface ScoreResult {
   emoji: string
 }
 
+/**
+ * Condição incompleta (sem answerKey nem answerContains) nunca é satisfeita:
+ * antes ela valia "qualquer resposta", o que mostrava perguntas de todos os casos.
+ */
 function matchesCondition(answers: Record<string, string>, cond: ShowIfCondition): boolean {
   const answer = answers[cond.questionKey]
   if (!answer) return false
   if (cond.answerContains) {
     return answer.split(',').includes(cond.answerContains)
   }
-  if (cond.answerKey) {
+  if (cond.answerKey !== undefined) {
     if (Array.isArray(cond.answerKey)) return cond.answerKey.includes(answer)
     return answer === cond.answerKey
   }
-  return true
+  return false
 }
 
+/**
+ * Perguntas visíveis para um conjunto de respostas.
+ *
+ * Uma pergunta condicional só é visível se a condição for satisfeita E a
+ * pergunta-pai também estiver visível. Assim, trocar "A" por "B" em caso_tipo
+ * esconde a1 e, em cascata, a5 — mesmo que a resposta antiga de a1 continue
+ * guardada na sessão. Pai inexistente (ex.: pergunta desativada) conta como
+ * oculto; ciclos são tratados como ocultos.
+ */
 export function getVisibleQuestions(
   answers: Record<string, string>,
   questions: QuizQuestion[] = QUIZ_QUESTIONS,
 ): QuizQuestion[] {
-  return questions.filter((q) => {
-    if (!q.showIf) return true
+  const byKey = new Map(questions.map((q) => [q.key, q]))
+  const memo = new Map<string, boolean>()
+  const visiting = new Set<string>()
+
+  const isVisible = (key: string): boolean => {
+    const cached = memo.get(key)
+    if (cached !== undefined) return cached
+    const q = byKey.get(key)
+    if (!q) return false
+    if (!q.showIf) {
+      memo.set(key, true)
+      return true
+    }
+    if (visiting.has(key)) return false // ciclo nas condições
+    visiting.add(key)
+
+    const holds = (c: ShowIfCondition) => isVisible(c.questionKey) && matchesCondition(answers, c)
     const rule = q.showIf
-    if ('any' in rule) return (rule as { any: ShowIfCondition[] }).any.some((c) => matchesCondition(answers, c))
-    if ('all' in rule) return (rule as { all: ShowIfCondition[] }).all.every((c) => matchesCondition(answers, c))
-    return matchesCondition(answers, rule as ShowIfCondition)
-  })
+    const result =
+      'any' in rule
+        ? rule.any.some(holds)
+        : 'all' in rule
+          ? rule.all.length > 0 && rule.all.every(holds)
+          : holds(rule)
+
+    visiting.delete(key)
+    memo.set(key, result)
+    return result
+  }
+
+  return questions.filter((q) => isVisible(q.key))
 }
 
+/**
+ * Remove as respostas de perguntas que não estão visíveis (ramos ocultos).
+ * Chaves que não correspondem a nenhuma pergunta conhecida são mantidas.
+ * Usar antes de enviar/persistir as respostas e de chamar suggestVisas (DI-042).
+ */
+export function pruneAnswers(
+  answers: Record<string, string>,
+  questions: QuizQuestion[] = QUIZ_QUESTIONS,
+): Record<string, string> {
+  const known = new Set(questions.map((q) => q.key))
+  const visible = new Set(getVisibleQuestions(answers, questions).map((q) => q.key))
+  const pruned: Record<string, string> = {}
+  for (const [key, value] of Object.entries(answers)) {
+    if (!known.has(key) || visible.has(key)) pruned[key] = value
+  }
+  return pruned
+}
+
+// Só as perguntas visíveis são pontuadas (respostas de ramos ocultos não contam).
 export function computeScore(
   answers: Record<string, string>,
   questions: QuizQuestion[] = QUIZ_QUESTIONS,
@@ -448,7 +512,7 @@ export function computeScore(
   let max = 0
 
   for (const q of visible) {
-    if (!q.options || q.fieldType === 'multiselect') continue
+    if (!q.options?.length || q.fieldType === 'multiselect') continue
 
     const maxOption = Math.max(...q.options.map((o) => o.score))
     max += maxOption
@@ -511,6 +575,11 @@ export interface VisaSuggestion {
   reason: string
 }
 
+// Textos sem prometer serviço próprio nem indicar advogados (DI-065):
+// quando fizer sentido, indicar que a análise completa aponta quando vale
+// procurar um profissional.
+// Recebe as respostas como estão; quem envia deve aplicar pruneAnswers antes
+// (DI-042), para que respostas de ramos ocultos não influenciem o resultado.
 export function suggestVisas(answers: Record<string, string>): VisaSuggestion[] {
   const suggestions: VisaSuggestion[] = []
   const casos = (answers.caso_tipo || '').split(',').filter(Boolean)
@@ -539,14 +608,14 @@ export function suggestVisas(answers: Record<string, string>): VisaSuggestion[] 
         match: hasDoc && hasLacos ? 'strong' : hasDoc || hasLacos ? 'possible' : 'weak',
         reason: hasDoc
           ? 'Com documentação e laços com Portugal, a elegibilidade é real, mas requer análise jurídica aprofundada.'
-          : 'Precisará levantar documentos genealógicos em Portugal — um serviço que podemos providenciar.',
+          : 'Será preciso conseguir os documentos do seu antepassado em Portugal. A análise completa indica quais documentos reunir e quando vale procurar um profissional.',
       })
     } else if (antepassado === 'nao_sei') {
       suggestions.push({
         code: 'pesquisa_genealogica',
         name: 'Pesquisa Genealógica',
         match: 'weak',
-        reason: 'Antes de avançar, é necessário descobrir se tem antepassados portugueses. O nosso serviço de genealogia pode identificar essa ligação.',
+        reason: 'Antes de avançar, é preciso descobrir se você tem antepassados portugueses. Uma pesquisa genealógica em documentos de família, certidões e arquivos pode confirmar essa ligação.',
       })
     }
   }
@@ -590,7 +659,7 @@ export function suggestVisas(answers: Record<string, string>): VisaSuggestion[] 
           ? 'Com Autorização de Residência há 5 ou mais anos, reúne as condições para pedir a naturalização.'
           : legal === 'sim'
           ? 'Em curso para a naturalização — complete 5 anos de residência legal.'
-          : 'Primeiro passo: regularizar a situação junto da AIMA com apoio jurídico especializado.',
+          : 'Primeiro passo: regularizar a sua situação junto da AIMA. A análise completa indica quando vale procurar um profissional.',
     })
   }
 
@@ -600,7 +669,7 @@ export function suggestVisas(answers: Record<string, string>): VisaSuggestion[] 
       code: 'reaquisicao_nacionalidade',
       name: 'Reaquisição de Nacionalidade Portuguesa',
       match: 'strong',
-      reason: 'Quem já foi português(a) tem grandes probabilidades de reaver a nacionalidade. Requer análise jurídica especializada — os nossos advogados podem orientá-lo(a).',
+      reason: 'Quem já foi português(a) tem boas chances de reaver a nacionalidade, mas as regras dependem de como ela foi perdida. A análise completa indica quando vale procurar um profissional.',
     })
   }
 
@@ -623,7 +692,7 @@ export function suggestVisas(answers: Record<string, string>): VisaSuggestion[] 
       code: 'analise_personalizada',
       name: 'Análise Personalizada Necessária',
       match: 'weak',
-      reason: 'O seu caso requer uma análise jurídica individualizada. Os nossos advogados especializados podem identificar os caminhos disponíveis.',
+      reason: 'O seu caso precisa de uma análise individual. A análise completa mostra os caminhos possíveis e indica quando vale procurar um profissional.',
     })
   }
 

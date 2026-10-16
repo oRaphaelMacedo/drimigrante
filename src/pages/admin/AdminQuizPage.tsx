@@ -6,16 +6,9 @@ import {
   ChevronDown, ChevronRight, Search, ListChecks, AlertCircle, Loader2,
   Pencil, ArrowUp, ArrowDown, EyeOff, History, Plus, Palette, X, Save,
 } from 'lucide-react'
-import type { QuizQuestion, ShowIfRule } from '@/data/quiz-questions'
-
-function showIfSummary(rule: ShowIfRule): string {
-  if ('any' in rule) return `any(${(rule as { any: { questionKey: string }[] }).any.map(c => c.questionKey).join(', ')})`
-  if ('all' in rule) return `all(${(rule as { all: { questionKey: string }[] }).all.map(c => c.questionKey).join(', ')})`
-  const c = rule as { questionKey: string; answerKey?: string | string[] }
-  const val = Array.isArray(c.answerKey) ? c.answerKey.join('|') : String(c.answerKey ?? '')
-  return `${c.questionKey} = ${val}`
-}
-import { useQuizQuestions } from '@/hooks/useQuizQuestions'
+import type { QuizQuestion } from '@/data/quiz-questions'
+import { describeShowIf } from '@/lib/quiz-conditions'
+import { useQuizQuestionsAdmin } from '@/hooks/useQuizQuestions'
 import {
   useReorderQuestion, useToggleQuestionActive,
   useFormThemes, useCreateTheme, useUpdateTheme,
@@ -26,6 +19,7 @@ import { cn } from '@/lib/utils'
 
 const FIELD_TYPE_LABEL: Record<string, string> = {
   radio: 'Escolha única',
+  multiselect: 'Múltipla escolha',
   select: 'Lista suspensa',
   number: 'Número',
   text: 'Texto',
@@ -38,7 +32,9 @@ const FIELD_TYPE_LABEL: Record<string, string> = {
 }
 
 export function AdminQuizPage() {
-  const { data: questions = [], isLoading, error } = useQuizQuestions()
+  // Só dados do banco (sem as perguntas do código como substituto): o admin
+  // precisa ver erro se o banco falhar, e não editar dados que não existem lá.
+  const { data: questions = [], isLoading, error } = useQuizQuestionsAdmin()
   const { data: formThemes = [] } = useFormThemes()
   const reorder = useReorderQuestion()
   const toggleActive = useToggleQuestionActive()
@@ -79,6 +75,11 @@ export function AdminQuizPage() {
     })
   }, [questions, search, themeFilter])
 
+  const repairedCount = useMemo(
+    () => questions.filter((q) => q.showIfRepaired).length,
+    [questions],
+  )
+
   const totalOptions = useMemo(
     () => questions.reduce((sum, q) => sum + (q.options?.length ?? 0), 0),
     [questions],
@@ -114,7 +115,7 @@ export function AdminQuizPage() {
     return (
       <div className="flex items-center gap-3 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
         <AlertCircle className="h-5 w-5 flex-shrink-0" />
-        Erro a carregar perguntas: {(error as Error).message}
+        Erro ao carregar perguntas: {(error as Error).message}
       </div>
     )
   }
@@ -126,7 +127,7 @@ export function AdminQuizPage() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Quiz</h1>
           <p className="mt-1 text-sm text-gray-500">
-            Edita as perguntas, opções e ordem. Cada alteração cria automaticamente uma versão para reverter.
+            Edite as perguntas, as opções e a ordem. Cada alteração cria automaticamente uma versão para reverter.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -163,14 +164,29 @@ export function AdminQuizPage() {
         </div>
       </div>
 
+      {repairedCount > 0 && (
+        <div
+          role="status"
+          className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"
+        >
+          <AlertCircle className="mt-0.5 h-5 w-5 flex-shrink-0" />
+          <p>
+            {repairedCount === 1 ? '1 pergunta tem' : `${repairedCount} perguntas têm`} condição de
+            exibição incompleta no banco. O quiz está usando a regra padrão do código para{' '}
+            {repairedCount === 1 ? 'ela' : 'elas'}. Para corrigir no banco, abra a pergunta e salve,
+            ou aplique a migration 20261016000200_fix_quiz_display_conditions.sql.
+          </p>
+        </div>
+      )}
+
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-3">
         <div className="relative flex-1 min-w-[240px]">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" />
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Procurar pergunta, key ou ajuda…"
+            placeholder="Buscar pergunta, key ou ajuda…"
             className="w-full rounded-lg border border-gray-200 bg-white py-2 pl-9 pr-3 text-sm outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
           />
         </div>
@@ -221,14 +237,16 @@ export function AdminQuizPage() {
                 if (ft) setEditingTheme(ft)
               }}
               title="Editar tema"
-              className="border-y border-gray-200 bg-white px-1.5 py-1 text-gray-400 transition hover:bg-gray-50 hover:text-gray-700"
+              aria-label={`Editar tema ${t.name}`}
+              className="border-y border-gray-200 bg-white px-1.5 py-1 text-gray-500 transition hover:bg-gray-50 hover:text-gray-700"
             >
               <Pencil className="h-3 w-3" />
             </button>
             <button
               onClick={() => openCreate(t.code)}
               title="Nova pergunta neste tema"
-              className="rounded-r-full border border-gray-200 bg-white px-1.5 py-1 text-gray-400 transition hover:bg-brand-50 hover:text-brand-600"
+              aria-label={`Nova pergunta no tema ${t.name}`}
+              className="rounded-r-full border border-gray-200 bg-white px-1.5 py-1 text-gray-500 transition hover:bg-brand-50 hover:text-brand-600"
             >
               <Plus className="h-3 w-3" />
             </button>
@@ -256,10 +274,11 @@ export function AdminQuizPage() {
               const isOpen = expanded.has(q.key)
               return (
                 <li key={q.key} className="px-4 py-3 sm:px-6">
-                  <div className="flex items-start gap-3">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-3">
                     <button
                       onClick={() => toggle(q.key)}
-                      className="flex flex-1 items-start gap-3 text-left"
+                      aria-expanded={isOpen}
+                      className="flex min-w-0 flex-1 items-start gap-3 text-left"
                     >
                       <span
                         className="mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
@@ -270,7 +289,7 @@ export function AdminQuizPage() {
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="text-sm font-medium text-gray-900">{q.text}</span>
-                          <span className="rounded-md bg-gray-100 px-1.5 py-0.5 font-mono text-[11px] text-gray-600">
+                          <span className="rounded-md bg-gray-100 px-1.5 py-0.5 font-mono text-[11px] text-gray-600 break-all">
                             {q.key}
                           </span>
                         </div>
@@ -287,52 +306,60 @@ export function AdminQuizPage() {
                           {q.showIf ? (
                             <>
                               <span>·</span>
-                              <span className="rounded-full bg-amber-50 px-2 py-0.5 text-amber-700">
+                              <span className="rounded-full bg-amber-50 px-2 py-0.5 text-amber-800">
                                 Condicional
                               </span>
                             </>
                           ) : null}
+                          {q.showIfRepaired ? (
+                            <span className="rounded-full bg-red-50 px-2 py-0.5 text-red-700">
+                              Condição incompleta no banco
+                            </span>
+                          ) : null}
                           {!q.isRequired ? (
                             <>
                               <span>·</span>
-                              <span className="text-gray-400">opcional</span>
+                              <span className="text-gray-500">opcional</span>
                             </>
                           ) : null}
                         </div>
                         {q.helpText ? (
-                          <p className="mt-1 text-xs text-gray-400">{q.helpText}</p>
+                          <p className="mt-1 text-xs text-gray-500">{q.helpText}</p>
                         ) : null}
                       </div>
                       {isOpen ? (
-                        <ChevronDown className="h-4 w-4 flex-shrink-0 text-gray-400" />
+                        <ChevronDown className="h-4 w-4 flex-shrink-0 text-gray-500" />
                       ) : (
-                        <ChevronRight className="h-4 w-4 flex-shrink-0 text-gray-400" />
+                        <ChevronRight className="h-4 w-4 flex-shrink-0 text-gray-500" />
                       )}
                     </button>
 
                     {/* Action toolbar */}
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-1 self-end sm:self-auto">
                       <button
                         onClick={() => reorder.mutate({ questionKey: q.key, direction: 'up', questions })}
                         disabled={reorder.isPending}
-                        className="rounded p-1 text-gray-400 transition hover:bg-gray-100 hover:text-gray-600 disabled:opacity-30"
+                        className="rounded p-1 text-gray-500 transition hover:bg-gray-100 hover:text-gray-600 disabled:opacity-30"
                         title="Subir no tema"
+                        aria-label={`Subir ${q.key} no tema`}
                       >
                         <ArrowUp className="h-3.5 w-3.5" />
                       </button>
                       <button
                         onClick={() => reorder.mutate({ questionKey: q.key, direction: 'down', questions })}
                         disabled={reorder.isPending}
-                        className="rounded p-1 text-gray-400 transition hover:bg-gray-100 hover:text-gray-600 disabled:opacity-30"
+                        className="rounded p-1 text-gray-500 transition hover:bg-gray-100 hover:text-gray-600 disabled:opacity-30"
                         title="Descer no tema"
+                        aria-label={`Descer ${q.key} no tema`}
                       >
                         <ArrowDown className="h-3.5 w-3.5" />
                       </button>
                       <button
                         onClick={() => toggleActive.mutate({ questionKey: q.key, isActive: false })}
                         disabled={toggleActive.isPending}
-                        className="rounded p-1 text-gray-400 transition hover:bg-amber-50 hover:text-amber-700 disabled:opacity-30"
-                        title="Desactivar pergunta"
+                        className="rounded p-1 text-gray-500 transition hover:bg-amber-50 hover:text-amber-700 disabled:opacity-30"
+                        title="Desativar pergunta"
+                        aria-label={`Desativar ${q.key}`}
                       >
                         <EyeOff className="h-3.5 w-3.5" />
                       </button>
@@ -352,8 +379,13 @@ export function AdminQuizPage() {
                         <div className="text-xs text-gray-600">
                           <span className="font-semibold">Mostra quando:</span>{' '}
                           <code className="rounded bg-white px-1.5 py-0.5 text-[11px]">
-                            {showIfSummary(q.showIf)}
+                            {describeShowIf(q.showIf)}
                           </code>
+                          {q.showIfRepaired ? (
+                            <span className="ml-2 text-red-700">
+                              (regra padrão do código — a do banco está incompleta)
+                            </span>
+                          ) : null}
                         </div>
                       ) : null}
 
@@ -526,19 +558,19 @@ function ThemeEditor({
               {isCreating ? 'Novo tema' : 'Editar tema'}
             </p>
             {!isCreating && (
-              <p className="mt-0.5 font-mono text-xs text-gray-400">{theme!.code}</p>
+              <p className="mt-0.5 font-mono text-xs text-gray-500">{theme!.code}</p>
             )}
           </div>
           <button
             onClick={onClose}
-            className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+            className="rounded-lg p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-600"
             aria-label="Fechar"
           >
             <X className="h-5 w-5" />
           </button>
         </header>
 
-        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 space-y-4 sm:px-6">
           {isCreating && (
             <div>
               <label className="mb-1.5 block text-sm font-medium text-gray-700">
@@ -591,13 +623,13 @@ function ThemeEditor({
               >
                 {namePt || 'Pré-visualização'}
               </span>
-              <span className="font-mono text-xs text-gray-400">{color}</span>
+              <span className="font-mono text-xs text-gray-500">{color}</span>
             </div>
           </div>
 
           <div>
             <label className="mb-2 block text-sm font-medium text-gray-700">
-              Ícone — actual:{' '}
+              Ícone atual:{' '}
               <span className="text-base" aria-label={icon}>
                 {icon}
               </span>
@@ -642,7 +674,7 @@ function ThemeEditor({
             ) : (
               <Save className="h-4 w-4" />
             )}
-            {isPending ? 'A guardar…' : isCreating ? 'Criar tema' : 'Guardar'}
+            {isPending ? 'Salvando…' : isCreating ? 'Criar tema' : 'Salvar'}
           </button>
         </footer>
       </aside>
