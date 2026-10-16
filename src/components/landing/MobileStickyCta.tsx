@@ -6,8 +6,10 @@
  *   continua escondido abaixo dela (rodapé).
  * - Some enquanto o banner de cookies está aberto (`--cookie-banner-h` > 0):
  *   duas barras fixas empilhadas cobririam um terço da tela.
- * - O StickyCTA já cuida do resto: some com campo focado, respeita a safe-area
- *   e reserva a própria altura no fluxo (monte antes da seção final).
+ * - O StickyCTA já cuida do resto: some com campo focado, respeita a safe-area,
+ *   só conta o CTA de preço como visível com metade dele na tela (fora do
+ *   banner de cookies) e publica a altura em `--sticky-cta-h` só enquanto
+ *   aparece — escondido à força (`forceHidden`), publica 0px.
  */
 import { useEffect, useState, type RefObject } from 'react'
 import { Link } from 'react-router-dom'
@@ -17,12 +19,6 @@ import { Button } from '@/components/ui/Button'
 import { StickyCTA } from '@/components/ui/StickyCTA'
 
 const BANNER_VAR = '--cookie-banner-h'
-
-/**
- * Mesmo visual do estado "hidden" do StickyCTA (transição incluída). `invisible`
- * também tira o link da ordem de tabulação e da árvore de acessibilidade.
- */
-const FORCED_HIDDEN = 'pointer-events-none invisible translate-y-full opacity-0'
 
 function readBannerHeight(): number {
   const value = document.documentElement.style.getPropertyValue(BANNER_VAR)
@@ -84,8 +80,8 @@ export function MobileStickyCta({ anchorRef, inlineCtaRef, endRef, label }: Mobi
     <StickyCTA
       anchorRef={anchorRef}
       inlineCtaRef={inlineCtaRef}
+      forceHidden={forcedHidden}
       label="Começar o diagnóstico"
-      className={forcedHidden ? FORCED_HIDDEN : undefined}
     >
       <Button asChild size="md" className="w-full">
         <Link

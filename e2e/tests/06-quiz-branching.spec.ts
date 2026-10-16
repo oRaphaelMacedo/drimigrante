@@ -407,7 +407,8 @@ test.describe('admin do quiz — editor', () => {
     await expect(dialog).toBeVisible()
     await expect(dialog.getByText('A condição gravada no banco estava incompleta')).toBeVisible()
     await expect(dialog.getByText('Mostrar quando a resposta incluir')).toBeVisible()
-    await expect(dialog.getByRole('button', { name: /Casado\(a\)/, pressed: true })).toBeVisible()
+    // Sem diferenciar maiúsculas: o rótulo B de caso_tipo é "Sou casado(a) ou vivo em união estável…".
+    await expect(dialog.getByRole('button', { name: /casado\(a\)/i, pressed: true })).toBeVisible()
     await dialog.getByRole('button', { name: 'Cancelar' }).click()
     await expect(dialog).toHaveCount(0)
 

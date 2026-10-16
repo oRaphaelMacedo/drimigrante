@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigationType } from 'react-router-dom'
 import { ArrowRight, Check, ClipboardList, Gauge, Unlock } from 'lucide-react'
 import { track } from '@/lib/analytics'
 import { OFFER } from '@/lib/offer'
+import { QUIZ_CTA_LABEL } from '@/lib/copy'
 import { COMPANY, getCompanyIdentification } from '@/data/company'
 import { HAS_WHATSAPP, SUPPORT_EMAIL, WHATSAPP_URL, mailtoHref } from '@/config/contact'
 import { Badge } from '@/components/ui/Badge'
@@ -22,7 +23,6 @@ import { Testimonials } from '@/components/landing/Testimonials'
  * `null`; prova social só com dados reais (Testimonials vem vazio).
  */
 
-const QUIZ_CTA_LABEL = 'Fazer o diagnóstico grátis'
 const MICROCOPY = 'Grátis · sem criar conta · poucos minutos'
 
 type CtaPosition = 'hero' | 'pricing' | 'final'

@@ -3,8 +3,12 @@
  *
  *  - `full` (padrão): marca, navegação e links legais, com alvos de 44px.
  *  - `compact` (modo foco do funil): só os links legais, numa linha.
- *  - O fundo reserva a altura do banner de cookies (`--cookie-banner-h`) e a
- *    safe-area para que os links não fiquem cobertos no celular.
+ *  - O fundo reserva a altura do banner de cookies (`--cookie-banner-h`) e,
+ *    só enquanto uma barra fixa está na tela (StickyCTA, navegação do quiz), a
+ *    altura dela (`--sticky-cta-h`, que já inclui a safe-area); sem barra, só a
+ *    safe-area. Assim os links nunca ficam cobertos no celular e não sobra
+ *    espaço em branco no fim da página (DI-079). Como o rodapé reserva, o
+ *    StickyCTA dispensa o próprio espaçador (`data-sticky-cta-reserve`).
  *  - Identificação da empresa (razão social, NIF, sede) só com dados reais de
  *    `COMPANY`: campos `null` não aparecem (DI-035).
  */
@@ -12,6 +16,7 @@ import { Link } from 'react-router-dom'
 import { COMPANY, getCompanyIdentification } from '@/data/company'
 import { cn } from '@/lib/utils'
 import { Container } from '@/components/ui/Container'
+import { STICKY_CTA_RESERVE_ATTR } from '@/components/ui/sticky-bar'
 import { BrandLogo } from './BrandLogo'
 
 const SERVICE_LINKS = [
@@ -21,16 +26,27 @@ const SERVICE_LINKS = [
 ] as const
 
 const LEGAL_LINKS = [
-  { to: '/termos', label: 'Termos de Serviço', shortLabel: 'Termos' },
+  { to: '/termos', label: 'Termos e condições', shortLabel: 'Termos' },
   { to: '/privacidade', label: 'Privacidade', shortLabel: 'Privacidade' },
   { to: '/cookies', label: 'Cookies', shortLabel: 'Cookies' },
 ] as const
 
+// min-h-11/min-w-11: alvo de 44px mesmo em rótulos curtos ("Preços").
 const linkClass = cn(
-  'inline-flex min-h-11 items-center rounded-md text-sm text-muted-foreground',
+  'inline-flex min-h-11 min-w-11 items-center rounded-md text-sm text-muted-foreground',
   'underline-offset-4 transition-colors hover:text-foreground hover:underline',
   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
 )
+
+/**
+ * Espaço no fim do rodapé: a barra fixa visível (que já inclui a safe-area) ou,
+ * sem barra, a safe-area; mais o banner de cookies.
+ */
+const BOTTOM_RESERVE =
+  'pb-[calc(max(var(--sticky-cta-h,0px),env(safe-area-inset-bottom,0px))+var(--cookie-banner-h,0px))]'
+
+/** Marca o rodapé como responsável pela reserva da barra fixa (ver StickyCTA). */
+const reserveProps = { [STICKY_CTA_RESERVE_ATTR]: '' }
 
 export interface FooterProps {
   /** `compact` no modo foco do funil (quiz, resultado, checkout). */
@@ -47,16 +63,13 @@ export function Footer({ variant = 'full' }: FooterProps) {
   const holderSentence = holder.endsWith('.') ? holder : `${holder}.`
 
   return (
-    <footer
-      data-variant="full"
-      className="border-t border-border bg-card pb-[calc(env(safe-area-inset-bottom)+var(--cookie-banner-h,0px))]"
-    >
+    <footer data-variant="full" {...reserveProps} className={cn('border-t border-border bg-card', BOTTOM_RESERVE)}>
       <Container className="pb-5 pt-6 sm:pb-6 sm:pt-10">
         <div className="grid grid-cols-2 gap-x-6 gap-y-6 md:grid-cols-4 md:gap-y-8">
           <div className="col-span-2">
             <Link
               to="/"
-              className="inline-flex rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              className="inline-flex min-h-11 items-center rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
             >
               <BrandLogo />
             </Link>
@@ -116,19 +129,17 @@ export function Footer({ variant = 'full' }: FooterProps) {
 }
 
 /**
- * Modo foco: links legais numa linha. No celular reserva também a altura de uma
- * barra de ação fixa (quiz, StickyCTA) — ela fica em `bottom: --cookie-banner-h`
- * e cobriria os links no fim da rolagem.
+ * Modo foco: links legais numa linha. A barra de ação fixa (quiz, StickyCTA)
+ * fica em `bottom: --cookie-banner-h` e cobriria os links no fim da rolagem: o
+ * rodapé reserva a altura dela só enquanto ela está visível (`--sticky-cta-h`;
+ * 0px no desktop, onde a barra não é fixa).
  */
 function CompactFooter() {
   return (
     <footer
       data-variant="compact"
-      className={cn(
-        'border-t border-border bg-background',
-        'pb-[calc(5.5rem+env(safe-area-inset-bottom)+var(--cookie-banner-h,0px))]',
-        'md:pb-[calc(env(safe-area-inset-bottom)+var(--cookie-banner-h,0px))]',
-      )}
+      {...reserveProps}
+      className={cn('border-t border-border bg-background', BOTTOM_RESERVE)}
     >
       <Container className="py-1">
         <nav aria-label="Links legais">

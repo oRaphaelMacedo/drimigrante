@@ -1,5 +1,9 @@
 import * as React from 'react'
 import { cn } from '@/lib/utils'
+import { STICKY_CTA_RESERVE_ATTR, useBottomOverlayHeight, usePublishStickyBarHeight } from './sticky-bar'
+
+/** Fração do CTA inline que precisa estar na tela para contar como visível. */
+const INLINE_VISIBLE_RATIO = 0.5
 
 const NON_TEXT_INPUT_TYPES = new Set([
   'button',
@@ -73,10 +77,13 @@ export interface StickyCTAProps {
    */
   anchorRef?: React.RefObject<Element>
   /**
-   * CTA inline equivalente. Enquanto ele estiver visível, a barra some para não
-   * haver dois CTAs iguais na tela.
+   * CTA inline equivalente. Enquanto pelo menos metade dele estiver visível
+   * (descontando o banner de cookies e a BottomNav, que o cobrem), a barra some
+   * para não haver dois CTAs iguais na tela.
    */
   inlineCtaRef?: React.RefObject<Element>
+  /** Esconde a barra (ex.: a página já mostra o próprio CTA). Publica 0px. */
+  forceHidden?: boolean
   /** Exibe também a partir de md (padrão: só no celular). */
   showOnDesktop?: boolean
   /** Rótulo da região para leitores de tela. */
@@ -88,13 +95,18 @@ export interface StickyCTAProps {
 /**
  * Barra de ação fixa no rodapé (z-30), pensada para o celular.
  *
- * - Aparece quando a âncora sai da tela e some quando o CTA inline está visível
- *   (IntersectionObserver).
+ * - Aparece quando a âncora sai da tela e some quando pelo menos metade do CTA
+ *   inline está visível (IntersectionObserver). A área considerada desconta o
+ *   banner de cookies e a BottomNav (`--cookie-banner-h`, `--bottom-nav-h`):
+ *   um botão escondido atrás do banner não conta como visível.
  * - Some enquanto um input/textarea está focado (teclado aberto).
  * - Fica acima do banner de cookies (`bottom: var(--cookie-banner-h)`) e respeita
  *   a safe-area do iPhone.
- * - Renderiza um espaçador com a altura da barra no lugar onde é montada: monte-a
- *   no fim do conteúdo da página para que o último bloco não fique coberto.
+ * - Publica a própria altura em `--sticky-cta-h` enquanto está visível (0px
+ *   escondida), para o rodapé público reservar espaço só quando preciso.
+ * - Fora do layout público (sem rodapé que reserve espaço), renderiza um
+ *   espaçador com a altura da barra no lugar onde é montada: monte-a no fim do
+ *   conteúdo da página para que o último bloco não fique coberto.
  *
  * @example
  * const heroRef = useRef<HTMLElement>(null)
@@ -108,6 +120,7 @@ export function StickyCTA({
   children,
   anchorRef,
   inlineCtaRef,
+  forceHidden = false,
   showOnDesktop = false,
   label = 'Ação principal',
   className,
@@ -116,7 +129,18 @@ export function StickyCTA({
   const [anchorPassed, setAnchorPassed] = React.useState(!anchorRef)
   const [inlineVisible, setInlineVisible] = React.useState(false)
   const [barHeight, setBarHeight] = React.useState(0)
+  const [footerReserves, setFooterReserves] = React.useState(false)
   const keyboardOpen = useVirtualKeyboardOpen()
+  const bottomOverlay = useBottomOverlayHeight()
+
+  // O rodapé público já reserva a altura da barra: sem espaçador duplicado.
+  // Premissa: o Footer monta antes ou no mesmo commit que o StickyCTA (o Layout
+  // público o renderiza junto com a página, sem lazy/Suspense próprio), então
+  // basta checar na montagem. Se o rodapé passar a montar depois, trocar por
+  // um MutationObserver no <body>.
+  React.useLayoutEffect(() => {
+    setFooterReserves(document.querySelector(`[${STICKY_CTA_RESERVE_ATTR}]`) !== null)
+  }, [])
 
   React.useEffect(() => {
     const anchor = anchorRef?.current
@@ -136,16 +160,26 @@ export function StickyCTA({
     return () => observer.disconnect()
   }, [anchorRef])
 
+  // Recria o observador quando o banner de cookies/BottomNav muda de altura:
+  // o rootMargin negativo tira do "visível" a faixa que eles cobrem.
   React.useEffect(() => {
     const inlineCta = inlineCtaRef?.current
     if (!inlineCta || typeof IntersectionObserver === 'undefined') {
       setInlineVisible(false)
       return
     }
-    const observer = new IntersectionObserver(([entry]) => setInlineVisible(entry.isIntersecting))
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (!entry) return
+        // Sem razão informada (ambientes simulados), vale o isIntersecting.
+        const ratio = typeof entry.intersectionRatio === 'number' ? entry.intersectionRatio : 1
+        setInlineVisible(entry.isIntersecting && ratio >= INLINE_VISIBLE_RATIO - 0.01)
+      },
+      { rootMargin: `0px 0px ${-Math.round(bottomOverlay)}px 0px`, threshold: [0, INLINE_VISIBLE_RATIO, 1] },
+    )
     observer.observe(inlineCta)
     return () => observer.disconnect()
-  }, [inlineCtaRef])
+  }, [inlineCtaRef, bottomOverlay])
 
   React.useEffect(() => {
     const bar = barRef.current
@@ -158,12 +192,15 @@ export function StickyCTA({
     return () => observer.disconnect()
   }, [])
 
-  const visible = anchorPassed && !inlineVisible && !keyboardOpen
+  const visible = !forceHidden && anchorPassed && !inlineVisible && !keyboardOpen
+  usePublishStickyBarHeight(barRef, visible)
 
   return (
     <>
-      {/* Espaçador: compensa a altura da barra no fim do conteúdo. */}
-      <div aria-hidden="true" className={cn(!showOnDesktop && 'md:hidden')} style={{ height: barHeight }} />
+      {/* Espaçador: compensa a altura da barra no fim do conteúdo (só sem rodapé que reserve). */}
+      {!footerReserves && (
+        <div aria-hidden="true" className={cn(!showOnDesktop && 'md:hidden')} style={{ height: barHeight }} />
+      )}
       <div
         ref={barRef}
         role="region"

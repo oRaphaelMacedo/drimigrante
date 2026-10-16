@@ -2,7 +2,7 @@ import { test, expect, type Page } from '@playwright/test'
 import { LandingPage } from '../pages/LandingPage'
 
 /**
- * Landing (DI-034, DI-035, DI-036, DI-076).
+ * Landing (DI-034, DI-035, DI-036, DI-076, DI-074).
  *
  * Nenhuma chamada sai para o backend: as APIs do Supabase (rest/auth/functions/
  * storage) e os analytics são abortados aqui mesmo, então o spec roda contra
@@ -38,6 +38,9 @@ test.describe('Landing page', () => {
     await page.goto('/?utm_source=teste&utm_campaign=e2e')
 
     await expect(page).toHaveTitle(DEFAULT_TITLE)
+    // Idioma único pt-BR (DI-074).
+    await expect(page.locator('html')).toHaveAttribute('lang', 'pt-BR')
+    await expect(page.locator('meta[property="og:locale"]')).toHaveAttribute('content', 'pt_BR')
     await expect(page.locator('meta[property="og:title"]')).toHaveAttribute('content', DEFAULT_TITLE)
     await expect(page.locator('h1')).toContainText(/nacionalidade portuguesa/i)
     await expect(page.locator('link[rel="canonical"]')).toHaveAttribute('href', 'https://www.drimigrante.com/')
@@ -62,6 +65,8 @@ test.describe('Landing page', () => {
     for (const forbidden of [/4,90/, /válido para sempre/i, /mais popular/i, /20 perguntas/i, /advogados? especializad/i]) {
       expect(text).not.toMatch(forbidden)
     }
+    // pt-BR (DI-074): nada de construções de Portugal na interface.
+    expect(text).not.toMatch(/introduza|partilh|equipa\b|subscriç|aceder|connosco|telemóvel|ecrã|colónia/i)
     await expect(page.getByTestId('landing-offer')).toContainText('€30')
     await expect(page.getByTestId('cta-pricing-subscription')).toHaveCount(0)
     expect(await page.getByTestId('landing-faq').locator('details').count()).toBeGreaterThanOrEqual(6)
@@ -97,6 +102,7 @@ test.describe('Landing page', () => {
         /* banner may already be dismissed */
       })
 
+    await expect(page.locator('footer a[href="/termos"]')).toHaveText('Termos e condições')
     for (const [path, h1Text] of [
       ['/termos', /Termos/],
       ['/privacidade', /Privacidade/],

@@ -4,6 +4,9 @@
 // ícone e "Próximo" largo; ao trocar de pergunta, a tela volta ao topo e o foco
 // vai para o título; nas perguntas de escolha única, tocar numa opção avança
 // sozinho (só toque/clique/Enter/Espaço — nunca as setas do teclado).
+// A barra publica a própria altura em --sticky-cta-h enquanto está na tela, e
+// o rodapé compacto reserva esse espaço (um espaçador aqui dobraria o branco
+// no fim da página).
 //
 // Tela "em breve" (DI-037): a lista de espera grava pela RPC anônima (o insert
 // direto era barrado pela RLS e o e-mail se perdia) e só confirma depois que o
@@ -19,6 +22,7 @@ import { QuizQuestionCard, type QuizAnswerMeta } from '@/components/quiz/QuizQue
 import { CAPTURE_TITLE_ID, QuizCaptureForm } from '@/components/quiz/QuizCaptureForm'
 import { useKeyboardActivation } from '@/components/quiz/keyboard-activation'
 import { Badge, Button, Container, Input } from '@/components/ui'
+import { usePublishStickyBarHeight } from '@/components/ui/sticky-bar'
 import { Sentry } from '@/lib/sentry'
 import { cn } from '@/lib/utils'
 
@@ -111,28 +115,6 @@ function useTextFieldFocused(): boolean {
   return focused
 }
 
-/**
- * Altura atual do elemento (ResizeObserver). Usada para reservar, no fim do
- * conteúdo, o espaço exato da barra fixa — que cresce com o aviso de resposta
- * obrigatória e com a área segura do iPhone.
- */
-function useElementHeight<T extends HTMLElement>(): [React.RefCallback<T>, number | null] {
-  const [height, setHeight] = useState<number | null>(null)
-  const observerRef = useRef<ResizeObserver | null>(null)
-  const ref = useCallback((el: T | null) => {
-    observerRef.current?.disconnect()
-    observerRef.current = null
-    if (!el) return
-    const measure = () => setHeight(Math.ceil(el.getBoundingClientRect().height))
-    measure()
-    if (typeof ResizeObserver === 'undefined') return
-    observerRef.current = new ResizeObserver(measure)
-    observerRef.current.observe(el)
-  }, [])
-  useEffect(() => () => observerRef.current?.disconnect(), [])
-  return [ref, height]
-}
-
 function requiredHintText(fieldType: string | undefined): string {
   if (fieldType === 'multiselect') return 'Marque pelo menos uma opção para continuar.'
   if (fieldType === 'number' || fieldType === 'select') return 'Responda para continuar.'
@@ -186,7 +168,7 @@ export function QuizPage() {
 
   const textFieldFocused = useTextFieldFocused()
   const nextActivation = useKeyboardActivation()
-  const [navRef, navHeight] = useElementHeight<HTMLElement>()
+  const navRef = useRef<HTMLElement>(null)
   const headingRef = useRef<HTMLHeadingElement>(null)
   const sectionRef = useRef<HTMLElement>(null)
 
@@ -206,6 +188,10 @@ export function QuizPage() {
 
   // Guarda (DI-066): estado de pergunta sem pergunta para mostrar nunca fica em branco.
   const isQuestionMissing = quizState === 'question' && !currentQuestion
+
+  // Altura da barra fixa para o rodapé reservar (0px com o teclado aberto,
+  // fora das perguntas e a partir de sm, onde a navegação não é fixa).
+  usePublishStickyBarHeight(navRef, quizState === 'question' && Boolean(currentQuestion) && !textFieldFocused)
 
   const currentQuestionKey = currentQuestion?.key
 
@@ -407,16 +393,6 @@ export function QuizPage() {
                 </div>
               </nav>
 
-              {/* Espaço para a barra fixa (e o banner de cookies) não cobrir o fim do conteúdo */}
-              <div
-                aria-hidden="true"
-                className="sm:hidden"
-                style={{
-                  height: navHeight
-                    ? `calc(${navHeight}px + var(--cookie-banner-h, 0px))`
-                    : 'calc(4.5rem + env(safe-area-inset-bottom, 0px) + var(--cookie-banner-h, 0px))',
-                }}
-              />
             </div>
           )}
 

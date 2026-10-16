@@ -35,7 +35,7 @@ function selectedOption(choice: ConsentChoice | null, metaPixel: boolean): Optio
 }
 
 export function CookiesPage() {
-  useSEO({ title: 'Política de Cookies', description: 'Política e gestão de cookies.' })
+  useSEO({ title: 'Política de Cookies', description: 'Quais cookies usamos e como mudar a sua escolha.' })
   const metaPixel = isMetaPixelConfigured()
   const [choice, setChoice] = useState<ConsentChoice | null>(() => getConsentChoice())
   const [saved, setSaved] = useState(false)
@@ -150,7 +150,7 @@ export function CookiesPage() {
               aria-pressed={selected}
               data-testid={`cookie-choice-${option.choice}`}
               className={cn(
-                'inline-flex h-12 items-center justify-center gap-2 rounded-xl border bg-card px-5 text-base font-semibold text-foreground transition-colors duration-150 hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
+                'inline-flex h-12 items-center justify-center gap-2 rounded-xl border bg-card px-5 text-base font-semibold text-foreground transition-colors duration-fast hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
                 selected ? 'border-primary ring-1 ring-primary' : 'border-border',
               )}
             >

@@ -12,6 +12,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { LayoutDashboard, LogOut, Menu, X } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { track } from '@/lib/analytics'
+import { QUIZ_CTA_LABEL } from '@/lib/copy'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/Button'
 import { Container } from '@/components/ui/Container'
@@ -21,8 +22,6 @@ const NAV_LINKS = [
   { to: '/#como-funciona', label: 'Como funciona' },
   { to: '/#precos', label: 'Preços' },
 ] as const
-
-const QUIZ_CTA_LABEL = 'Fazer o diagnóstico grátis'
 
 const brandLinkClass =
   'inline-flex min-h-11 items-center rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'

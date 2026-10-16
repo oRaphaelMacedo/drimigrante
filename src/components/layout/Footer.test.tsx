@@ -2,6 +2,8 @@
 /**
  * DI-035 — identificação da empresa no rodapé só com dados reais: campos
  * `null`/placeholder de COMPANY não aparecem.
+ * W4-04 — o rodapé reserva a barra fixa só quando ela está visível
+ * (`--sticky-cta-h`), sem os 5,5rem fixos que dobravam o espaço em branco.
  */
 import { render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
@@ -28,6 +30,7 @@ vi.mock('@/data/company', async () => {
 })
 
 import { Footer } from './Footer'
+import { STICKY_CTA_RESERVE_ATTR } from '@/components/ui/sticky-bar'
 
 function renderFooter() {
   render(
@@ -53,5 +56,30 @@ describe('Footer — identificação da empresa', () => {
     expect(screen.getByTestId('footer-company-address')).toHaveTextContent('Sede: Lisboa')
     expect(screen.queryByTestId('footer-company-nif')).toBeNull()
     expect(footer.textContent).not.toMatch(/A_PREENCHER/)
+  })
+})
+
+describe('Footer — reserva da barra fixa (W4-04)', () => {
+  it.each(['full', 'compact'] as const)('%s: reserva --sticky-cta-h (ou a safe-area) e o banner de cookies', (variant) => {
+    render(
+      <MemoryRouter>
+        <Footer variant={variant} />
+      </MemoryRouter>,
+    )
+    const footer = screen.getByRole('contentinfo')
+    expect(footer).toHaveAttribute(STICKY_CTA_RESERVE_ATTR)
+    expect(footer.className).toContain(
+      'pb-[calc(max(var(--sticky-cta-h,0px),env(safe-area-inset-bottom,0px))+var(--cookie-banner-h,0px))]',
+    )
+    expect(footer.className).not.toContain('5.5rem')
+  })
+
+  it('compacto: links legais com "Termos e condições" como nome acessível', () => {
+    render(
+      <MemoryRouter>
+        <Footer variant="compact" />
+      </MemoryRouter>,
+    )
+    expect(screen.getByRole('link', { name: 'Termos e condições' })).toHaveAttribute('href', '/termos')
   })
 })
