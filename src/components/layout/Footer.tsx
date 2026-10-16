@@ -5,9 +5,11 @@
  *  - `compact` (modo foco do funil): só os links legais, numa linha.
  *  - O fundo reserva a altura do banner de cookies (`--cookie-banner-h`) e a
  *    safe-area para que os links não fiquem cobertos no celular.
+ *  - Identificação da empresa (razão social, NIF, sede) só com dados reais de
+ *    `COMPANY`: campos `null` não aparecem (DI-035).
  */
 import { Link } from 'react-router-dom'
-import { COMPANY } from '@/data/company'
+import { COMPANY, getCompanyIdentification } from '@/data/company'
 import { cn } from '@/lib/utils'
 import { Container } from '@/components/ui/Container'
 import { BrandLogo } from './BrandLogo'
@@ -39,14 +41,18 @@ export function Footer({ variant = 'full' }: FooterProps) {
   if (variant === 'compact') return <CompactFooter />
 
   const year = new Date().getFullYear()
+  const identification = getCompanyIdentification()
+  const holder = identification.find((field) => field.key === 'legalName')?.value ?? COMPANY.brandName
+  // "Lda." já termina em ponto: não duplica.
+  const holderSentence = holder.endsWith('.') ? holder : `${holder}.`
 
   return (
     <footer
       data-variant="full"
       className="border-t border-border bg-card pb-[calc(env(safe-area-inset-bottom)+var(--cookie-banner-h,0px))]"
     >
-      <Container className="pb-6 pt-10">
-        <div className="grid grid-cols-2 gap-x-6 gap-y-8 md:grid-cols-4">
+      <Container className="pb-5 pt-6 sm:pb-6 sm:pt-10">
+        <div className="grid grid-cols-2 gap-x-6 gap-y-6 md:grid-cols-4 md:gap-y-8">
           <div className="col-span-2">
             <Link
               to="/"
@@ -91,10 +97,17 @@ export function Footer({ variant = 'full' }: FooterProps) {
           </nav>
         </div>
 
-        <div className="mt-8 space-y-1 border-t border-border pt-6 text-center text-sm text-muted-foreground [text-wrap:pretty]">
+        <div className="mt-5 space-y-1 border-t border-border pt-5 text-center text-sm text-muted-foreground [text-wrap:pretty] sm:mt-8 sm:pt-6">
           <p>
-            © {year} {COMPANY.brandName}. Todos os direitos reservados.
+            © {year} {holderSentence} Todos os direitos reservados.
           </p>
+          {identification
+            .filter((field) => field.key !== 'legalName')
+            .map((field) => (
+              <p key={field.key} data-testid={`footer-company-${field.key}`}>
+                {field.label}: {field.value}
+              </p>
+            ))}
           <p>As informações deste site não constituem aconselhamento jurídico.</p>
         </div>
       </Container>
