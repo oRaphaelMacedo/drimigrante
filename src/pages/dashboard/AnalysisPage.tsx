@@ -31,6 +31,7 @@ import { fetchFullAnalysis, getFullAnalysisErrorKind } from '@/hooks/useAssessme
 import { useFullAnalysisGeneration } from '@/hooks/useFullAnalysisGeneration'
 import { Badge, Button, Card } from '@/components/ui'
 import { MarkdownText } from '@/components/MarkdownText'
+import { ShareWithFamily } from '@/components/ShareButton'
 import {
   getNationalityPath,
   getPathDocuments,
@@ -292,9 +293,7 @@ export function AnalysisPage() {
         </div>
         <p className="hidden text-sm text-muted-foreground print:block">Doutor Imigrante</p>
         <div className="space-y-1.5">
-          <h1 className="font-display text-[1.75rem] font-semibold leading-tight [text-wrap:balance] sm:text-4xl">
-            Sua análise completa
-          </h1>
+          <h1 className="text-h1 text-foreground">Sua análise completa</h1>
           <p className="text-base text-muted-foreground [text-wrap:pretty]">
             {diagnosedAt ? `Diagnóstico de ${diagnosedAt}.` : 'Feita a partir das suas respostas no diagnóstico.'}
           </p>
@@ -320,7 +319,7 @@ export function AnalysisPage() {
       {/* Caminhos para a nacionalidade */}
       <section id={PATHS_ANCHOR} aria-labelledby={`${PATHS_ANCHOR}-title`} className="scroll-mt-20 space-y-4">
         <div className="space-y-1">
-          <h2 id={`${PATHS_ANCHOR}-title`} className="font-display text-[1.375rem] font-semibold leading-snug sm:text-2xl">
+          <h2 id={`${PATHS_ANCHOR}-title`} className="text-h2 text-foreground">
             Caminhos para a nacionalidade
           </h2>
           {pathways.length > 1 && (
@@ -372,7 +371,7 @@ export function AnalysisPage() {
 
       {/* Análise detalhada (IA) */}
       <section id={ANALYSIS_ANCHOR} aria-labelledby={`${ANALYSIS_ANCHOR}-title`} className="scroll-mt-20 space-y-4">
-        <h2 id={`${ANALYSIS_ANCHOR}-title`} className="font-display text-[1.375rem] font-semibold leading-snug sm:text-2xl">
+        <h2 id={`${ANALYSIS_ANCHOR}-title`} className="text-h2 text-foreground">
           Análise detalhada
         </h2>
         {!assessmentId ? (
@@ -415,6 +414,11 @@ export function AnalysisPage() {
 
       {/* Próximos passos (some quando o servidor nega o acesso: a ação é a do card acima) */}
       {!accessDenied && <NextStepsCard canChat={canChat} />}
+
+      {/* DI-053: convite para a família fazer o quiz grátis (link sem dados desta conta). */}
+      <div data-print-hide className="print:hidden">
+        <ShareWithFamily placement="analysis" />
+      </div>
 
       <p className="border-t pt-4 text-sm leading-relaxed text-muted-foreground [text-wrap:pretty]">
         Análise informativa, gerada por IA a partir das suas respostas. Não constitui aconselhamento jurídico. Antes de
@@ -688,7 +692,7 @@ function AccordionItem({ section, open, onToggle }: { section: MarkdownSection; 
           <span className="[text-wrap:balance]">{section.title}</span>
           <ChevronDown
             className={cn(
-              'h-5 w-5 shrink-0 text-muted-foreground transition-transform duration-200 ease-out print:hidden',
+              'h-5 w-5 shrink-0 text-muted-foreground transition-transform duration-base ease-out print:hidden',
               open && 'rotate-180',
             )}
             aria-hidden="true"
@@ -947,7 +951,7 @@ function StateMessage({
       <div className="flex h-14 w-14 items-center justify-center rounded-full bg-muted">
         <Icon className="h-7 w-7 text-muted-foreground" aria-hidden="true" />
       </div>
-      <h1 className="font-display text-2xl font-semibold leading-tight [text-wrap:balance]">{title}</h1>
+      <h1 className="text-h2 text-foreground">{title}</h1>
       <p className="text-base leading-relaxed text-muted-foreground [text-wrap:pretty]">{description}</p>
       {action && <div className="mt-2 flex w-full flex-col items-center gap-2">{action}</div>}
       {secondary}
