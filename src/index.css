@@ -2,41 +2,71 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Direção visual "Azulejo" (DI-062).
+ *
+ * Fonte da verdade das cores do app, em HSL no formato do shadcn/ui
+ * (`H S% L%`, usado como `hsl(var(--token))`). O tailwind.config.ts só mapeia
+ * estes tokens para classes. Os comentários trazem o hex exato e o contraste.
+ *
+ * Contraste: `npm test` (src/lib/contrast.test.ts) falha se algum par cair
+ * abaixo de 4,5:1; a tabela completa sai em `npx tsx scripts/check-contrast.ts`.
+ * Regras de uso: DESIGN.md.
+ */
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
+    /* Superfícies e texto */
+    --background: 225 50% 98.4%; /* #f9fafd */
+    --foreground: 223 34.4% 12%; /* #141a29 — 16,6:1 sobre o fundo */
+    --card: 0 0% 100%; /* #ffffff */
+    --card-foreground: 223 34.4% 12%;
     --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
-    --primary: 222 80% 48%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 222 80% 48%;
-    --radius: 0.5rem;
+    --popover-foreground: 223 34.4% 12%;
+
+    /* Cobalto: o ÚNICO primary do app (= brand-700, theme-color e manifest). */
+    --primary: 228 73% 45.1%; /* #1f41c7 — branco por cima 7,96:1 */
+    --primary-foreground: 0 0% 100%;
+    --primary-hover: 228 75.5% 38.4%; /* #1836ac */
 
     /*
-     * Tokens complementares da direção "Azulejo" usados por src/components/ui.
-     * Os tokens acima continuam com os valores atuais (o W2-01 redefine-os).
+     * Âmbar: SÓ para CTA de compra/pagamento (Button variant="pay") e destaques
+     * de compra. Texto sempre escuro: branco sobre âmbar é proibido.
      */
-    --primary-hover: 228 75.5% 38.4%; /* #1836ac */
-    --accent-hover: 41 92% 51%; /* #f5ab0f — texto accent-foreground 8,2:1 */
-    --success: 151 82.9% 25.3%; /* #0b7643 */
+    --accent: 40.5 98.1% 58.8%; /* #fdba2f */
+    --accent-foreground: 33 64.3% 11%; /* #2e1e0a — 9,37:1 */
+    --accent-hover: 40.7 92% 51%; /* #f5ab0f — texto accent-foreground 8,2:1 */
+
+    /* Neutros */
+    --secondary: 223 33.3% 95.9%; /* = muted */
+    --secondary-foreground: 223 34.4% 12%;
+    --muted: 223 33.3% 95.9%; /* #f1f3f8 */
+    --muted-foreground: 221 10.7% 40.4%; /* #5c6372 — 6,03:1 sobre branco */
+    --border: 222 23.6% 89.2%; /* #dde1ea */
+    --input: 222 23.6% 89.2%; /* #dde1ea */
+    --ring: 228 73% 45.1%; /* = primary */
+
+    /* Estados (texto sobre branco ≥5:1; branco por cima também passa) */
+    --success: 151.4 82.9% 25.3%; /* #0b7643 — 5,7:1 */
     --success-foreground: 0 0% 100%;
-    --warning: 39 100% 27.1%; /* #8a5a00 */
+    --warning: 39 100% 27.1%; /* #8a5a00 — 5,9:1 */
     --warning-foreground: 0 0% 100%;
+    --destructive: 0.4 67.9% 47.6%; /* #cc2827 — 5,38:1 */
+    --destructive-foreground: 0 0% 100%;
+
+    /* Forma: cards com --radius; controles rounded-xl (.75rem); pílula só em badges. */
+    --radius: 0.875rem;
+
+    /*
+     * Sombras tingidas (nunca preto puro). sm e md são as da direção; lg é
+     * extensão para sheets e diálogos; xl/2xl só cobrem o código legado.
+     */
     --shadow-sm: 0 1px 2px rgb(20 26 41 / 0.06);
     --shadow-md: 0 8px 24px -8px rgb(31 65 199 / 0.18);
+    --shadow-lg: 0 16px 40px -12px rgb(31 65 199 / 0.22);
+    --shadow-xl: 0 24px 48px -16px rgb(31 65 199 / 0.24);
+    --shadow-2xl: 0 32px 64px -24px rgb(20 26 41 / 0.28);
+
+    /* Movimento */
     --ease-out: cubic-bezier(0.25, 1, 0.5, 1);
     --duration-fast: 150ms;
     --duration-base: 250ms;
@@ -50,6 +80,8 @@
   }
 }
 
+/* As fontes (@font-face da Figtree, da Literata e das reservas) ficam em src/styles/fonts.css. */
+
 @layer base {
   * {
     @apply border-border;
@@ -57,10 +89,47 @@
   html {
     -webkit-text-size-adjust: 100%;
     text-size-adjust: 100%;
+    /* Toque no celular: realce discreto na cor da marca em vez do cinza do sistema. */
+    -webkit-tap-highlight-color: hsl(var(--primary) / 0.12);
   }
   body {
-    @apply bg-background text-foreground;
+    /* Figtree 1rem/1.6 na interface e no corpo. */
+    @apply bg-background font-sans text-base text-foreground antialiased;
     font-feature-settings: "rlig" 1, "calt" 1;
+  }
+
+  /*
+   * Títulos h1–h2 em Literata (600–700); h3 em diante seguem em Figtree.
+   * Tamanho vem das classes (text-display, text-h1, text-h2, text-h3); aqui só
+   * ficam família, peso, entrelinha e quebra equilibrada como padrão.
+   */
+  h1,
+  h2 {
+    @apply font-display;
+    letter-spacing: -0.01em;
+    line-height: 1.2;
+  }
+  h1 {
+    font-weight: 700;
+  }
+  h2 {
+    font-weight: 600;
+  }
+  h3 {
+    line-height: 1.4;
+  }
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+  p {
+    text-wrap: pretty;
+  }
+
+  ::selection {
+    background-color: hsl(var(--primary) / 0.16);
+    color: hsl(var(--foreground));
   }
 
   /*
@@ -81,6 +150,22 @@
 @layer utilities {
   .container {
     @apply mx-auto max-w-6xl px-4 sm:px-6 lg:px-8;
+  }
+
+  /*
+   * Motivo de azulejo: tile de 48px, uma cor, ~7% de opacidade, em SVG inline
+   * (data URI, sem requisição extra). Uso restrito ao hero e ao card de paywall.
+   * - `bg-azulejo`: cobalto sobre superfícies claras (background, card, muted).
+   * - `bg-azulejo-inverse`: branco sobre superfícies cobalto (bg-primary).
+   * Combine com a cor de fundo: `bg-primary bg-azulejo-inverse`.
+   */
+  .bg-azulejo {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='48' viewBox='0 0 48 48'%3E%3Cg fill='none' stroke='%231f41c7' stroke-opacity='.07' stroke-width='1.5'%3E%3Cpath d='M24 7c2.4 8.6 8.4 14.6 17 17-8.6 2.4-14.6 8.4-17 17-2.4-8.6-8.4-14.6-17-17 8.6-2.4 14.6-8.4 17-17Z'/%3E%3Cpath d='M0 10a10 10 0 0 0 10-10M38 0a10 10 0 0 0 10 10M48 38a10 10 0 0 0-10 10M10 48A10 10 0 0 0 0 38'/%3E%3Ccircle cx='24' cy='24' r='3'/%3E%3C/g%3E%3C/svg%3E");
+    background-size: 48px 48px;
+  }
+  .bg-azulejo-inverse {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='48' viewBox='0 0 48 48'%3E%3Cg fill='none' stroke='%23ffffff' stroke-opacity='.08' stroke-width='1.5'%3E%3Cpath d='M24 7c2.4 8.6 8.4 14.6 17 17-8.6 2.4-14.6 8.4-17 17-2.4-8.6-8.4-14.6-17-17 8.6-2.4 14.6-8.4 17-17Z'/%3E%3Cpath d='M0 10a10 10 0 0 0 10-10M38 0a10 10 0 0 0 10 10M48 38a10 10 0 0 0-10 10M10 48A10 10 0 0 0 0 38'/%3E%3Ccircle cx='24' cy='24' r='3'/%3E%3C/g%3E%3C/svg%3E");
+    background-size: 48px 48px;
   }
 }
 
