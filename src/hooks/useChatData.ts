@@ -15,6 +15,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useInfiniteQuery, useQuery, useQueryClient, type InfiniteData } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/hooks/useAuth'
+import { QUIZ_RESULT_STORAGE_KEY, parseStoredQuizIdentity } from '@/lib/stored-quiz-result'
 
 export interface ChatMessage {
   id: string
@@ -99,10 +100,10 @@ export function describeChatSendError(error: ChatSendError): string {
   }
 }
 
+/** Assessment do quiz feito neste aparelho (mesma leitura segura da autenticação). */
 function getStoredAssessmentId(): string | null {
   try {
-    const raw = localStorage.getItem('dr_imigrante_quiz_result')
-    return raw ? (JSON.parse(raw)?.assessmentId as string | null) ?? null : null
+    return parseStoredQuizIdentity(localStorage.getItem(QUIZ_RESULT_STORAGE_KEY))?.assessmentId ?? null
   } catch {
     return null
   }

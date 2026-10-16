@@ -5,6 +5,7 @@
 import { useId, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Bot, CheckCircle2, Loader2, Settings2, Sliders, Sparkles } from 'lucide-react'
+import { Button } from '@/components/ui'
 import { supabase } from '@/lib/supabase'
 import { cn } from '@/lib/utils'
 import {
@@ -49,7 +50,7 @@ const USE_CASE_HINTS: Record<string, string> = {
 }
 
 const inputClass =
-  'w-full rounded-xl border border-input bg-card px-3 text-base text-foreground outline-none transition focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 aria-[invalid=true]:border-red-700'
+  'w-full rounded-xl border border-input bg-card px-3 text-base text-foreground outline-none transition focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 aria-[invalid=true]:border-destructive'
 
 function toDraft(config: AIConfig): DraftState {
   return {
@@ -146,10 +147,10 @@ function AiConfigCard({
   }
 
   return (
-    <form onSubmit={handleSubmit} className="rounded-2xl border border-border bg-card shadow-sm" noValidate>
+    <form onSubmit={handleSubmit} className="rounded-lg border bg-card shadow-sm" noValidate>
       <div className="border-b border-border p-5">
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-700">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/[.08] text-primary">
             <Bot className="h-5 w-5" aria-hidden="true" />
           </div>
           <div className="min-w-0 flex-1">
@@ -159,7 +160,7 @@ function AiConfigCard({
             </p>
           </div>
           {justSaved && !dirty && (
-            <span className="flex items-center gap-1 text-sm font-semibold text-emerald-700" role="status">
+            <span className="flex items-center gap-1 text-sm font-semibold text-success" role="status">
               <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
               Salvo
             </span>
@@ -171,7 +172,7 @@ function AiConfigCard({
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
             <label htmlFor={ids.model} className="mb-1 flex items-center gap-1 text-sm font-semibold text-foreground">
-              <Sparkles className="h-3.5 w-3.5 text-brand-700" aria-hidden="true" />
+              <Sparkles className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
               Modelo
             </label>
             <select
@@ -192,7 +193,7 @@ function AiConfigCard({
               ))}
             </select>
             {errors.model && (
-              <p id={ids.modelError} className="mt-1 text-sm text-red-700">
+              <p id={ids.modelError} className="mt-1 text-sm text-destructive">
                 {errors.model}
               </p>
             )}
@@ -210,7 +211,7 @@ function AiConfigCard({
               htmlFor={ids.temperature}
               className="mb-1 flex items-center gap-1 text-sm font-semibold text-foreground"
             >
-              <Sliders className="h-3.5 w-3.5 text-brand-700" aria-hidden="true" />
+              <Sliders className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
               Temperatura: {draft.temperature.toFixed(2)}
             </label>
             <input
@@ -221,7 +222,7 @@ function AiConfigCard({
               step="0.05"
               value={draft.temperature}
               onChange={(e) => update({ temperature: Number(e.target.value) })}
-              className="h-11 w-full accent-brand-700"
+              className="h-11 w-full accent-primary"
             />
             <div className="flex justify-between text-sm text-muted-foreground" aria-hidden="true">
               <span>Preciso</span>
@@ -251,7 +252,7 @@ function AiConfigCard({
               Entre {limits.min} e {limits.max}. Valores fora da faixa são corrigidos pelo servidor.
             </p>
             {errors.max_tokens && (
-              <p id={ids.maxTokensError} className="mt-1 text-sm text-red-700">
+              <p id={ids.maxTokensError} className="mt-1 text-sm text-destructive">
                 {errors.max_tokens}
               </p>
             )}
@@ -260,7 +261,7 @@ function AiConfigCard({
 
         <div>
           <label htmlFor={ids.prompt} className="mb-1 flex items-center gap-1 text-sm font-semibold text-foreground">
-            <Settings2 className="h-3.5 w-3.5 text-brand-700" aria-hidden="true" />
+            <Settings2 className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
             Prompt de sistema (tom e estilo)
           </label>
           <textarea
@@ -279,39 +280,33 @@ function AiConfigCard({
             {draft.systemPrompt.length}/{AI_SYSTEM_PROMPT_MAX_LENGTH} caracteres.
           </p>
           {errors.system_prompt && (
-            <p id={ids.promptError} className="mt-1 text-sm text-red-700">
+            <p id={ids.promptError} className="mt-1 text-sm text-destructive">
               {errors.system_prompt}
             </p>
           )}
         </div>
 
         {mutation.isError && (
-          <p className="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-800" role="alert">
+          <p className="rounded-xl bg-destructive/[.08] px-3 py-2 text-sm text-destructive" role="alert">
             Não foi possível salvar. Confira sua conexão e tente de novo.
           </p>
         )}
 
         <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-          <button
+          <Button
             type="button"
+            variant="ghost"
             onClick={() => {
               setDraft(initial)
               mutation.reset()
             }}
             disabled={!dirty || mutation.isPending}
-            className="inline-flex h-12 items-center justify-center rounded-xl px-5 text-base font-semibold text-foreground transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
           >
             Descartar alterações
-          </button>
-          <button
-            type="submit"
-            disabled={!dirty || hasErrors || mutation.isPending}
-            aria-busy={mutation.isPending}
-            className="inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-primary px-5 text-base font-semibold text-primary-foreground transition hover:bg-brand-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {mutation.isPending && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
+          </Button>
+          <Button type="submit" disabled={!dirty || hasErrors} loading={mutation.isPending}>
             Salvar alterações
-          </button>
+          </Button>
         </div>
       </div>
     </form>
@@ -358,7 +353,7 @@ export function AdminAiConfigPage() {
       </div>
 
       {isError && (
-        <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-800" role="alert">
+        <p className="rounded-xl bg-destructive/[.08] px-4 py-3 text-sm text-destructive" role="alert">
           Não foi possível carregar as configurações.
         </p>
       )}
@@ -374,7 +369,7 @@ export function AdminAiConfigPage() {
         ))}
 
         {!isError && configs.length === 0 && (
-          <div className="col-span-full rounded-2xl border-2 border-dashed border-border p-8 text-center">
+          <div className="col-span-full rounded-lg border-2 border-dashed border-border p-8 text-center">
             <Bot className="mx-auto mb-3 h-8 w-8 text-muted-foreground" aria-hidden="true" />
             <h2 className="font-bold text-foreground">Nenhuma configuração ativa</h2>
             <p className="mt-1 text-sm text-muted-foreground">As configurações de IA aparecem aqui.</p>

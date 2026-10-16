@@ -2,14 +2,12 @@ import { useState } from 'react'
 import { Navigate, useLocation } from 'react-router-dom'
 import { Loader2, RefreshCw, WifiOff } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
+import { Button } from '@/components/ui/Button'
 import { accessDeniedRedirect, routeFeature, type AccessFeature } from '@/lib/access'
-import { cn } from '@/lib/utils'
 
 interface ProtectedRouteProps {
   children: React.ReactNode
   requireAdmin?: boolean
-  /** @deprecated use requireFeature instead — kept for routes that only need any paid access */
-  requirePaid?: boolean
   /**
    * Gate de uma funcionalidade (regras em src/lib/access.ts):
    * - 'dashboard' / 'full_analysis' → acesso vigente (€30 no prazo ou assinatura)
@@ -63,32 +61,13 @@ function AccountLoadError() {
         <p className="mt-2 text-base text-muted-foreground [text-wrap:pretty]">
           Verifique sua conexão com a internet e tente de novo.
         </p>
-        <button
-          type="button"
-          onClick={handleRetry}
-          disabled={retrying}
-          aria-busy={retrying}
-          className={cn(
-            'mt-5 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-primary px-4',
-            'text-base font-semibold text-primary-foreground transition-colors hover:bg-primary/90',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
-            'disabled:cursor-not-allowed disabled:opacity-70',
-          )}
-        >
-          <RefreshCw aria-hidden="true" className={cn('h-4 w-4', retrying && 'animate-spin')} />
+        <Button className="mt-5 w-full" onClick={handleRetry} loading={retrying}>
+          {!retrying && <RefreshCw aria-hidden="true" />}
           {retrying ? 'Tentando…' : 'Tentar de novo'}
-        </button>
-        <button
-          type="button"
-          onClick={() => void signOut()}
-          className={cn(
-            'mt-2 flex h-11 w-full items-center justify-center rounded-xl px-4 text-base font-medium',
-            'text-muted-foreground transition-colors hover:bg-muted hover:text-foreground',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
-          )}
-        >
+        </Button>
+        <Button variant="ghost" className="mt-2 w-full text-muted-foreground" onClick={() => void signOut()}>
           Sair da conta
-        </button>
+        </Button>
       </div>
     </div>
   )
@@ -97,7 +76,6 @@ function AccountLoadError() {
 export function ProtectedRoute({
   children,
   requireAdmin = false,
-  requirePaid = false,
   requireFeature,
 }: ProtectedRouteProps) {
   const { authUser, loading, userDataError, isHubUser, hasAccess, access } = useAuth()
@@ -120,10 +98,8 @@ export function ProtectedRoute({
     return <Navigate to="/dashboard" replace />
   }
 
-  // requireFeature tem precedência sobre o legado requirePaid
-  const required: AccessFeature | null = requireFeature ?? (requirePaid ? 'dashboard' : null)
-  if (required) {
-    const feature = routeFeature(required, location.pathname)
+  if (requireFeature) {
+    const feature = routeFeature(requireFeature, location.pathname)
     if (!hasAccess(feature)) {
       return <Navigate to={accessDeniedRedirect(feature, access)} replace />
     }

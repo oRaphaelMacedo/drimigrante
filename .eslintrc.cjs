@@ -4,7 +4,11 @@
  *
  * - `npm run lint`        → falha só com erros (warnings não bloqueiam).
  * - `npm run lint:strict` → falha também com warnings (--max-warnings 0).
- *   O DI-088 ativa o modo estrito depois de remover os `any` restantes.
+ *
+ * DI-088: `no-explicit-any` é erro. A única exceção temporária (aviso) é
+ * src/hooks/useQuizAdmin.ts, que ficou fora do pacote que zerou os `any`;
+ * quando ele for corrigido, apague o override no fim deste arquivo e o
+ * `lint:strict` passa a valer para o repositório inteiro (e pode entrar no CI).
  */
 module.exports = {
   root: true,
@@ -32,9 +36,18 @@ module.exports = {
     'src/lib/database.types.ts',
   ],
   rules: {
-    'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
-    // Por ora como aviso: o DI-088 zera os `any` e liga o lint:strict.
-    '@typescript-eslint/no-explicit-any': 'warn',
+    'react-refresh/only-export-components': [
+      'warn',
+      {
+        allowConstantExport: true,
+        // Exportações não-componente intencionais ao lado do componente (padrão
+        // shadcn/cva e hook do contexto). Mudar esses arquivos recarrega a página
+        // em vez do fast refresh — aceitável para utilitários estáveis.
+        allowExportNames: ['buttonVariants', 'badgeVariants', 'fieldControlClass', 'useFieldIds', 'joinIds', 'useAuth'],
+      },
+    ],
+    // DI-088: tipar com os tipos gerados (src/lib/database.types.ts) ou `unknown`.
+    '@typescript-eslint/no-explicit-any': 'error',
     '@typescript-eslint/no-unused-vars': [
       'error',
       {
@@ -58,6 +71,13 @@ module.exports = {
         '**/*.test.{ts,tsx}',
       ],
       env: { node: true },
+    },
+    {
+      // TODO(DI-088): arquivo fora do pacote W4-05 (3 `any[]` no snapshot de
+      // useRestoreVersion). Fica como aviso para o `npm run lint` não quebrar;
+      // o `lint:strict` continua acusando até ser corrigido.
+      files: ['src/hooks/useQuizAdmin.ts'],
+      rules: { '@typescript-eslint/no-explicit-any': 'warn' },
     },
   ],
 }
