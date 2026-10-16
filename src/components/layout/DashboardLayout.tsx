@@ -7,6 +7,8 @@
  * - O conteúdo reserva espaço para a barra inferior, a safe-area e o banner de
  *   cookies (`--cookie-banner-h`), para o último bloco nunca ficar escondido.
  * - ScrollRestoration: cada página nova começa no topo; o "voltar" restaura a rolagem.
+ * - Chat (DI-051): no celular a rota não tem padding — o painel do chat ocupa a
+ *   tela entre o cabeçalho e a barra inferior e cuida das próprias margens.
  */
 import { useEffect } from 'react'
 import { Link, Outlet, ScrollRestoration, useLocation } from 'react-router-dom'
@@ -34,6 +36,7 @@ export function DashboardLayout() {
   }, [location.pathname, userId, canReadAnalysis])
 
   const displayName = authUser?.profile?.full_name?.trim() || 'Sua conta'
+  const isChatRoute = location.pathname === '/dashboard/chat' || location.pathname.startsWith('/dashboard/chat/')
 
   return (
     <div className="flex min-h-dvh bg-background">
@@ -128,8 +131,14 @@ export function DashboardLayout() {
           </div>
         </header>
 
-        {/* Espaço inferior = barra de navegação (~4rem + safe-area) + banner de cookies, se aberto. */}
-        <main className="flex-1 px-4 pt-4 pb-[calc(5rem+env(safe-area-inset-bottom)+var(--cookie-banner-h,0px))] md:p-6">
+        {/* Espaço inferior = barra de navegação (~4rem + safe-area) + banner de cookies, se aberto.
+            No chat, a altura do próprio painel já desconta a barra e o banner (ChatPage). */}
+        <main
+          className={cn(
+            'flex-1 md:p-6',
+            !isChatRoute && 'px-4 pt-4 pb-[calc(5rem+env(safe-area-inset-bottom)+var(--cookie-banner-h,0px))]',
+          )}
+        >
           <Outlet />
         </main>
       </div>

@@ -15,17 +15,22 @@ vi.mock('@/hooks/useAuth', () => ({ useAuth: () => mocks.auth }))
 vi.mock('@/hooks/useAssessmentResult', () => ({
   useAssessmentResult: () => ({ result: null, isLoading: false, hasDbResult: false, error: null }),
 }))
-vi.mock('@/hooks/useChatData', () => ({
+vi.mock('@/hooks/useChatData', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/hooks/useChatData')>()),
   useChatData: () => ({
     assessment: { id: 'a1' },
     isLoadingAssessment: false,
     messages: [],
     isLoadingMessages: false,
-    sendMessage: vi.fn(),
+    hasOlderMessages: false,
+    isLoadingOlderMessages: false,
+    loadOlderMessages: vi.fn(async () => true),
+    sendMessage: vi.fn(async () => ({ ok: true })),
     isStreaming: false,
     streamingText: '',
     pendingUserMessage: null,
     sendError: null,
+    clearSendError: vi.fn(),
   }),
 }))
 vi.mock('@/lib/supabase', () => ({ supabase: { functions: { invoke: vi.fn() } } }))

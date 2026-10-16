@@ -28,6 +28,7 @@ import {
 import { useAuth } from '@/hooks/useAuth'
 import { useAssessmentResult, type ResultPathway } from '@/hooks/useAssessmentResult'
 import { fetchFullAnalysis, getFullAnalysisErrorKind } from '@/hooks/useAssessment'
+import { useFullAnalysisGeneration } from '@/hooks/useFullAnalysisGeneration'
 import { Badge, Button, Card } from '@/components/ui'
 import { MarkdownText } from '@/components/MarkdownText'
 import {
@@ -71,10 +72,6 @@ const SCORE_COLOR: Record<string, string> = {
   media: 'text-[hsl(var(--warning))]',
   baixa: 'text-primary',
 }
-
-/** Polling leve (só leitura) enquanto a análise completa ainda não existe: ~4 min. */
-const PREPARING_POLL_MS = 20_000
-const PREPARING_POLL_MAX = 12
 
 /** Seção da análise com requisitos e documentos (ver ANALYSIS_SECTIONS em _shared/prompts.ts). */
 const REQUIREMENTS_TITLE = /^requisitos/i
@@ -164,17 +161,26 @@ export function AnalysisPage() {
     enabled: hasFullAccess && !!assessmentId,
     staleTime: 5 * 60 * 1000,
     retry: (count, error) => getFullAnalysisErrorKind(error) === 'other' && count < 1,
-    refetchInterval: (query) => {
-      const ready = !!query.state.data?.ia_explanation_full?.trim()
-      if (query.state.status !== 'success' || ready) return false
-      return query.state.dataUpdateCount < PREPARING_POLL_MAX ? PREPARING_POLL_MS : false
-    },
   })
 
   const pathways = useMemo(() => sortPathways(result?.pathways ?? []), [result?.pathways])
   const topPathway = pathways[0] ?? null
 
   const fullText = fullQuery.data?.ia_explanation_full?.trim() || null
+  const fullErrorKind = fullQuery.isError ? getFullAnalysisErrorKind(fullQuery.error) : null
+
+  // DI-018: quem pagou e ainda não tem a análise completa pede a geração (JWT) e
+  // a página relê pela RPC até o texto chegar. Sem chamada se a RPC negou o acesso.
+  const { refetch: refetchFull } = fullQuery
+  const generation = useFullAnalysisGeneration({
+    assessmentId,
+    enabled: hasFullAccess && fullQuery.isSuccess && !fullErrorKind,
+    ready: !!fullText,
+    refetch: refetchFull,
+  })
+  const accessDenied = fullErrorKind === 'payment_required' || generation.status === 'payment_required'
+  const sessionExpired = fullErrorKind === 'auth_required' || generation.status === 'auth_required'
+
   const analysis = useMemo(() => splitMarkdownSections(fullText), [fullText])
   // null = ainda não mexeu: só a primeira seção aberta.
   const [openIds, setOpenIds] = useState<ReadonlySet<string> | null>(null)
@@ -190,7 +196,6 @@ export function AnalysisPage() {
     setOpenIds(next)
   }
 
-  const fullErrorKind = fullQuery.isError ? getFullAnalysisErrorKind(fullQuery.error) : null
   const requirementsSection = analysis.sections.find((section) => REQUIREMENTS_TITLE.test(section.title)) ?? null
 
   // Evento uma vez por visita, quando há conteúdo pago para mostrar.
@@ -206,10 +211,10 @@ export function AnalysisPage() {
   // (acesso expirado ou oferta de €30) em vez de confiar no cache do cliente.
   const refreshedRef = useRef(false)
   useEffect(() => {
-    if (fullErrorKind !== 'payment_required' || refreshedRef.current) return
+    if (!accessDenied || refreshedRef.current) return
     refreshedRef.current = true
     void refreshUser()
-  }, [fullErrorKind, refreshUser])
+  }, [accessDenied, refreshUser])
 
   if (!hasFullAccess) {
     return <NoAccess expired={access.state === 'expired'} assessmentId={assessmentId} />
@@ -382,9 +387,9 @@ export function AnalysisPage() {
           </Card>
         ) : fullQuery.isPending ? (
           <AnalysisSkeleton />
-        ) : fullErrorKind === 'payment_required' ? (
+        ) : accessDenied ? (
           <AccessEndedCard />
-        ) : fullErrorKind === 'auth_required' ? (
+        ) : sessionExpired ? (
           <SessionExpiredCard />
         ) : fullErrorKind ? (
           <AnalysisError
@@ -399,13 +404,17 @@ export function AnalysisPage() {
             openIds={effectiveOpen}
             onToggle={(id) => setSectionOpen(id, !effectiveOpen.has(id))}
           />
+        ) : generation.status === 'not_found' ? (
+          <AnalysisError notFound onRetry={generation.retry} retrying={false} />
+        ) : generation.status === 'deferred' || generation.status === 'failed' ? (
+          <AnalysisGenerationProblem busy={generation.status === 'deferred'} onRetry={generation.retry} />
         ) : (
-          <AnalysisPreparing onRefresh={() => fullQuery.refetch()} refreshing={fullQuery.isFetching} />
+          <AnalysisPreparing />
         )}
       </section>
 
       {/* Próximos passos (some quando o servidor nega o acesso: a ação é a do card acima) */}
-      {fullErrorKind !== 'payment_required' && <NextStepsCard canChat={canChat} />}
+      {!accessDenied && <NextStepsCard canChat={canChat} />}
 
       <p className="border-t pt-4 text-sm leading-relaxed text-muted-foreground [text-wrap:pretty]">
         Análise informativa, gerada por IA a partir das suas respostas. Não constitui aconselhamento jurídico. Antes de
@@ -717,22 +726,55 @@ function AnalysisSkeleton() {
   )
 }
 
-function AnalysisPreparing({ onRefresh, refreshing }: { onRefresh: () => void; refreshing: boolean }) {
+/** Análise completa sendo escrita (DI-018): a página confere sozinha, sem botão. */
+function AnalysisPreparing() {
   return (
-    <Card variant="muted" role="status">
+    <Card variant="muted" role="status" aria-live="polite" data-testid="analysis-preparing">
       <div className="flex gap-3">
-        <RefreshCw className="mt-0.5 h-5 w-5 shrink-0 text-primary" aria-hidden="true" />
+        <RefreshCw className="mt-0.5 h-5 w-5 shrink-0 animate-spin text-primary" aria-hidden="true" />
         <div className="space-y-1">
-          <p className="text-base font-semibold">Sua análise detalhada está sendo preparada</p>
-          <p className="text-sm leading-relaxed text-muted-foreground">
-            Esta página confere de novo sozinha por alguns minutos. Você também pode atualizar agora.
-            {SUPPORT_EMAIL ? ' Se ela não aparecer, fale com o suporte.' : ''}
+          <p className="text-base font-semibold">Preparando sua análise detalhada…</p>
+          <p className="text-sm leading-relaxed text-muted-foreground [text-wrap:pretty]">
+            Estamos escrevendo a análise a partir das suas respostas. Leva alguns instantes: pode continuar nesta
+            página, o texto aparece aqui sozinho.
+          </p>
+        </div>
+      </div>
+      <div className="mt-4 animate-pulse space-y-2.5" aria-hidden="true">
+        <div className="h-4 w-2/3 rounded bg-border" />
+        <div className="h-3.5 w-full rounded bg-border/70" />
+        <div className="h-3.5 w-11/12 rounded bg-border/70" />
+        <div className="h-3.5 w-4/5 rounded bg-border/70" />
+      </div>
+    </Card>
+  )
+}
+
+/** A geração não terminou (erro, tempo esgotado ou muita procura): tentar de novo pelo botão. */
+function AnalysisGenerationProblem({ busy, onRetry }: { busy: boolean; onRetry: () => void }) {
+  return (
+    <Card variant="muted" role="alert" data-testid="analysis-generation-problem">
+      <div className="flex gap-3">
+        <AlertTriangle
+          className={cn('mt-0.5 h-5 w-5 shrink-0', busy ? 'text-[hsl(var(--warning))]' : 'text-destructive')}
+          aria-hidden="true"
+        />
+        <div className="space-y-1">
+          <p className="text-base font-semibold">
+            {busy ? 'Muitas análises sendo preparadas agora' : 'Não foi possível preparar sua análise agora'}
+          </p>
+          <p className="text-sm leading-relaxed text-muted-foreground [text-wrap:pretty]">
+            {busy
+              ? 'Tente de novo em alguns minutos.'
+              : SUPPORT_EMAIL
+                ? 'Tente de novo. Se o problema continuar, fale com o suporte.'
+                : 'Tente de novo em instantes.'}
           </p>
         </div>
       </div>
       <div className="mt-4 flex flex-col gap-2 sm:flex-row" data-print-hide>
-        <Button variant="secondary" loading={refreshing} onClick={onRefresh}>
-          Atualizar
+        <Button variant="secondary" onClick={onRetry}>
+          Tentar de novo
         </Button>
         <SupportLink subject="Minha análise completa não apareceu" />
       </div>
