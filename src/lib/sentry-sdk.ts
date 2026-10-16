@@ -26,7 +26,15 @@ export interface StartOptions {
   release?: string
   /** Liga o replay mascarado já na inicialização (consentimento dado). */
   replay: boolean
+  /**
+   * Consultado a cada transação (carregamento/navegação): medições de
+   * desempenho só com consentimento de estatísticas. O registro de erros não
+   * depende dele.
+   */
+  tracesAllowed: () => boolean
 }
+
+const TRACES_SAMPLE_RATE = 0.2
 
 function scrubRequest(event: Event): void {
   const request = event.request
@@ -72,9 +80,45 @@ export function scrubBreadcrumb(breadcrumb: Breadcrumb): Breadcrumb | null {
   return breadcrumb
 }
 
-let replayIntegrationInstance: { startBuffering?: () => void; stop?: () => Promise<void> } | null = null
+/** O que usamos da integração de Replay do SDK 7. */
+interface ReplayHandle {
+  startBuffering?: () => void
+  stop?: () => Promise<void>
+  /** Só devolve um id enquanto a gravação está ativa. */
+  getReplayId?: () => string | undefined
+}
+
+let replayIntegrationInstance: ReplayHandle | null = null
 let replayLoading: Promise<void> | null = null
 let replayWanted = false
+/**
+ * O SDK só inicializa o Replay (e já liga o buffer) num setTimeout agendado
+ * pelo addIntegration. Até lá, startBuffering/stop agiriam sobre um estado que
+ * o próprio SDK vai sobrescrever; o ajuste fica para logo depois.
+ */
+let replayReady = false
+
+function isReplayRecording(replay: ReplayHandle): boolean {
+  return typeof replay.getReplayId?.() === 'string'
+}
+
+/**
+ * Alinha a gravação com `replayWanted`. Nunca lança: o startBuffering() do SDK
+ * lança "Replay recording is already in progress" se a gravação já estiver
+ * ativa, e esse erro viraria um evento falso no Sentry (que ainda enviaria o
+ * buffer do replay).
+ */
+function syncReplay(): void {
+  const replay = replayIntegrationInstance
+  if (!replay || !replayReady) return
+  try {
+    const recording = isReplayRecording(replay)
+    if (replayWanted && !recording) replay.startBuffering?.()
+    else if (!replayWanted && recording) void replay.stop?.().catch(() => undefined)
+  } catch {
+    // O replay nunca pode derrubar o app nem gerar erro próprio no Sentry.
+  }
+}
 
 export function startSentry(options: StartOptions): void {
   init({
@@ -83,7 +127,15 @@ export function startSentry(options: StartOptions): void {
     release: options.release,
     sendDefaultPii: false,
     integrations: [browserTracingIntegration()],
-    tracesSampleRate: 0.2,
+    // Desempenho só com consentimento de estatísticas (sem ele, nenhuma
+    // transação é enviada; os erros continuam sendo registrados).
+    tracesSampler: () => {
+      try {
+        return options.tracesAllowed() ? TRACES_SAMPLE_RATE : 0
+      } catch {
+        return 0
+      }
+    },
     // Replay só grava em buffer e só é enviado quando acontece um erro —
     // e só existe depois do consentimento (ver enableReplay).
     replaysSessionSampleRate: 0,
@@ -107,11 +159,16 @@ export function startSentry(options: StartOptions): void {
   if (options.replay) enableReplay()
 }
 
-/** Liga o Session Replay mascarado (texto, inputs e mídia). Idempotente. */
+/**
+ * Liga o Session Replay mascarado (texto, inputs e mídia). Idempotente: chamar
+ * de novo com o replay já ligado não faz nada.
+ */
 export function enableReplay(): void {
+  const wasWanted = replayWanted
   replayWanted = true
   if (replayIntegrationInstance) {
-    replayIntegrationInstance.startBuffering?.()
+    // Só uma transição real (desligado → ligado) mexe na gravação.
+    if (!wasWanted) syncReplay()
     return
   }
   if (replayLoading) return
@@ -119,8 +176,14 @@ export function enableReplay(): void {
     .then(({ createReplayIntegration }) => {
       if (!replayWanted) return
       const integration = createReplayIntegration()
-      replayIntegrationInstance = integration as unknown as typeof replayIntegrationInstance
+      replayIntegrationInstance = integration as unknown as ReplayHandle
       addIntegration(integration)
+      // Roda depois da inicialização agendada pelo SDK e corrige o estado se o
+      // consentimento mudou nesse meio-tempo.
+      window.setTimeout(() => {
+        replayReady = true
+        syncReplay()
+      }, 0)
     })
     .catch(() => {
       // Sem replay: o monitoramento de erros continua funcionando.
@@ -130,8 +193,9 @@ export function enableReplay(): void {
     })
 }
 
-/** Para a gravação quando o consentimento é retirado. */
+/** Para a gravação quando o consentimento é retirado. Idempotente. */
 export function disableReplay(): void {
+  const wasWanted = replayWanted
   replayWanted = false
-  void replayIntegrationInstance?.stop?.().catch(() => undefined)
+  if (wasWanted) syncReplay()
 }

@@ -29,14 +29,14 @@ trackOnce('purchase', purchaseId, { value: OFFER.price, currency: OFFER.currency
 
 ## Quando nada é enviado
 
-| Situação | PostHog / GA4 | Meta Pixel | Sentry (erros) | Sentry Replay |
-|---|---|---|---|---|
-| Consentimento pendente ou recusado | não carrega | não carrega | ativo | desligado |
-| Aceitou só estatísticas (`granted` ou `analytics`) | ativo | não carrega | ativo | buffer mascarado |
-| Aceitou "Aceitar estatísticas e marketing" (`all`) | ativo | ativo se `VITE_META_PIXEL_ID` existir | ativo | buffer mascarado |
-| `npm run dev`, localhost, `*.vercel.app` | **nunca** | **nunca** | dev/localhost: não; preview: sim | idem |
-| Playwright / `navigator.webdriver` | **nunca** | **nunca** | não | não |
-| `VITE_APP_ENV` ≠ `production` fora do domínio oficial | **nunca** | **nunca** | sim (`environment` = valor da variável) | idem |
+| Situação | PostHog / GA4 | Meta Pixel | Sentry (erros) | Sentry (desempenho) | Sentry Replay |
+|---|---|---|---|---|---|
+| Consentimento pendente ou recusado | não carrega | não carrega | ativo | nenhuma transação | desligado |
+| Aceitou só estatísticas (`granted` ou `analytics`) | ativo | não carrega | ativo | 20% das transações | buffer mascarado |
+| Aceitou "Aceitar estatísticas e marketing" (`all`) | ativo | ativo se `VITE_META_PIXEL_ID` existir | ativo | 20% das transações | buffer mascarado |
+| `npm run dev`, localhost, `*.vercel.app` | **nunca** | **nunca** | dev/localhost: não; preview: sim | idem | idem |
+| Playwright / `navigator.webdriver` | **nunca** | **nunca** | não | não | não |
+| `VITE_APP_ENV` ≠ `production` fora do domínio oficial | **nunca** | **nunca** | sim (`environment` = valor da variável) | idem | idem |
 
 - O domínio oficial (`www.drimigrante.com` / `drimigrante.com`) sempre conta como produção, mesmo que `VITE_APP_ENV` esteja ausente ou errada na Vercel — assim um erro de configuração não desliga a medição. Mesmo assim, defina `VITE_APP_ENV=production` no ambiente Production da Vercel.
 - Em dev e no Playwright, os eventos que **seriam** enviados (com consentimento) ficam em `window.__DI_ANALYTICS_DEBUG__` (`{ name, props, at }`), para inspeção e testes E2E. Sem consentimento, nada é registrado ali.
@@ -67,7 +67,7 @@ O magic link do Supabase volta como `/auth/callback#access_token=…&refresh_tok
 - **Pageview manual** (`capture_pageview: false` no PostHog, `send_page_view: false` no GA4). O `$pageview`/`page_view` é enviado ~300 ms após cada navegação do React Router, com a URL sanitizada.
 - **PostHog `before_send`** sanitiza todas as propriedades (`$current_url`, `$referrer`, `$initial_*`, texto de elementos do autocapture).
 - **GA4**: `page_location` e `page_referrer` sanitizados em todo evento.
-- **Meta Pixel** lê a URL sozinho: só dispara quando a URL atual está limpa; senão o evento espera a próxima navegação limpa.
+- **Meta Pixel** lê a URL sozinho: só dispara quando a URL atual está limpa; senão o evento espera a próxima navegação limpa. `fbq.disablePushState = true` desliga o PageView automático do fbevents.js a cada `pushState`/`popstate` (mandaria a URL crua e duplicaria o PageView manual).
 - **Sentry**: `beforeSend`, `beforeSendTransaction`, `beforeBreadcrumb`, um event processor para `replay_event` e `beforeAddRecordingEvent` no Replay. Breadcrumbs de `console` (exceto `error`) são descartados.
 
 ## Atribuição (UTM)
@@ -149,6 +149,8 @@ Propriedades marcadas com `*` são obrigatórias (o `tsc` exige).
 - O SDK é baixado em `requestIdleCallback` (ou no primeiro erro). Chamadas anteriores ficam numa fila de até 30 itens; erros globais anteriores ao SDK também são capturados.
 - `environment`: `production` no domínio oficial; senão `VITE_APP_ENV`; senão `preview` em `*.vercel.app`.
 - Replay: `replaysSessionSampleRate: 0`, `replaysOnErrorSampleRate: 1.0`, `maskAllText`, `maskAllInputs`, `blockAllMedia`, sem corpo/cabeçalho de rede; baixado em chunk próprio e só com consentimento.
+- O Replay só muda de estado numa transição real do consentimento de estatísticas (sem → com ou com → sem). Regravar a mesma permissão em `/cookies` (ex.: `granted` → `analytics`, `all` → `analytics`) não mexe nele: chamar `startBuffering()` com a gravação ativa faz o SDK lançar "Replay recording is already in progress", e esse erro viraria um evento falso no Sentry, enviando o buffer do replay junto.
+- Desempenho: `tracesSampler` devolve 0,2 só com consentimento de estatísticas e 0 sem ele (decidido a cada transação). Erros são registrados com ou sem consentimento.
 
 ## Erros de rota e deploy
 

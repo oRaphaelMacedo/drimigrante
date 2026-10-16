@@ -55,6 +55,8 @@ interface FbqStub {
   push: FbqStub
   loaded: boolean
   version: string
+  /** true = o fbevents.js não registra PageView sozinho em pushState/popstate */
+  disablePushState?: boolean
 }
 interface DebugEntry {
   name: string
@@ -349,6 +351,9 @@ function loadPixel(): void {
   fbq.loaded = true
   fbq.version = '2.0'
   fbq.queue = []
+  // Em SPA o fbevents.js dispara PageView a cada mudança de history, com a URL
+  // crua (pode ter ?r= ou session_id) e duplicando o PageView manual.
+  fbq.disablePushState = true
   if (!window._fbq) window._fbq = fbq
   window.fbq = fbq
 

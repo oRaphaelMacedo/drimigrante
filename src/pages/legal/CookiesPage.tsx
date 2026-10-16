@@ -102,8 +102,9 @@ export function CookiesPage() {
             <tr>
               <td>Estatísticas (com consentimento)</td>
               <td>
-                PostHog e Google Analytics 4: como o site é usado, sem gravação de tela. Sentry: reprodução da sessão
-                com texto, campos e imagens mascarados, enviada só quando ocorre um erro.
+                PostHog e Google Analytics 4: como o site é usado, sem gravação de tela. Sentry: tempo de carregamento
+                das páginas e reprodução da sessão com texto, campos e imagens mascarados, enviada só quando ocorre um
+                erro.
               </td>
               <td>PostHog e GA4: até 2 anos. Sentry: até fechar a aba</td>
             </tr>

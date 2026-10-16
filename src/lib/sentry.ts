@@ -7,13 +7,14 @@
  * - O SDK é baixado por import() em requestIdleCallback (ou antes, no primeiro
  *   erro capturado).
  * - Session Replay só depois do consentimento de estatísticas, com texto,
- *   inputs e mídia mascarados, e enviado só quando há erro.
+ *   inputs e mídia mascarados, e enviado só quando há erro. Transações de
+ *   desempenho também só com esse consentimento; erros, sempre.
  * - Tudo passa por sanitização: sem e-mails, tokens da URL, JWT ou session_id.
  *
  * Nunca importe '@sentry/react' fora de src/lib/sentry-sdk.ts e sentry-replay.ts.
  */
 import type { Breadcrumb } from '@sentry/react'
-import { hasConsent, onConsentChange } from './consent'
+import { choiceAllows, hasConsent, onConsentChange } from './consent'
 import { isChunkLoadError, trackBackgroundImport } from './chunk-reload'
 import { getMonitoringEnvironment, getRuntimeEnv, isErrorMonitoringEnvironment } from './runtime-env'
 
@@ -33,6 +34,12 @@ let sdk: SentrySdkModule | null = null
 let loading: Promise<void> | null = null
 const queue: QueuedCall[] = []
 let removeEarlyHandlers: (() => void) | null = null
+/**
+ * Último consentimento de estatísticas aplicado ao Replay. Só uma mudança real
+ * (sem → com, com → sem) mexe no Replay: regravar a mesma permissão em /cookies
+ * ('granted' → 'analytics', 'all' → 'analytics'…) não faz nada.
+ */
+let replayConsent = false
 
 function devLog(kind: string, payload: unknown): void {
   if (import.meta.env.DEV) {
@@ -76,10 +83,12 @@ function loadSdk(): Promise<void> {
   if (loading) return loading
   loading = trackBackgroundImport(import('./sentry-sdk'))
     .then((mod) => {
+      replayConsent = hasConsent('analytics')
       mod.startSentry({
         dsn: DSN as string,
         environment: getMonitoringEnvironment(),
-        replay: hasConsent('analytics'),
+        replay: replayConsent,
+        tracesAllowed: () => hasConsent('analytics'),
       })
       sdk = mod
       removeEarlyHandlers?.()
@@ -143,10 +152,18 @@ export function initSentry(): void {
   enabled = true
   removeEarlyHandlers = installEarlyHandlers()
 
-  onConsentChange(() => {
+  replayConsent = hasConsent('analytics')
+  onConsentChange((choice) => {
+    const next = choiceAllows(choice, 'analytics')
+    if (next === replayConsent) return
+    replayConsent = next
     if (!sdk) return // ao carregar, o SDK lê o consentimento atual
-    if (hasConsent('analytics')) sdk.enableReplay()
-    else sdk.disableReplay()
+    try {
+      if (next) sdk.enableReplay()
+      else sdk.disableReplay()
+    } catch {
+      // o monitoramento nunca pode derrubar o app
+    }
   })
 
   // erro já na fila (capturado antes do init) → baixa já; senão, em idle

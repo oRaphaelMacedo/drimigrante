@@ -98,8 +98,9 @@ export function PrivacyPage() {
           removidos antes do envio.
         </li>
         <li>
-          Se você aceitar os cookies de estatística, o Sentry também pode guardar uma reprodução da sessão com todo o
-          texto, os campos e as imagens mascarados. Ela só é enviada quando ocorre um erro.
+          Se você aceitar os cookies de estatística, o Sentry também pode medir o tempo de carregamento das páginas e
+          guardar uma reprodução da sessão com todo o texto, os campos e as imagens mascarados. A reprodução só é
+          enviada quando ocorre um erro.
         </li>
         {metaPixel && (
           <li>
