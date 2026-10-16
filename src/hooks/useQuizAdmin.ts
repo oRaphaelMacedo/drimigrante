@@ -6,6 +6,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { supabase } from '@/lib/supabase'
 import type { QuizQuestion } from '@/data/quiz-questions'
+import type { DbDisplayConditions } from '@/lib/quiz-conditions'
 
 export interface QuestionUpdate {
   question_text_pt?: string
@@ -15,7 +16,8 @@ export interface QuestionUpdate {
   is_required?: boolean
   placeholder?: string | null
   validation_rules?: { min?: number; max?: number } | null
-  display_conditions?: { question_key: string; answer_key: string | string[] } | null
+  // Preserva answer_contains e any/all (ver src/lib/quiz-conditions.ts)
+  display_conditions?: DbDisplayConditions | null
   is_active?: boolean
   sort_order?: number
   theme_id?: string
@@ -98,6 +100,7 @@ export function useUpdateQuestion() {
             question_id: questionId,
             option_key: o.option_key,
             option_text_pt: o.option_text_pt,
+            option_text_en: o.option_text_en ?? null,
             score: o.score,
             is_eliminatory: o.is_eliminatory ?? false,
             sort_order: o.sort_order ?? i,
@@ -110,7 +113,7 @@ export function useUpdateQuestion() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['quiz-questions'] })
       qc.invalidateQueries({ queryKey: ['quiz-versions'] })
-      toast.success('Pergunta actualizada')
+      toast.success('Pergunta atualizada')
     },
     onError: (err: Error) => toast.error(`Erro: ${err.message}`),
   })
@@ -131,7 +134,7 @@ export function useToggleQuestionActive() {
     onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: ['quiz-questions'] })
       qc.invalidateQueries({ queryKey: ['quiz-versions'] })
-      toast.success(vars.isActive ? 'Pergunta reactivada' : 'Pergunta desactivada')
+      toast.success(vars.isActive ? 'Pergunta reativada' : 'Pergunta desativada')
     },
     onError: (err: Error) => toast.error(`Erro: ${err.message}`),
   })
@@ -155,7 +158,7 @@ export function useCreateQuestion() {
         is_required: boolean
         placeholder?: string | null
         validation_rules?: { min?: number; max?: number } | null
-        display_conditions?: { question_key: string; answer_key: string | string[] } | null
+        display_conditions?: DbDisplayConditions | null
       }
       options?: OptionInput[]
     }) => {
@@ -305,7 +308,7 @@ export function useUpdateTheme() {
       qc.invalidateQueries({ queryKey: ['quiz-questions'] })
       qc.invalidateQueries({ queryKey: ['quiz-versions'] })
       qc.invalidateQueries({ queryKey: ['form-themes'] })
-      toast.success('Tema actualizado')
+      toast.success('Tema atualizado')
     },
     onError: (err: Error) => toast.error(`Erro: ${err.message}`),
   })
@@ -459,6 +462,6 @@ export function useRestoreVersion() {
       qc.invalidateQueries({ queryKey: ['quiz-versions'] })
       toast.success('Versão restaurada')
     },
-    onError: (err: Error) => toast.error(`Erro a restaurar: ${err.message}`),
+    onError: (err: Error) => toast.error(`Erro ao restaurar: ${err.message}`),
   })
 }

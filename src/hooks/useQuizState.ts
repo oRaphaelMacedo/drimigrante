@@ -1,9 +1,12 @@
+// useQuizState.ts — máquina de estados da tela do quiz (intro → perguntas →
+// captura → processamento → resultado, e "em breve"). Testes: useQuizState.test.ts.
 import { useReducer } from 'react'
+import type { QuizStep } from '@/lib/quiz-flow'
 import type { QuizResult } from './useQuiz'
 
 export type QuizFlowState = 'intro' | 'question' | 'capture' | 'processing' | 'results' | 'comingsoon'
 
-interface State {
+export interface QuizMachineState {
   quizState: QuizFlowState
   currentIndex: number
   animationDirection: 'forward' | 'backward'
@@ -11,18 +14,29 @@ interface State {
   isSubmitting: boolean
 }
 
-type Action =
+/** Etapas em que a retomada pode deixar a pessoa. */
+export type ResumeStep = Extract<QuizStep, { kind: 'question' } | { kind: 'capture' }>
+
+export type QuizAction =
   | { type: 'START' }
-  | { type: 'NEXT_QUESTION'; totalVisible: number }
-  | { type: 'PREV_QUESTION' }
-  | { type: 'GO_COMINGSOON' }
-  | { type: 'BACK_FROM_COMINGSOON' }
+  /** "Continuar" no card de retomada (DI-041). */
+  | { type: 'RESUME'; step: ResumeStep }
+  /**
+   * Ir para uma etapa: "Próximo"/"Anterior" (destino calculado pelo useQuiz) ou
+   * ?passo= da URL (voltar/avançar do sistema), já ajustada por clampStep.
+   */
+  | { type: 'GO_TO_STEP'; step: QuizStep }
+  /**
+   * "Voltar às perguntas" na captura (DI-043): mostra a última pergunta visível
+   * (`lastIndex`, já ajustado por clampStep). As respostas ficam na sessão.
+   */
+  | { type: 'BACK_FROM_CAPTURE'; lastIndex: number }
   | { type: 'SUBMIT_START' }
   | { type: 'SUBMIT_SUCCESS'; payload: QuizResult }
   | { type: 'SUBMIT_ERROR' }
   | { type: 'RESET' }
 
-const initialState: State = {
+export const initialQuizState: QuizMachineState = {
   quizState: 'intro',
   currentIndex: 0,
   animationDirection: 'forward',
@@ -30,38 +44,77 @@ const initialState: State = {
   isSubmitting: false,
 }
 
-function quizReducer(state: State, action: Action): State {
+function stepRank(state: QuizMachineState): number {
+  switch (state.quizState) {
+    case 'intro':
+      return -1
+    case 'question':
+      return state.currentIndex
+    case 'comingsoon':
+      // Logo depois da primeira pergunta (o atalho para nacionalidade anima para frente).
+      return 0.5
+    default:
+      return Number.MAX_SAFE_INTEGER
+  }
+}
+
+export function quizReducer(state: QuizMachineState, action: QuizAction): QuizMachineState {
   switch (action.type) {
     case 'START':
       return { ...state, quizState: 'question', currentIndex: 0, animationDirection: 'forward' }
-    case 'NEXT_QUESTION':
-      if (state.currentIndex < action.totalVisible - 1) {
-        return { ...state, currentIndex: state.currentIndex + 1, animationDirection: 'forward' }
+    case 'RESUME':
+      if (state.isSubmitting) return state
+      return action.step.kind === 'capture'
+        ? { ...state, quizState: 'capture', animationDirection: 'forward' }
+        : { ...state, quizState: 'question', currentIndex: Math.max(0, action.step.index), animationDirection: 'forward' }
+    case 'GO_TO_STEP': {
+      // Durante o envio a etapa não muda (o voltar do sistema não interrompe o processamento).
+      if (state.isSubmitting || state.quizState === 'processing' || state.quizState === 'results') return state
+      const step = action.step
+      switch (step.kind) {
+        case 'intro':
+          return { ...state, quizState: 'intro', currentIndex: 0, animationDirection: 'backward' }
+        case 'capture':
+          return { ...state, quizState: 'capture', animationDirection: 'forward' }
+        case 'comingsoon':
+          return { ...state, quizState: 'comingsoon', animationDirection: 'forward' }
+        case 'question': {
+          const index = Math.max(0, step.index)
+          return {
+            ...state,
+            quizState: 'question',
+            currentIndex: index,
+            animationDirection: index < stepRank(state) ? 'backward' : 'forward',
+          }
+        }
+        default:
+          return state
       }
-      return { ...state, quizState: 'capture' }
-    case 'PREV_QUESTION':
-      if (state.currentIndex > 0) {
-        return { ...state, currentIndex: state.currentIndex - 1, animationDirection: 'backward' }
+    }
+    case 'BACK_FROM_CAPTURE':
+      // Só a partir da captura; durante o envio a tela não muda.
+      if (state.quizState !== 'capture' || state.isSubmitting) return state
+      return {
+        ...state,
+        quizState: 'question',
+        currentIndex: Math.max(0, action.lastIndex),
+        animationDirection: 'backward',
       }
-      return { ...state, quizState: 'intro' }
-    case 'GO_COMINGSOON':
-      return { ...state, quizState: 'comingsoon' }
-    case 'BACK_FROM_COMINGSOON':
-      return { ...state, quizState: 'question', currentIndex: 0, animationDirection: 'backward' }
     case 'SUBMIT_START':
+      if (state.isSubmitting) return state
       return { ...state, quizState: 'processing', isSubmitting: true }
     case 'SUBMIT_SUCCESS':
       return { ...state, quizState: 'results', isSubmitting: false, result: action.payload }
     case 'SUBMIT_ERROR':
       return { ...state, quizState: 'capture', isSubmitting: false }
     case 'RESET':
-      return initialState
+      return initialQuizState
     default:
       return state
   }
 }
 
 export function useQuizState() {
-  const [state, dispatch] = useReducer(quizReducer, initialState)
+  const [state, dispatch] = useReducer(quizReducer, initialQuizState)
   return { state, dispatch }
 }

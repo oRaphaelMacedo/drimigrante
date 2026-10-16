@@ -1,66 +1,68 @@
-// QuizProgress.tsx — Visual progress bar with theme indicators
-import { QUIZ_THEMES } from '@/data/quiz-questions'
-import { cn } from '@/lib/utils'
+// QuizProgress.tsx — progresso honesto do quiz (DI-040).
+//
+// - "Pergunta N de T" e a porcentagem só aparecem quando o total é conhecido
+//   (depois do caso); antes disso, só "Pergunta N".
+// - A barra é segmentada pelos temas das perguntas visíveis (não pela lista
+//   fixa de temas), cada segmento proporcional ao número de perguntas.
+// - O tema atual aparece uma vez só, aqui.
+// - Acessibilidade (DI-069): role="progressbar" com aria-valuenow/valuetext
+//   quando o total é conhecido; sem animação com "reduzir movimento".
+import type { ThemeProgress } from '@/lib/quiz-flow'
 
 interface QuizProgressProps {
-  currentThemeCode: string
-  progressPercentage: number
-  currentIndex: number
-  totalQuestions: number
+  /** Ex.: "Pergunta 3 de 9", "Pergunta 1", "Perguntas concluídas". */
+  label: string
+  /** Tema atual (mostrado uma vez). */
+  themeName?: string | null
+  /** 0–100, ou null enquanto o total não é conhecido. */
+  percentage: number | null
+  /** Segmentos da barra: temas das perguntas visíveis. */
+  segments?: ThemeProgress[]
 }
 
-const THEME_ORDER = QUIZ_THEMES.map((t) => t.code) as string[]
-
-export function QuizProgress({
-  currentThemeCode,
-  progressPercentage,
-  currentIndex,
-  totalQuestions,
-}: QuizProgressProps) {
-  const currentThemeIdx = THEME_ORDER.indexOf(currentThemeCode)
+export function QuizProgress({ label, themeName, percentage, segments = [] }: QuizProgressProps) {
+  const showBar = percentage !== null && segments.length > 0
 
   return (
-    <div className="w-full space-y-3">
-      {/* Top row: question count + percentage */}
-      <div className="flex items-center justify-between text-sm">
-        <span className="font-medium text-gray-500">
-          Pergunta {currentIndex + 1} de {totalQuestions}
+    <div className="w-full">
+      <div className="flex items-baseline justify-between gap-3 text-sm">
+        <span className="min-w-0 truncate font-semibold text-primary">{themeName}</span>
+        <span data-testid="quiz-progress-label" className="shrink-0 tabular-nums text-muted-foreground">
+          {label}
+          {percentage !== null && (
+            <>
+              <span aria-hidden="true"> · </span>
+              <span className="font-semibold text-foreground">{percentage}%</span>
+            </>
+          )}
         </span>
-        <span className="font-semibold text-brand-700">{progressPercentage}%</span>
       </div>
 
-      {/* Main progress bar */}
-      <div className="h-2 w-full overflow-hidden rounded-full bg-gray-100">
+      {showBar && (
         <div
-          className="h-full rounded-full bg-gradient-to-r from-brand-500 to-brand-700 transition-all duration-500 ease-out"
-          style={{ width: `${progressPercentage}%` }}
-        />
-      </div>
-
-      {/* Theme segments */}
-      <div className="flex items-center gap-1">
-        {QUIZ_THEMES.map((theme, idx) => {
-          const isDone = idx < currentThemeIdx
-          const isCurrent = idx === currentThemeIdx
-          return (
+          role="progressbar"
+          aria-label="Progresso do diagnóstico"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={percentage}
+          aria-valuetext={`${label}, ${percentage}%`}
+          className="mt-3 flex gap-1"
+        >
+          {segments.map((segment) => (
             <div
-              key={theme.code}
-              className={cn(
-                'h-1.5 flex-1 rounded-full transition-all duration-300',
-                isDone && 'bg-brand-600',
-                isCurrent && 'bg-brand-400',
-                !isDone && !isCurrent && 'bg-gray-200',
-              )}
-              title={theme.name}
-            />
-          )
-        })}
-      </div>
-
-      {/* Current theme label */}
-      <p className="text-xs font-medium text-gray-400">
-        {QUIZ_THEMES.find((t) => t.code === currentThemeCode)?.name ?? ''}
-      </p>
+              key={segment.code}
+              title={segment.name}
+              className="h-1.5 min-w-[0.5rem] overflow-hidden rounded-full bg-muted"
+              style={{ flexGrow: Math.max(1, segment.total), flexBasis: 0 }}
+            >
+              <div
+                className="h-full w-full origin-left rounded-full bg-primary transition-transform duration-slow ease-out motion-reduce:transition-none"
+                style={{ transform: `scaleX(${segment.total > 0 ? segment.answered / segment.total : 0})` }}
+              />
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

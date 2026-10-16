@@ -1,0 +1,16 @@
+# Supabase CLI — arquivos locais que nunca vão para o git
+.branches
+.temp
+
+# Segredos das Edge Functions para `supabase functions serve --env-file`
+functions/.env
+functions/.env.*
+
+# dotenvx / env locais
+.env
+.env.keys
+.env.local
+.env.*.local
+
+# Chaves de assinatura JWT locais (auth.signing_keys_path)
+signing_keys.json

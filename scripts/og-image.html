@@ -1,140 +1,136 @@
 <!doctype html>
-<!-- Fonte da imagem de partilha (public/og-image.png). Regenerar: node scripts/generate-og-image.mjs -->
-<html lang="pt-PT">
+<!--
+  Fonte da imagem de partilha (public/og-image.jpg, 1200×630) na direção visual "Azulejo" (DI-062).
+  Regenerar: node scripts/generate-og-image.mjs
+  Fontes locais do @fontsource-variable (precisa de node_modules instalado); nada de CDN.
+  Cores = tokens de src/index.css: cobalto #1f41c7 (primary) como superfície, branco no CTA
+  (o convite é para o diagnóstico grátis, não para pagar: âmbar fica reservado à compra),
+  âmbar #fdba2f só no destaque (eyebrow, 4,63:1 sobre o cobalto) e brand-100 #dae8ff no texto
+  secundário (6,42:1). Conteúdo importante longe das bordas: algumas redes cortam a imagem.
+-->
+<html lang="pt-BR">
 <head>
 <meta charset="UTF-8" />
-<link rel="preconnect" href="https://fonts.googleapis.com" />
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@500;600;700;800;900&display=swap" rel="stylesheet" />
 <style>
+  @font-face {
+    font-family: 'Figtree';
+    font-weight: 300 900;
+    src: url('../node_modules/@fontsource-variable/figtree/files/figtree-latin-wght-normal.woff2') format('woff2');
+  }
+  @font-face {
+    font-family: 'Literata';
+    font-weight: 600 700;
+    src: url('../node_modules/@fontsource-variable/literata/files/literata-latin-wght-normal.woff2') format('woff2');
+  }
+
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { width: 1200px; height: 630px; }
   body {
-    font-family: 'Inter', -apple-system, 'Helvetica Neue', Arial, sans-serif;
-    color: #fff;
-    overflow: hidden;
     position: relative;
-    background:
-      radial-gradient(ellipse 620px 520px at 900px 330px, rgba(59, 98, 246, 0.45), transparent 70%),
-      radial-gradient(ellipse 380px 300px at 960px 470px, rgba(245, 158, 11, 0.18), transparent 70%),
-      linear-gradient(135deg, #0b0f2e 0%, #121a4a 55%, #0b0f2e 100%);
-  }
-  /* grelha subtil */
-  body::before {
-    content: ''; position: absolute; inset: 0;
-    background-image:
-      linear-gradient(rgba(255,255,255,0.035) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(255,255,255,0.035) 1px, transparent 1px);
+    overflow: hidden;
+    font-family: 'Figtree', Arial, sans-serif;
+    color: #ffffff;
+    background-color: #1f41c7;
+    /* Motivo de azulejo: tile de 48px, uma cor (branco), 8% — o mesmo de .bg-azulejo-inverse. */
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='48' viewBox='0 0 48 48'%3E%3Cg fill='none' stroke='%23ffffff' stroke-opacity='.08' stroke-width='1.5'%3E%3Cpath d='M24 7c2.4 8.6 8.4 14.6 17 17-8.6 2.4-14.6 8.4-17 17-2.4-8.6-8.4-14.6-17-17 8.6-2.4 14.6-8.4 17-17Z'/%3E%3Cpath d='M0 10a10 10 0 0 0 10-10M38 0a10 10 0 0 0 10 10M48 38a10 10 0 0 0-10 10M10 48A10 10 0 0 0 0 38'/%3E%3Ccircle cx='24' cy='24' r='3'/%3E%3C/g%3E%3C/svg%3E");
     background-size: 48px 48px;
-    mask-image: radial-gradient(ellipse 700px 500px at 900px 320px, #000 30%, transparent 75%);
+    -webkit-font-smoothing: antialiased;
   }
 
-  .left { position: absolute; left: 64px; top: 56px; width: 640px; }
+  .left { position: absolute; left: 72px; top: 72px; width: 640px; }
 
-  .logo { display: flex; align-items: center; gap: 14px; font-size: 30px; font-weight: 800; letter-spacing: -0.5px; }
-  .logo-mark {
-    width: 46px; height: 46px; border-radius: 12px;
-    background: linear-gradient(135deg, #3b62f6, #1b33d8);
-    display: grid; place-items: center;
-    box-shadow: 0 6px 20px rgba(59, 98, 246, 0.5);
-    font-size: 22px; font-weight: 900;
-  }
-  .logo span { color: #fbbf24; }
+  .logo { display: flex; align-items: center; gap: 16px; font-size: 30px; font-weight: 700; letter-spacing: -0.3px; }
+  .logo svg { width: 56px; height: 56px; flex: none; }
 
   .eyebrow {
-    margin-top: 40px; font-size: 15px; font-weight: 600;
-    letter-spacing: 2.5px; text-transform: uppercase; color: rgba(255,255,255,0.65);
+    margin-top: 40px;
+    font-size: 17px; font-weight: 700; letter-spacing: 2.4px; text-transform: uppercase;
+    color: #fdba2f;
   }
 
   h1 {
-    margin-top: 18px; font-size: 62px; line-height: 1.04;
-    font-weight: 900; letter-spacing: -2px;
+    margin-top: 12px;
+    font-family: 'Literata', Georgia, serif;
+    font-size: 50px; line-height: 1.1; font-weight: 700; letter-spacing: -0.6px;
+    text-wrap: balance;
   }
-  h1 .gold { color: #fbbf24; }
 
-  .sub { margin-top: 22px; font-size: 22px; color: rgba(255,255,255,0.75); font-weight: 500; }
+  .sub { margin-top: 18px; font-size: 22px; line-height: 1.45; font-weight: 500; color: #dae8ff; text-wrap: pretty; }
 
   .cta {
-    margin-top: 34px; display: inline-flex; align-items: center; gap: 10px;
-    background: #fbbf24; color: #111827;
-    font-size: 21px; font-weight: 800;
-    padding: 15px 26px; border-radius: 10px;
+    margin-top: 30px; display: inline-flex; align-items: center; gap: 12px;
+    padding: 15px 26px; border-radius: 12px;
+    background: #ffffff; color: #1f41c7;
+    font-size: 22px; font-weight: 700;
+    box-shadow: 0 8px 24px -8px rgb(9 25 78 / 0.5);
   }
-  .cta svg { width: 20px; height: 20px; }
+  .cta svg { width: 22px; height: 22px; }
 
-  .domain { position: absolute; right: 56px; bottom: 34px; font-size: 18px; font-weight: 600; color: rgba(255,255,255,0.7); }
-
-  /* cartão de resultado */
-  .stack { position: absolute; right: 70px; top: 110px; width: 380px; height: 380px; }
-  .ghost {
-    position: absolute; inset: 0; border-radius: 22px;
-    border: 1px solid rgba(147, 180, 253, 0.25);
-    background: rgba(59, 98, 246, 0.08);
-  }
-  .ghost.g1 { transform: translate(-34px, 26px) rotate(-7deg); }
-  .ghost.g2 { transform: translate(-17px, 13px) rotate(-3.5deg); background: rgba(59, 98, 246, 0.12); }
-
+  /* Cartão claro: o que o diagnóstico avalia (sem simular um resultado). */
   .card {
-    position: absolute; inset: 0; border-radius: 22px; padding: 30px;
-    background: linear-gradient(160deg, rgba(255,255,255,0.16), rgba(255,255,255,0.05));
-    border: 1px solid rgba(255,255,255,0.28);
-    box-shadow: 0 30px 80px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255,255,255,0.3);
-    backdrop-filter: blur(8px);
+    position: absolute; right: 64px; top: 112px; width: 360px;
+    padding: 30px 30px 26px;
+    border-radius: 22px;
+    background: #ffffff; color: #141a29;
+    box-shadow: 0 30px 60px -24px rgb(9 25 78 / 0.55);
   }
-  .card-top { display: flex; align-items: center; justify-content: space-between; }
-  .card-label { font-size: 13px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: rgba(255,255,255,0.6); }
-  .flag { display: flex; width: 40px; height: 26px; border-radius: 4px; overflow: hidden; box-shadow: 0 2px 6px rgba(0,0,0,0.3); }
-  .flag i { display: block; height: 100%; }
-  .flag i:first-child { width: 40%; background: #046a38; }
-  .flag i:last-child { width: 60%; background: #da291c; }
-
-  .card-title { margin-top: 22px; font-size: 25px; font-weight: 800; line-height: 1.2; }
-
-  .badge {
-    margin-top: 18px; display: inline-flex; align-items: center; gap: 8px;
-    padding: 8px 14px; border-radius: 999px;
-    background: rgba(34, 197, 94, 0.18); border: 1px solid rgba(74, 222, 128, 0.5);
-    color: #86efac; font-size: 16px; font-weight: 700;
+  .card-label { font-size: 16px; font-weight: 600; color: #5c6372; }
+  .card-title {
+    margin-top: 6px;
+    font-family: 'Literata', Georgia, serif;
+    font-size: 27px; line-height: 1.2; font-weight: 600; letter-spacing: -0.3px;
   }
-  .badge b { width: 9px; height: 9px; border-radius: 50%; background: #4ade80; box-shadow: 0 0 10px #4ade80; }
-
-  .rows { margin-top: 24px; display: grid; gap: 12px; }
-  .row { display: flex; align-items: center; gap: 12px; font-size: 16px; font-weight: 600; color: rgba(255,255,255,0.88); }
-  .check {
-    width: 24px; height: 24px; border-radius: 50%; flex: none;
-    background: #fbbf24; color: #111827; display: grid; place-items: center;
-    font-size: 14px; font-weight: 900;
+  .paths { margin-top: 20px; list-style: none; display: grid; gap: 13px; }
+  .paths li { display: flex; align-items: center; gap: 14px; font-size: 18px; font-weight: 600; }
+  .paths li::before {
+    content: ''; flex: none; width: 10px; height: 10px; margin: 0 3px;
+    background: #1f41c7; border-radius: 2px; transform: rotate(45deg);
   }
+  .card-foot {
+    margin-top: 22px; padding-top: 16px; border-top: 1px solid #dde1ea;
+    display: flex; align-items: center; gap: 10px;
+    font-size: 16px; font-weight: 600; color: #5c6372;
+  }
+  .card-foot svg { width: 18px; height: 18px; color: #1f41c7; }
+
+  .domain { position: absolute; right: 64px; bottom: 40px; font-size: 18px; font-weight: 600; color: #dae8ff; }
 </style>
 </head>
 <body>
   <div class="left">
-    <div class="logo"><div class="logo-mark">DI</div>Doutor <span>Imigrante</span></div>
-    <p class="eyebrow">Diagnóstico gratuito · Nacionalidade portuguesa</p>
-    <h1>Descubra se tem<br />direito à nacionalidade.<br /><span class="gold">Em 5 minutos.</span></h1>
-    <p class="sub">Análise personalizada, privada e imediata.</p>
+    <div class="logo">
+      <!-- Monograma DI (mesma geometria de scripts/generate-icons.mjs), invertido: fundo branco, letras cobalto. -->
+      <svg viewBox="0 0 512 512" aria-hidden="true">
+        <rect width="512" height="512" rx="112" fill="#ffffff" />
+        <path fill="#1f41c7" fill-rule="evenodd" d="M113 146H203A110 110 0 0 1 203 366H113ZM169 202V310H203A54 54 0 0 0 203 202Z" />
+        <rect x="343" y="146" width="56" height="220" fill="#1f41c7" />
+      </svg>
+      Doutor Imigrante
+    </div>
+    <p class="eyebrow">Diagnóstico gratuito</p>
+    <h1>Descubra se você tem direito à nacionalidade portuguesa</h1>
+    <p class="sub">Responda a algumas perguntas e veja os caminhos possíveis para o seu caso.</p>
     <div class="cta">
-      Fazer diagnóstico grátis
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7M8 7h9v9"/></svg>
+      Fazer o diagnóstico grátis
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
     </div>
   </div>
 
-  <div class="stack">
-    <div class="ghost g1"></div>
-    <div class="ghost g2"></div>
-    <div class="card">
-      <div class="card-top">
-        <span class="card-label">O seu resultado</span>
-        <span class="flag"><i></i><i></i></span>
-      </div>
-      <p class="card-title">Nacionalidade Portuguesa</p>
-      <span class="badge"><b></b>Elegibilidade alta</span>
-      <div class="rows">
-        <div class="row"><span class="check">✓</span>Descendência</div>
-        <div class="row"><span class="check">✓</span>Matrimónio</div>
-        <div class="row"><span class="check">✓</span>Residência</div>
-        <div class="row"><span class="check">✓</span>Ex-nacional</div>
-      </div>
-    </div>
+  <div class="card">
+    <p class="card-label">O diagnóstico avalia</p>
+    <p class="card-title">Seus caminhos para a nacionalidade</p>
+    <ul class="paths">
+      <li>Descendência</li>
+      <li>Casamento ou união estável</li>
+      <li>Nascimento em Portugal</li>
+      <li>Residência em Portugal</li>
+      <li>Reaquisição da nacionalidade</li>
+      <li>Ex-colônias portuguesas</li>
+    </ul>
+    <p class="card-foot">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>
+      Leva cerca de 5 minutos
+    </p>
   </div>
 
   <div class="domain">drimigrante.com</div>

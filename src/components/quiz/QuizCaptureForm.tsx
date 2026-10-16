@@ -1,17 +1,49 @@
-// QuizCaptureForm.tsx — Lead capture before showing result
+// QuizCaptureForm.tsx — contato antes do resultado (DI-043).
+//
+// - Campos do DS (Input): 16px (sem zoom no iOS), rótulo ligado, erro com
+//   aria-invalid/aria-describedby e role="alert".
+// - noValidate + validação do Zod no toque (mode onTouched): só a nossa
+//   mensagem aparece, nunca a bolha nativa do navegador.
+// - Enter/"próximo" do teclado leva ao campo seguinte; no último, envia.
+// - Opt-in de novidades desmarcado por padrão (vai em p_answers.marketing_opt_in).
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { Loader2, Lock, Mail, Phone, User } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { ArrowRight, Lock, Target } from 'lucide-react'
+import { Button, Input } from '@/components/ui'
 import type { LeadInfo } from '@/hooks/useQuiz'
 
+/** Telefone opcional: se vier, só dígitos e separadores comuns, de 8 a 15 dígitos. */
+function isValidPhone(value: string | undefined): boolean {
+  if (!value) return true
+  if (!/^[+\d][\d\s().-]*$/.test(value)) return false
+  const digits = value.replace(/\D/g, '').length
+  return digits >= 8 && digits <= 15
+}
+
 const schema = z.object({
-  fullName: z.string().min(2, 'Nome deve ter pelo menos 2 caracteres'),
-  email: z.string().email('Email inválido'),
-  phone: z.string().optional(),
+  fullName: z
+    .string()
+    .trim()
+    .min(2, 'Informe como podemos te chamar (pelo menos 2 letras).')
+    .max(120, 'Use no máximo 120 caracteres.'),
+  email: z
+    .string()
+    .trim()
+    .min(1, 'Informe o seu e-mail.')
+    .email('Confira o e-mail: ele parece incompleto (ex.: nome@email.com).'),
+  phone: z
+    .string()
+    .trim()
+    .optional()
+    .refine(isValidPhone, 'Confira o número: use o código do país e só números (ex.: +55 11 99999-9999).'),
+  marketingOptIn: z.boolean(),
 })
 
 type FormValues = z.infer<typeof schema>
+
+export const CAPTURE_TITLE_ID = 'quiz-capture-title'
 
 interface QuizCaptureFormProps {
   onSubmit: (leadInfo: LeadInfo) => void
@@ -25,6 +57,8 @@ export function QuizCaptureForm({ onSubmit, isSubmitting }: QuizCaptureFormProps
     formState: { errors },
   } = useForm<FormValues>({
     resolver: zodResolver(schema),
+    mode: 'onTouched',
+    defaultValues: { fullName: '', email: '', phone: '', marketingOptIn: false },
   })
 
   const submit = (data: FormValues) => {
@@ -32,115 +66,123 @@ export function QuizCaptureForm({ onSubmit, isSubmitting }: QuizCaptureFormProps
       fullName: data.fullName,
       email: data.email,
       phone: data.phone || undefined,
+      marketingOptIn: data.marketingOptIn,
     })
   }
 
+  /**
+   * Enter num campo do meio vai para o próximo em vez de enviar o formulário.
+   * Foco síncrono (dentro do gesto) para o teclado do iOS continuar aberto.
+   */
+  const focusOnEnter = (next: keyof FormValues) => (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== 'Enter' || event.nativeEvent.isComposing) return
+    const target = event.currentTarget.form?.elements.namedItem(next)
+    if (!(target instanceof HTMLInputElement)) return
+    event.preventDefault()
+    target.focus()
+  }
+
   return (
-    <div className="animate-in fade-in-0 slide-in-from-right-4 duration-300 space-y-6">
-      {/* Header */}
-      <div>
-        <div className="mb-3 flex items-center gap-2 text-brand-700">
-          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-brand-100">
-            🎯
-          </div>
-          <span className="text-sm font-semibold uppercase tracking-wider">Quase lá!</span>
+    <div className="animate-in fade-in-0 slide-in-from-right-4 space-y-6 duration-300 motion-reduce:animate-none">
+      <header>
+        <div className="mb-4 flex h-11 w-11 items-center justify-center rounded-xl bg-brand-50 text-primary">
+          <Target className="h-6 w-6" aria-hidden="true" />
         </div>
-        <h2 className="mb-2 text-2xl font-bold text-gray-900">
-          Onde enviamos o seu resultado?
+        <h2 id={CAPTURE_TITLE_ID} className="text-h2 text-foreground">
+          Falta pouco para ver o seu resultado
         </h2>
-        <p className="text-sm text-gray-500">
-          Introduza os seus dados para receber o resultado e guardar a sua análise.
+        <p className="mt-2 text-base text-muted-foreground">
+          Informe como podemos te chamar e o seu e-mail. O resultado aparece logo em seguida.
         </p>
-      </div>
+      </header>
 
-      {/* Form */}
-      <form id="quiz-capture-form" onSubmit={handleSubmit(submit)} className="space-y-4">
-        {/* Full name */}
-        <div>
-          <label htmlFor="capture-name" className="mb-1.5 block text-sm font-medium text-gray-700">
-            Nome completo *
-          </label>
-          <div className="relative">
-            <User className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-            <input
-              id="capture-name"
-              type="text"
-              autoComplete="name"
-              placeholder="Ex: Ana Silva"
-              {...register('fullName')}
-              className="w-full rounded-xl border-2 border-gray-200 bg-white py-3 pl-9 pr-4 text-sm text-gray-900 transition focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-200"
-            />
-          </div>
-          {errors.fullName && (
-            <p className="mt-1 text-xs text-red-500">{errors.fullName.message}</p>
-          )}
-        </div>
+      <form
+        id="quiz-capture-form"
+        noValidate
+        aria-labelledby={CAPTURE_TITLE_ID}
+        onSubmit={handleSubmit(submit)}
+        className="space-y-5"
+      >
+        <Input
+          id="capture-name"
+          label="Como podemos te chamar?"
+          required
+          autoComplete="name"
+          autoCapitalize="words"
+          enterKeyHint="next"
+          placeholder="Ex.: Ana Silva"
+          error={errors.fullName?.message}
+          onKeyDown={focusOnEnter('email')}
+          {...register('fullName')}
+        />
 
-        {/* Email */}
-        <div>
-          <label htmlFor="capture-email" className="mb-1.5 block text-sm font-medium text-gray-700">
-            Email *
-          </label>
-          <div className="relative">
-            <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-            <input
-              id="capture-email"
-              type="email"
-              autoComplete="email"
-              placeholder="Ex: ana@email.com"
-              {...register('email')}
-              className="w-full rounded-xl border-2 border-gray-200 bg-white py-3 pl-9 pr-4 text-sm text-gray-900 transition focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-200"
-            />
-          </div>
-          {errors.email && (
-            <p className="mt-1 text-xs text-red-500">{errors.email.message}</p>
-          )}
-        </div>
+        <Input
+          id="capture-email"
+          label="E-mail"
+          type="email"
+          inputMode="email"
+          required
+          autoComplete="email"
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
+          enterKeyHint="next"
+          placeholder="nome@email.com"
+          error={errors.email?.message}
+          onKeyDown={focusOnEnter('phone')}
+          {...register('email')}
+        />
 
-        {/* Phone (optional) */}
-        <div>
-          <label htmlFor="capture-phone" className="mb-1.5 block text-sm font-medium text-gray-700">
-            Telefone / WhatsApp{' '}
-            <span className="font-normal text-gray-400">(opcional)</span>
-          </label>
-          <div className="relative">
-            <Phone className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-            <input
-              id="capture-phone"
-              type="tel"
-              autoComplete="tel"
-              placeholder="Ex: +55 11 99999-9999"
-              {...register('phone')}
-              className="w-full rounded-xl border-2 border-gray-200 bg-white py-3 pl-9 pr-4 text-sm text-gray-900 transition focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-200"
-            />
-          </div>
-        </div>
+        <Input
+          id="capture-phone"
+          label={
+            <>
+              WhatsApp <span className="font-normal text-muted-foreground">(opcional)</span>
+            </>
+          }
+          type="tel"
+          inputMode="tel"
+          autoComplete="tel"
+          enterKeyHint="go"
+          placeholder="+55 11 99999-9999"
+          hint="Com o código do país."
+          error={errors.phone?.message}
+          {...register('phone')}
+        />
 
-        {/* Submit */}
-        <button
-          type="submit"
-          id="quiz-submit-btn"
-          disabled={isSubmitting}
-          className="flex w-full items-center justify-center gap-2 rounded-xl bg-brand-700 py-3.5 text-base font-bold text-white shadow-md shadow-brand-200 transition-all hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-70"
+        <label
+          htmlFor="capture-marketing"
+          className="flex min-h-11 cursor-pointer select-none items-start gap-3 py-1 text-sm leading-relaxed text-foreground"
         >
-          {isSubmitting ? (
-            <>
-              <Loader2 className="h-4 w-4 animate-spin" />
-              A calcular o seu perfil...
-            </>
-          ) : (
-            <>
-              Ver Meu Resultado Gratuito
-              <span>→</span>
-            </>
-          )}
-        </button>
+          <input
+            id="capture-marketing"
+            type="checkbox"
+            className="mt-0.5 h-5 w-5 shrink-0 cursor-pointer rounded-md accent-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            {...register('marketingOptIn')}
+          />
+          <span>Quero receber por e-mail novidades e dicas sobre a nacionalidade portuguesa.</span>
+        </label>
 
-        {/* Trust signal */}
-        <div className="flex items-center justify-center gap-1.5 text-xs text-gray-400">
-          <Lock className="h-3 w-3" />
-          Os seus dados são confidenciais e nunca partilhados com terceiros.
-        </div>
+        <Button id="quiz-submit-btn" type="submit" size="lg" loading={isSubmitting} className="w-full">
+          Ver meu resultado
+          {!isSubmitting && <ArrowRight aria-hidden="true" />}
+        </Button>
+
+        <p className="flex items-start gap-2 text-sm text-muted-foreground">
+          <Lock className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+          <span>
+            Usamos seus dados para o seu diagnóstico.{' '}
+            <Link
+              to="/privacidade"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-medium text-primary underline decoration-primary/40 underline-offset-4 hover:decoration-primary"
+            >
+              Política de Privacidade
+              <span className="sr-only"> (abre em nova aba)</span>
+            </Link>
+          </span>
+        </p>
       </form>
     </div>
   )

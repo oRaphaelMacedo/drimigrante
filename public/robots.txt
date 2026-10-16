@@ -1,8 +1,8 @@
+# Rotas privadas e do funil (/results, /login, /auth, /checkout, /dashboard,
+# /admin) e a página 404 saem do índice pela meta robots "noindex" aplicada
+# pelo app (src/router/index.tsx). Não use Disallow nelas: o robô precisa
+# abrir a página para ler o noindex.
 User-agent: *
 Allow: /
-Disallow: /dashboard
-Disallow: /admin
-Disallow: /auth
-Disallow: /checkout
 
 Sitemap: https://www.drimigrante.com/sitemap.xml

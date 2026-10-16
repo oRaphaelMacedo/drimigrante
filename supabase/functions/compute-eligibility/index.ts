@@ -1,200 +1,68 @@
-import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+// compute-eligibility — calcula score e regras de elegibilidade de um assessment.
+// A lógica fica em handler.ts (testável); aqui só a ligação com Deno, Supabase e env.
+//
+// Corpo: { assessment_id: uuid, session_id?: string }
+// Posse: JWT do dono OU session_id do assessment ainda anônimo → senão 404.
+// Resposta: 200 { result } só com colunas de score (nunca as análises de IA).
+// Score: _shared/quiz-engine.ts, o mesmo cálculo do front (DI-006). Query com erro → 500
+// sem gravar nada. Para corrigir resultados antigos: scripts/backfill-scores.mjs (dono).
+//
+// Boas-vindas (DI-077, modelo welcome_free_v2): saem daqui, depois da resposta, sem
+// depender da OpenAI — com a categoria certa, o link /results?r=<token> e o descadastro.
+// DRY-RUN por padrão: só envia com LIFECYCLE_EMAILS_DRY_RUN=false (ver
+// lifecycle-emails/index.ts).
+// ORDEM DE RELEASE: pode ir no passo 1 do runbook (antes das migrations), como hoje: em
+// dry-run não envia nada e, sem a migration 20261030000000, o welcome_free_v2 não existe
+// e nada sai. O modelo antigo 'welcome_free' não é tocado (o generate-explanation em
+// produção ainda o usa). Desligar o dry-run só depois das migrations 20261025000200 e
+// 20261030000000 E do generate-explanation novo no ar (senão saem dois e-mails).
+//
+// CORS: allowlist de _shared/cors.ts (chamada pelo navegador, no fim do quiz).
+// Observabilidade: _shared/observability.ts (logs JSON e Sentry com SENTRY_DSN_BACKEND).
+// Env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, INTERNAL_SECRET (send-email), APP_URL,
+//      LIFECYCLE_EMAILS_DRY_RUN (padrão: dry-run), EMAIL_UNSUBSCRIBE_SECRET;
+//      opcionais CORS_ALLOWED_ORIGINS, SENTRY_DSN_BACKEND, SENTRY_ENVIRONMENT, SENTRY_RELEASE.
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-}
+import { createClient } from 'npm:@supabase/supabase-js@2.105.4'
+import { withCors } from '../_shared/cors.ts'
+import { parseDryRun, unsubscribeFunctionUrl } from '../_shared/email-lifecycle.ts'
+import { createObservability, defaultSchedule } from '../_shared/observability.ts'
+import { getAppUrl } from '../_shared/origin.ts'
+import { createComputeEligibilityHandler } from './handler.ts'
+import { createEligibilityRepo } from './repo.ts'
 
-interface EligibilityRequest {
-  assessment_id: string
-}
-
-// Minimal JSON-Logic evaluator for MVP
-// Phase 2: use full json-logic-js library
-function evaluateRule(rule: unknown, data: Record<string, unknown>): boolean {
-  if (typeof rule !== 'object' || rule === null) return false
-
-  const r = rule as Record<string, unknown>
-
-  if ('and' in r && Array.isArray(r.and)) {
-    return (r.and as unknown[]).every((sub) => evaluateRule(sub, data))
-  }
-  if ('or' in r && Array.isArray(r.or)) {
-    return (r.or as unknown[]).some((sub) => evaluateRule(sub, data))
-  }
-  if ('>=' in r && Array.isArray(r['>='])) {
-    const [a, b] = r['>='] as unknown[]
-    return resolveValue(a, data) >= resolveValue(b, data)
-  }
-  if ('>' in r && Array.isArray(r['>'])) {
-    const [a, b] = r['>'] as unknown[]
-    return resolveValue(a, data) > resolveValue(b, data)
-  }
-  if ('in' in r && Array.isArray(r.in)) {
-    const [val, arr] = r.in as unknown[]
-    const resolved = resolveValue(val, data)
-    return Array.isArray(arr) && arr.includes(resolved)
-  }
-  if ('==' in r && Array.isArray(r['=='])) {
-    const [a, b] = r['=='] as unknown[]
-    return resolveValue(a, data) === resolveValue(b, data)
-  }
-
-  return false
-}
-
-function resolveValue(v: unknown, data: Record<string, unknown>): unknown {
-  if (typeof v === 'object' && v !== null && 'var' in (v as Record<string, unknown>)) {
-    const key = (v as { var: string }).var
-    return data[key]
-  }
-  return v
-}
-
-function calculateScore(answers: Record<string, unknown>, options: Array<{ question_key: string; option_key: string; score: number }>): number {
-  let total = 0
-  let maxPossible = 0
-
-  const scoresByQuestion: Record<string, number> = {}
-  const maxByQuestion: Record<string, number> = {}
-
-  for (const opt of options) {
-    if (!maxByQuestion[opt.question_key] || opt.score > maxByQuestion[opt.question_key]) {
-      maxByQuestion[opt.question_key] = opt.score
-    }
-  }
-
-  for (const opt of options) {
-    const answer = answers[opt.question_key]
-    if (answer === opt.option_key || (Array.isArray(answer) && (answer as string[]).includes(opt.option_key))) {
-      if (!scoresByQuestion[opt.question_key] || opt.score > scoresByQuestion[opt.question_key]) {
-        scoresByQuestion[opt.question_key] = opt.score
-      }
-    }
-  }
-
-  for (const [key, max] of Object.entries(maxByQuestion)) {
-    maxPossible += max
-    total += scoresByQuestion[key] ?? 0
-  }
-
-  return maxPossible > 0 ? Math.round((total / maxPossible) * 100) : 0
-}
-
-serve(async (req) => {
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
-  }
-
-  try {
-    const supabase = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
-    )
-
-    const { assessment_id }: EligibilityRequest = await req.json()
-
-    if (!assessment_id) {
-      return new Response(JSON.stringify({ error: 'assessment_id required' }), {
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
-    }
-
-    // Fetch assessment
-    const { data: assessment, error: aErr } = await supabase
-      .from('assessments')
-      .select('*')
-      .eq('id', assessment_id)
-      .single()
-
-    if (aErr || !assessment) {
-      return new Response(JSON.stringify({ error: 'Assessment not found' }), {
-        status: 404,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
-    }
-
-    const answers = assessment.answers as Record<string, unknown>
-
-    // Fetch all question options for scoring
-    const { data: options } = await supabase
-      .from('form_question_options')
-      .select('question_id, option_key, score, form_questions!inner(question_key)')
-      .eq('is_active', true)
-
-    const flatOptions = (options ?? []).map((o: Record<string, unknown>) => ({
-      question_key: (o.form_questions as { question_key: string }).question_key,
-      option_key: o.option_key as string,
-      score: o.score as number,
-    }))
-
-    // Calculate overall score
-    const scoreNumeric = calculateScore(answers, flatOptions)
-    const scoreCategory = scoreNumeric >= 65 ? 'alta' : scoreNumeric >= 35 ? 'media' : 'baixa'
-
-    // Evaluate per visa type
-    const { data: visaTypes } = await supabase
-      .from('visa_types')
-      .select('id, code, name_pt, rule_versions!inner(id, rules, is_active)')
-      .eq('is_active', true)
-      .eq('rule_versions.is_active', true)
-
-    const suggestedVisaTypes = []
-
-    for (const vt of visaTypes ?? []) {
-      const ruleVersions = Array.isArray(vt.rule_versions) ? vt.rule_versions : [vt.rule_versions]
-      const activeRule = ruleVersions[0]
-      if (!activeRule) continue
-
-      const eligible = evaluateRule(activeRule.rules, answers as Record<string, unknown>)
-
-      suggestedVisaTypes.push({
-        visa_type_id: vt.id,
-        visa_type_code: vt.code,
-        visa_type_name: vt.name_pt,
-        eligible,
-        rule_version_id: activeRule.id,
-      })
-    }
-
-    // Sort: eligible first, then by visa score
-    suggestedVisaTypes.sort((a, b) => (b.eligible ? 1 : 0) - (a.eligible ? 1 : 0))
-
-    // Upsert result
-    const { data: result, error: rErr } = await supabase
-      .from('assessment_results')
-      .upsert({
-        assessment_id,
-        score_numeric: scoreNumeric,
-        score_category: scoreCategory,
-        suggested_visa_types: suggestedVisaTypes,
-        computed_at: new Date().toISOString(),
-      }, { onConflict: 'assessment_id' })
-      .select()
-      .single()
-
-    if (rErr) {
-      console.error('Error upserting result:', rErr)
-      throw rErr
-    }
-
-    // Mark assessment as completed
-    await supabase
-      .from('assessments')
-      .update({ status: 'completed', completed_at: new Date().toISOString() })
-      .eq('id', assessment_id)
-
-    return new Response(JSON.stringify({ result }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    })
-  } catch (err) {
-    console.error(err)
-    // B03-A07: never leak internal error details to the caller
-    return new Response(JSON.stringify({ error: 'Internal server error' }), {
-      status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    })
-  }
+const obs = createObservability('compute-eligibility')
+const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
+const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+const supabase = createClient(supabaseUrl, serviceRoleKey, {
+  auth: { persistSession: false, autoRefreshToken: false },
 })
+const internalSecret = Deno.env.get('INTERNAL_SECRET') ?? ''
+
+const handler = createComputeEligibilityHandler({
+  repo: createEligibilityRepo(supabase),
+  log: obs.log,
+  now: () => Date.now(),
+  env: { serviceRoleKey },
+  welcome: {
+    dryRun: parseDryRun(Deno.env.get('LIFECYCLE_EMAILS_DRY_RUN')),
+    appUrl: getAppUrl(),
+    unsubscribeSecret: Deno.env.get('EMAIL_UNSUBSCRIBE_SECRET') ?? undefined,
+    unsubscribeUrl: unsubscribeFunctionUrl(supabaseUrl),
+    async send(body) {
+      const { error } = await supabase.functions.invoke('send-email', {
+        body,
+        headers: { 'x-internal-secret': internalSecret },
+      })
+      return { error: error ?? null }
+    },
+  },
+  // O e-mail não segura a resposta do quiz: termina em segundo plano.
+  defer: defaultSchedule,
+})
+
+Deno.serve(
+  withCors(obs.wrap(handler, { reportServerErrors: false }), {
+    onRejected: (origin, method) => obs.log('warn', 'cors_rejected', { origin, method }),
+  }),
+)

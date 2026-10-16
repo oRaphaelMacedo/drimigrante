@@ -1471,6 +1471,7 @@ export type Database = {
           has_dashboard_access: boolean | null
           has_full_analysis: boolean | null
           id: string
+          one_time_access_expires_at: string | null
           one_time_paid: boolean | null
           one_time_paid_at: string | null
           one_time_payment_amount: number | null
@@ -1491,6 +1492,7 @@ export type Database = {
           has_dashboard_access?: boolean | null
           has_full_analysis?: boolean | null
           id?: string
+          one_time_access_expires_at?: string | null
           one_time_paid?: boolean | null
           one_time_paid_at?: string | null
           one_time_payment_amount?: number | null
@@ -1511,6 +1513,7 @@ export type Database = {
           has_dashboard_access?: boolean | null
           has_full_analysis?: boolean | null
           id?: string
+          one_time_access_expires_at?: string | null
           one_time_paid?: boolean | null
           one_time_paid_at?: string | null
           one_time_payment_amount?: number | null
@@ -1829,7 +1832,19 @@ export type Database = {
           isSetofReturn: true
         }
       }
+      get_full_analysis: {
+        Args: { p_assessment_id: string }
+        Returns: {
+          assessment_id: string
+          computed_at: string | null
+          ia_explanation_full: string | null
+        }[]
+      }
       get_user_tenant_id: { Args: { _user_id: string }; Returns: string }
+      has_active_access: {
+        Args: { _feature: string; _user_id: string }
+        Returns: boolean
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
@@ -2230,3 +2245,16 @@ export type Tenant        = Database['public']['Tables']['tenants']['Row']
 export type Payment       = Database['public']['Tables']['payments']['Row']
 export type PaymentStatus  = Database['public']['Enums']['payment_status']
 export type PaymentProduct = Database['public']['Enums']['payment_product']
+
+/**
+ * Linha de assessment_results como o CLIENTE pode ler (DI-016): authenticated
+ * só tem SELECT por coluna e NÃO lê ia_explanation_full (a análise completa
+ * vem da RPC get_full_analysis, que confere posse e acesso vigente).
+ * Adicionado à mão: o gerador do Supabase não expressa privilégios por coluna.
+ */
+export type AssessmentResultClientRow = Omit<
+  Database['public']['Tables']['assessment_results']['Row'],
+  'ia_explanation_full'
+>
+/** Linha devolvida por get_full_analysis (migration 20261020000000). */
+export type FullAnalysisRow = Database['public']['Functions']['get_full_analysis']['Returns'][number]

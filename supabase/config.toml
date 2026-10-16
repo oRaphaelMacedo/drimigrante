@@ -1,0 +1,128 @@
+# Configuração do Supabase LOCAL (supabase start / db reset / functions serve)
+# e das flags por função usadas em `supabase functions deploy`.
+# Referência: https://supabase.com/docs/guides/local-development/cli/config
+# Guia do projeto: docs/testes.md
+#
+# Produção = projeto krjirhlmdnxqqrpzmowz. Nada aqui contém segredo: chaves e
+# tokens ficam em supabase/functions/.env (local, fora do git) ou nos secrets
+# do projeto no painel do Supabase.
+
+project_id = "drimigrante"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+shadow_port = 54320
+# Mesma versão principal do banco de produção (Postgres 17).
+major_version = 17
+
+[db.pooler]
+enabled = false
+
+[db.migrations]
+enabled = true
+
+[db.seed]
+# `supabase db reset` aplica as migrations e depois o seed (usuários de dev
+# LOCAIS — nunca rode o seed num projeto hospedado).
+enabled = true
+sql_paths = ["./seed.sql"]
+
+[realtime]
+enabled = true
+
+[studio]
+enabled = true
+port = 54323
+api_url = "http://127.0.0.1"
+
+# Caixa de e-mail local (Mailpit): os e-mails do Auth local não saem da máquina.
+[inbucket]
+enabled = true
+port = 54324
+
+[storage]
+enabled = true
+# Teto global; o bucket user-documents tem limite próprio de 10 MB (migration
+# 20261016000500_user_documents_storage.sql).
+file_size_limit = "50MiB"
+
+[auth]
+enabled = true
+# Dev server do Vite na porta fixa do projeto (33401).
+site_url = "http://localhost:33401"
+additional_redirect_urls = [
+  "http://localhost:33401/auth/callback",
+  "http://127.0.0.1:33401/auth/callback",
+]
+jwt_expiry = 3600
+enable_refresh_token_rotation = true
+refresh_token_reuse_interval = 10
+enable_signup = true
+enable_anonymous_sign_ins = false
+minimum_password_length = 8
+
+[auth.rate_limit]
+email_sent = 30
+token_verifications = 60
+
+[auth.email]
+enable_signup = true
+double_confirm_changes = true
+enable_confirmations = false
+max_frequency = "1s"
+otp_length = 6
+otp_expiry = 3600
+
+[edge_runtime]
+enabled = true
+policy = "per_worker"
+inspector_port = 8083
+deno_version = 2
+
+[analytics]
+# Desligado para o stack local subir mais leve; ligue se precisar dos logs no Studio.
+enabled = false
+
+# ─── Edge Functions ──────────────────────────────────────────────────────────
+# verify_jwt = false SÓ onde quem chama não tem JWT de usuário. Sem estas
+# entradas, um `supabase functions deploy` sem a flag --no-verify-jwt quebraria
+# o webhook do Stripe e o checkout anônimo. As demais funções (chat-completion,
+# compute-eligibility, create-portal-session, delete-account, export-my-data,
+# generate-explanation, send-email) usam o padrão verify_jwt = true.
+
+# Stripe chama sem Authorization; a função valida a assinatura stripe-signature.
+[functions.stripe-webhook]
+verify_jwt = false
+
+# Checkout anônimo do funil (€30): o visitante ainda não tem conta.
+[functions.create-checkout-session]
+verify_jwt = false
+
+# Login automático pós-pagamento: o comprador ainda não tem sessão.
+[functions.claim-session]
+verify_jwt = false
+
+# E-mails do ciclo de vida (DI-077): chamada pelo agendador (pg_net) ou pelo dono;
+# a função confere o segredo sozinha (x-internal-secret ou service role).
+[functions.lifecycle-emails]
+verify_jwt = false
+
+# Descadastro (DI-077): quem clica no link do e-mail não tem JWT; a autenticidade
+# vem da assinatura do token.
+[functions.unsubscribe]
+verify_jwt = false
+
+# e2e-login é SÓ para testes E2E contra Supabase local/staging e NUNCA entra em
+# deploy de produção (o código recusa o projeto de produção). enabled = false
+# impede que `supabase functions deploy` (sem nome) a publique e que o stack
+# local a sirva por padrão. Para usar localmente, veja docs/testes.md.
+[functions.e2e-login]
+enabled = false
+verify_jwt = false

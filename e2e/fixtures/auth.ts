@@ -1,4 +1,5 @@
-import { test as base, type Page } from '@playwright/test'
+import { randomBytes } from 'node:crypto'
+import { test as base, type Page, type TestInfo } from '@playwright/test'
 
 export type AuthedUser = { id: string; email: string }
 
@@ -8,39 +9,72 @@ type AuthedFixtures = {
 }
 
 /**
- * Derives Supabase's localStorage auth key (`sb-{ref}-auth-token`) from the
- * project URL. The ref is the subdomain before `.supabase.co`.
+ * Projeto Supabase de PRODUÇÃO. Os testes autenticados nunca rodam contra ele
+ * (DI-003): o fixture pula o teste e a function e2e-login recusa o pedido.
  */
-function storageKeyFromUrl(url: string): string {
-  const m = url.match(/^https?:\/\/([^.]+)\./)
-  if (!m) throw new Error(`Cannot derive Supabase ref from URL: ${url}`)
-  return `sb-${m[1]}-auth-token`
+const PRODUCTION_PROJECT_REF = 'krjirhlmdnxqqrpzmowz'
+
+type E2ELoginConfig =
+  | { ok: true; supabaseUrl: string; loginUrl: string; secret: string }
+  | { ok: false; reason: string }
+
+/**
+ * Lê a configuração dos testes autenticados. Sem Supabase local/staging
+ * configurado, os testes que dependem deste fixture (specs 04-autenticado e 05)
+ * ficam em skip com o motivo — ver docs/testes.md.
+ */
+function resolveE2ELoginConfig(): E2ELoginConfig {
+  const supabaseUrl = process.env.VITE_SUPABASE_URL ?? ''
+  const secret = process.env.E2E_LOGIN_SECRET ?? ''
+  const loginUrl = process.env.E2E_LOGIN_URL || `${supabaseUrl}/functions/v1/e2e-login`
+
+  if (!supabaseUrl || !secret) {
+    return {
+      ok: false,
+      reason:
+        'Testes autenticados exigem Supabase local/staging: defina VITE_SUPABASE_URL e ' +
+        'E2E_LOGIN_SECRET (ver docs/testes.md).',
+    }
+  }
+  if (supabaseUrl.includes(PRODUCTION_PROJECT_REF) || loginUrl.includes(PRODUCTION_PROJECT_REF)) {
+    return {
+      ok: false,
+      reason:
+        'VITE_SUPABASE_URL aponta para PRODUÇÃO. Testes autenticados só rodam contra ' +
+        'Supabase local/staging (ver docs/testes.md).',
+    }
+  }
+  return { ok: true, supabaseUrl, loginUrl, secret }
 }
 
-async function login(page: Page): Promise<AuthedUser> {
-  const supabaseUrl = process.env.VITE_SUPABASE_URL
-  const internalSecret = process.env.INTERNAL_SECRET
-  if (!supabaseUrl || !internalSecret) {
-    throw new Error(
-      'authedPage fixture requires VITE_SUPABASE_URL and INTERNAL_SECRET env vars. ' +
-        'Deploy the `e2e-login` edge function and set E2E_MODE=true + INTERNAL_SECRET in Supabase, ' +
-        'then export the same INTERNAL_SECRET locally.',
-    )
+/**
+ * Chave do localStorage onde o supabase-js guarda a sessão. Mesma regra do
+ * SDK: `sb-${hostname.split('.')[0]}-auth-token` (127.0.0.1 → sb-127-auth-token).
+ */
+function storageKeyFromUrl(url: string): string {
+  return `sb-${new URL(url).hostname.split('.')[0]}-auth-token`
+}
+
+/** E-mail aceito pela allowlist da e2e-login (domínio reservado .test). */
+function e2eEmail(): string {
+  return `e2e+${Date.now()}-${randomBytes(4).toString('hex')}@drimigrante.test`
+}
+
+async function login(page: Page, testInfo: TestInfo): Promise<AuthedUser> {
+  const config = resolveE2ELoginConfig()
+  if (!config.ok) {
+    testInfo.skip(true, config.reason)
+    throw new Error(config.reason) // inalcançável: skip interrompe o teste
   }
 
-  // Add a random suffix — parallel workers can hit the same millisecond
-  // and Supabase rejects the duplicate user creation with a 500.
-  const email = `e2e+${Date.now()}-${Math.random().toString(36).slice(2, 8)}@drimigrante.com`
-  const response = await page.request.post(
-    `${supabaseUrl}/functions/v1/e2e-login`,
-    {
-      headers: { 'x-internal-secret': internalSecret },
-      data: { email },
-    },
-  )
+  const email = e2eEmail()
+  const response = await page.request.post(config.loginUrl, {
+    headers: { 'x-e2e-login-secret': config.secret },
+    data: { email },
+  })
   if (!response.ok()) {
-    const text = await response.text().catch(() => '<no body>')
-    throw new Error(`e2e-login failed (${response.status()}): ${text}`)
+    const text = await response.text().catch(() => '<sem corpo>')
+    throw new Error(`e2e-login falhou (${response.status()}): ${text}`)
   }
   const body = (await response.json()) as {
     access_token: string
@@ -48,9 +82,8 @@ async function login(page: Page): Promise<AuthedUser> {
     user: { id: string; email: string }
   }
 
-  // Decode the JWT to build the full Session object supabase-js expects.
-  // Just storing { access_token, refresh_token } is NOT enough — the SDK
-  // needs at minimum expires_at + user to consider the session valid.
+  // Monta a Session completa que o supabase-js espera. Guardar só
+  // { access_token, refresh_token } NÃO basta: o SDK precisa de expires_at + user.
   const payload = JSON.parse(
     Buffer.from(body.access_token.split('.')[1], 'base64').toString('utf-8'),
   ) as {
@@ -83,7 +116,7 @@ async function login(page: Page): Promise<AuthedUser> {
     },
   }
 
-  const storageKey = storageKeyFromUrl(supabaseUrl)
+  const storageKey = storageKeyFromUrl(config.supabaseUrl)
 
   await page.goto('/')
   await page.evaluate(
@@ -96,12 +129,12 @@ async function login(page: Page): Promise<AuthedUser> {
 }
 
 export const test = base.extend<AuthedFixtures>({
-  authedUser: async ({ page }, use) => {
-    const user = await login(page)
+  authedUser: async ({ page }, use, testInfo) => {
+    const user = await login(page, testInfo)
     await use(user)
   },
   authedPage: async ({ page, authedUser }, use) => {
-    // authedUser triggers `login(page)`; `page` is now authenticated.
+    // authedUser dispara `login(page)`; aqui `page` já está autenticada.
     void authedUser
     await use(page)
   },

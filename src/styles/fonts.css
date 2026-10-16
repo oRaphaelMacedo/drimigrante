@@ -1,0 +1,96 @@
+/*
+ * Fontes da marca (DI-062), self-hosted a partir do @fontsource-variable:
+ * o Vite copia os woff2 variáveis para /assets no build (nada de CDN).
+ *
+ * - Só o subset latino (cobre pt-BR e pt-PT: acentos, ç, €, aspas e travessões).
+ *   Caracteres fora dele caem na fonte de reserva, sem baixar outro arquivo.
+ * - font-display: swap — o texto aparece na hora com a reserva de métricas
+ *   ajustadas (abaixo) e troca quando a fonte chega, quase sem mexer no layout.
+ * - Literata é declarada só de 600 a 700: títulos pedindo 800/900
+ *   (font-extrabold, font-black) são limitados a 700 pela própria fonte.
+ *
+ * Arquivos de origem: node_modules/@fontsource-variable/{figtree,literata}/files.
+ */
+
+@font-face {
+  font-family: 'Figtree';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 300 900;
+  src: url('@fontsource-variable/figtree/files/figtree-latin-wght-normal.woff2') format('woff2-variations'),
+    url('@fontsource-variable/figtree/files/figtree-latin-wght-normal.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Literata';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 600 700;
+  src: url('@fontsource-variable/literata/files/literata-latin-wght-normal.woff2') format('woff2-variations'),
+    url('@fontsource-variable/literata/files/literata-latin-wght-normal.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/*
+ * Reservas com métricas ajustadas às da marca: enquanto Figtree/Literata
+ * carregam, o texto já ocupa quase o mesmo espaço (menos salto de layout).
+ *
+ * Medição (Chromium, canvas measureText a 1000px, texto de referência em pt-BR):
+ * - Figtree: ascent 0,95 e descent 0,25 do em; Literata: 1,177 e 0,308.
+ * - size-adjust = largura da marca ÷ largura da reserva no mesmo peso;
+ *   ascent/descent-override = métrica da marca ÷ size-adjust.
+ * - Uma face por faixa de peso, para comparar com o corte certo (Arial Bold,
+ *   Georgia Bold) em vez de um negrito sintético.
+ *
+ * Se a fonte local não existir no aparelho (ex.: Android, que não tem Arial
+ * nem Georgia), a face é ignorada e a pilha segue para a próxima família
+ * (fontFamily no tailwind.config.ts) — no Android, Roboto sem ajuste.
+ */
+@font-face {
+  font-family: 'Figtree Fallback';
+  font-style: normal;
+  font-weight: 300 500;
+  src: local('Arial'), local('ArialMT');
+  size-adjust: 99.19%;
+  ascent-override: 95.78%;
+  descent-override: 25.2%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Figtree Fallback';
+  font-style: normal;
+  font-weight: 600 900;
+  src: local('Arial Bold'), local('Arial-BoldMT');
+  size-adjust: 94.62%;
+  ascent-override: 100.41%;
+  descent-override: 26.42%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  /* h2 (600). */
+  font-family: 'Literata Fallback';
+  font-style: normal;
+  font-weight: 600;
+  src: local('Georgia Bold'), local('Georgia-Bold');
+  size-adjust: 94.98%;
+  ascent-override: 123.92%;
+  descent-override: 32.43%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  /* h1 (700; pesos acima caem aqui). */
+  font-family: 'Literata Fallback';
+  font-style: normal;
+  font-weight: 700;
+  src: local('Georgia Bold'), local('Georgia-Bold');
+  size-adjust: 97.58%;
+  ascent-override: 120.62%;
+  descent-override: 31.57%;
+  line-gap-override: 0%;
+}

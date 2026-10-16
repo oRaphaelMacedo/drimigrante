@@ -1,326 +1,722 @@
-// ResultsPage.tsx — Day 2: Quiz Engine I — Pre-result + CTA
-// Day 3: Updated CTAs to route to /checkout
-import { useLocation, useNavigate, Link } from 'react-router-dom'
-import { useEffect, useState } from 'react'
-import { ArrowRight, CheckCircle, Lock, RotateCcw, Star, TrendingUp, Users, Zap } from 'lucide-react'
+// ResultsPage.tsx — pré-resultado do quiz + oferta da análise completa.
+//
+// Objetivo: o primeiro scroll do resultado leva ao €30, sem enganar.
+//
+// DI-029: apresentação única por categoria (src/lib/category.ts): o mesmo
+//   título e o mesmo ícone vindo do quiz, ao recarregar e em outro aparelho.
+// DI-070: caminhos para a nacionalidade, o mais forte primeiro, com o blur
+//   acessível (PathTeaser).
+// DI-028: cartão do resultado compacto, link "Ver o que inclui" e CTA de compra
+//   fixo no celular (StickyBuyBar) entre o resultado e a oferta.
+// DI-030: oferta personalizada por categoria e caminho (PaywallCard).
+// DI-031: e-mail de acesso visível e editável antes de pagar (AccessEmail).
+// DI-024: /results?r=<token> abre o resultado em outro aparelho; o token sai da
+//   URL antes de qualquer pageview e "Guardar meu resultado" copia o link.
+// DI-011/DI-032: a compra usa useStartCheckout (1 clique, sem login); erros em
+//   português logo abaixo do botão; ?checkout=cancelled mostra "Nada foi cobrado".
+// DI-033: results_viewed e paywall_viewed uma vez por diagnóstico. O
+//   quiz_completed é enviado só pelo useQuiz (aqui contaria em dobro, inclusive
+//   em outro aparelho).
+// DI-053: quem já pagou (ou enquanto a conta é confirmada) não vê o checkout:
+//   vê "Ir para o painel" (results-access.ts + ResultsAccessCard). Partilha com
+//   a família (link do quiz grátis, sem PII) e "Já comprou? Entrar" para quem
+//   volta sem login.
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
+import { forwardRef, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { ArrowRight, ChevronDown, Info, Link2Off, Loader2, LogIn, RotateCcw, WifiOff, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { QuizResult } from '@/hooks/useQuiz'
-import type { VisaSuggestion } from '@/data/quiz-questions'
-import { track } from '@/lib/analytics'
+import { pruneAnswers, suggestVisas, type VisaSuggestion } from '@/data/quiz-questions'
+import { track, trackOnce } from '@/lib/analytics'
+import { useAuth } from '@/hooks/useAuth'
+import { readStoredCheckoutData, useStartCheckout, type CheckoutError } from '@/hooks/useStartCheckout'
+import { QUIZ_RESULT_STORAGE_KEY } from '@/lib/stored-quiz-result'
+import { hasStoredAuthSession } from '@/lib/stored-session'
+import { categoryForPercentage, getCategoryPresentation, isScoreCategory, CATEGORY_THRESHOLDS } from '@/lib/category'
+import { updateAccessEmail } from '@/lib/access-email'
+import {
+  RESUME_PARAM,
+  fetchAssessmentByResumeToken,
+  fetchOwnResumeToken,
+  isValidResumeToken,
+  readStoredResumeToken,
+  rememberResumeToken,
+  storeResumedResult,
+  withoutParams,
+} from '@/lib/resume-token'
+import { Button, Card, Container } from '@/components/ui'
+import { CategoryIcon } from '@/components/results/CategoryIcon'
+import { PathTeaser } from '@/components/results/PathTeaser'
+import { PAYWALL_ID, PAYWALL_TITLE_ID, PaywallCard } from '@/components/results/PaywallCard'
+import { ResultsAccessCard } from '@/components/results/ResultsAccessCard'
+import { getResultsAccessView, showsCheckout } from '@/components/results/results-access'
+import { SaveResultLink } from '@/components/results/SaveResultLink'
+import { StickyBuyBar } from '@/components/results/StickyBuyBar'
+import { firstNameOf, sortPathways } from '@/components/results/results-copy'
+import { ShareWithFamily } from '@/components/ShareButton'
+
+/** Resultado pronto para a tela, com a identidade do envio do quiz. */
+interface LoadedResult {
+  result: QuizResult
+  /** Identifica o envio do quiz (session_id) para os eventos "uma vez por diagnóstico". */
+  key: string | null
+  assessmentId: string | null
+  sessionId: string | null
+  /** Token do link "Guardar meu resultado", se já conhecido neste aparelho. */
+  resumeToken: string | null
+}
+
+type ResumeStatus = 'idle' | 'loading' | 'ready' | 'invalid' | 'error'
+
+function prefersReducedMotion(): boolean {
+  try {
+    return window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  } catch {
+    return false
+  }
+}
+
+/** Rola até o elemento (sem animação com movimento reduzido); ignora navegadores sem a API. */
+function scrollToElement(el: Element | null | undefined, block: ScrollLogicalPosition): void {
+  if (!el || typeof el.scrollIntoView !== 'function') return
+  el.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block })
+}
+
+/**
+ * O navegador deixa este site gravar no localStorage? Com cookies bloqueados (ou
+ * em navegadores que travam o armazenamento), o resultado aparece pela memória,
+ * mas o useStartCheckout não encontra o diagnóstico para comprar.
+ */
+function canUseStorage(): boolean {
+  try {
+    const probe = '__di_storage_probe__'
+    window.localStorage.setItem(probe, '1')
+    window.localStorage.removeItem(probe)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** Compra impossível porque o navegador não guarda dados: diz o porquê e o que fazer. */
+const STORAGE_BLOCKED_ERROR: CheckoutError = {
+  message:
+    'Este navegador não deixa o site guardar dados (janela anônima ou cookies bloqueados), e sem isso não conseguimos abrir o pagamento. Abra o site no navegador padrão do celular, fora da janela anônima, e refaça o quiz grátis por lá ou abra de novo o link do seu resultado.',
+  action: 'quiz',
+  reason: 'storage_unavailable',
+  status: null,
+}
+
+/** Tira parâmetros da barra de endereço na hora (antes do pageview agendado). */
+function stripFromAddressBar(keys: readonly string[]): void {
+  try {
+    const { pathname, search, hash } = window.location
+    const params = new URLSearchParams(search)
+    if (!keys.some((key) => params.has(key))) return
+    window.history.replaceState(window.history.state, '', `${pathname}${withoutParams(search, keys)}${hash}`)
+  } catch {
+    // sem history (ambiente de teste): o roteador limpa a URL logo em seguida
+  }
+}
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export function ResultsPage() {
   const location = useLocation()
-  const navigate = useNavigate()
-  const [result, setResult] = useState<QuizResult | null>(null)
-  const [assessmentId, setAssessmentId] = useState<string | null>(null)
+  const [searchParams, setSearchParams] = useSearchParams()
+  // Lidos na primeira renderização: a URL é limpa logo depois.
+  const [initial] = useState(() => ({
+    token: searchParams.get(RESUME_PARAM),
+    cancelled: searchParams.get('checkout') === 'cancelled',
+  }))
+  const [resume, setResume] = useState<ResumeStatus>(() =>
+    initial.token === null ? 'idle' : isValidResumeToken(initial.token) ? 'loading' : 'invalid',
+  )
+  const [resumed, setResumed] = useState<LoadedResult | null>(null)
+  const [showCancelled, setShowCancelled] = useState(initial.cancelled)
+  const cancelTrackedRef = useRef(false)
 
-  useEffect(() => {
-    // Try router state first (direct from quiz), then localStorage fallback
-    if (location.state?.result) {
-      setResult(location.state.result as QuizResult)
-      if (location.state?.assessmentId) setAssessmentId(location.state.assessmentId as string)
-      return
+  // URL limpa ANTES de qualquer pageview (o analytics agenda o pageview para
+  // depois da navegação): o token de ?r= nunca fica na barra de endereço, e
+  // ?checkout=cancelled não repete o aviso ao recarregar.
+  useLayoutEffect(() => {
+    const hasToken = searchParams.has(RESUME_PARAM)
+    const cancelled = searchParams.get('checkout') === 'cancelled'
+    if (!hasToken && !cancelled) return
+    if (cancelled && !cancelTrackedRef.current) {
+      cancelTrackedRef.current = true
+      setShowCancelled(true)
+      track('checkout_cancelled', { plan: 'one_time' })
     }
-    try {
-      const stored = localStorage.getItem('dr_imigrante_quiz_result')
-      if (stored) {
-        const parsed = JSON.parse(stored)
-        if (parsed.assessmentId) setAssessmentId(parsed.assessmentId)
-        setResult({
-          score: {
-            total: parsed.score.total,
-            max: parsed.score.max,
-            percentage: parsed.score.percentage,
-            category: parsed.score.category,
-            label: categoryLabel(parsed.score.category).label,
-            sublabel: categoryLabel(parsed.score.category).sublabel,
-            color: categoryLabel(parsed.score.category).color,
-            bgColor: categoryLabel(parsed.score.category).bgColor,
-            emoji: categoryLabel(parsed.score.category).emoji,
-          },
-          visas: parsed.visas || [],
-          leadInfo: parsed.leadInfo || null,
-        })
+    const keys = cancelled ? [RESUME_PARAM, 'checkout'] : [RESUME_PARAM]
+    stripFromAddressBar(keys)
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        for (const key of keys) next.delete(key)
+        return next
+      },
+      { replace: true, state: location.state },
+    )
+  }, [searchParams, setSearchParams, location.state])
+
+  // Link de retomada: lê o resultado pelo token e guarda neste aparelho.
+  useEffect(() => {
+    const token = initial.token
+    if (resume !== 'loading' || !token) return
+    let active = true
+    void fetchAssessmentByResumeToken(token).then((outcome) => {
+      if (!active) return
+      if (outcome.kind !== 'ok') {
+        setResume(outcome.kind === 'not_found' ? 'invalid' : 'error')
+        return
       }
-    } catch {
-      // ignore parse errors
+      const record = storeResumedResult(outcome.data, token)
+      setResumed(parseStoredResult(record))
+      setResume('ready')
+    })
+    return () => {
+      active = false
     }
-  }, [location.state])
+  }, [resume, initial.token])
 
-  // Fire quiz_completed once per result load
-  useEffect(() => {
-    if (result) {
-      track('quiz_completed', {
-        score: result.score.percentage,
-        category: result.score.category,
-        top_visa: result.visas?.[0]?.code,
-      })
-    }
-  }, [result])
+  const local = useMemo(() => loadResult(location.state), [location.state])
+  const loaded = resume === 'ready' ? resumed : resume === 'idle' ? local : null
 
-  if (!result) {
+  const cancelledNotice = showCancelled ? <CancelledNotice onClose={() => setShowCancelled(false)} /> : null
+
+  if (resume === 'loading') return <ResumeLoading />
+  if (resume === 'invalid' || resume === 'error') {
     return (
-      <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4 text-center">
-        <p className="text-gray-500">Não encontrámos nenhum resultado de quiz.</p>
-        <Link
-          to="/quiz"
-          className="rounded-xl bg-brand-700 px-6 py-2.5 text-sm font-semibold text-white hover:bg-brand-600"
-        >
-          Fazer o Quiz →
-        </Link>
-      </div>
+      <ResumeProblem
+        kind={resume}
+        onRetry={() => setResume('loading')}
+        onShowLocal={local ? () => setResume('idle') : undefined}
+      />
     )
   }
 
-  const { score, visas, leadInfo } = result
-
-  return (
-    <div className="min-h-[calc(100vh-64px)] bg-gradient-to-b from-brand-50/40 to-white">
-      <div className="container py-8 sm:py-12">
-        <div className="mx-auto max-w-2xl space-y-6">
-
-          {/* ── Score Card ── */}
-          <ScoreCard score={score} leadInfo={leadInfo} />
-
-          {/* ── Visa suggestions (teaser) ── */}
-          <VisaTeaserCard visas={visas} />
-
-          {/* ── Paywall CTA ── */}
-          <PaywallCard firstName={leadInfo?.fullName?.split(' ')[0]} assessmentId={assessmentId} />
-
-          {/* ── Restart ── */}
-          <div className="text-center">
-            <button
-              id="results-restart-btn"
-              onClick={() => navigate('/quiz')}
-              className="inline-flex items-center gap-1.5 text-sm text-gray-400 hover:text-gray-600 transition"
-            >
-              <RotateCcw className="h-3.5 w-3.5" />
-              Refazer o quiz
-            </button>
+  if (!loaded) {
+    return (
+      <Container size="sm" className="flex min-h-[60dvh] flex-col justify-center gap-6 py-10">
+        {cancelledNotice}
+        <div className="flex flex-col items-center gap-4 text-center" data-testid="results-empty">
+          <p className="text-base text-muted-foreground">Não encontramos nenhum resultado do quiz neste aparelho.</p>
+          <div className="flex w-full max-w-sm flex-col gap-3">
+            <Button asChild size="md" className="w-full">
+              <Link to="/quiz">
+                Fazer o quiz grátis
+                <ArrowRight aria-hidden="true" />
+              </Link>
+            </Button>
+            <Button asChild variant="secondary" size="md" className="w-full">
+              <Link to="/login" state={{ returnTo: '/dashboard' }}>
+                Já paguei, entrar
+              </Link>
+            </Button>
           </div>
         </div>
-      </div>
+      </Container>
+    )
+  }
+
+  // `key`: o useStartCheckout lê o resultado do aparelho ao montar — remonta
+  // quando o resultado muda (ex.: aberto pelo link de retomada).
+  return <ResultsContent key={loaded.key ?? 'local'} loaded={loaded} notice={cancelledNotice} />
+}
+
+// ─── Conteúdo ─────────────────────────────────────────────────────────────────
+
+function ResultsContent({ loaded, notice }: { loaded: LoadedResult; notice: ReactNode }) {
+  const navigate = useNavigate()
+  const { session, loading, userDataError, access, hasAccess, refreshUser } = useAuth()
+  const [mayHaveSession] = useState(() => hasStoredAuthSession())
+  const accessView = getResultsAccessView({
+    loading,
+    hasSession: !!session,
+    mayHaveSession,
+    userDataError,
+    access,
+    canOpenDashboard: hasAccess('dashboard'),
+  })
+  // Já pagou ou ainda não sabemos: nada de oferta, barra fixa ou "Ver o que inclui".
+  const paid = !showsCheckout(accessView)
+  const checkout = useStartCheckout()
+  const { score, visas, leadInfo } = loaded.result
+  const category = score.category
+  const onceKey = loaded.key ?? `${category}:${score.percentage}`
+
+  const scoreRef = useRef<HTMLDivElement>(null)
+  // Botão de compra da oferta: a barra fixa some enquanto ELE está na tela.
+  const ctaRef = useRef<HTMLButtonElement>(null)
+  const buySourceRef = useRef<'paywall' | 'sticky' | null>(null)
+  const [storageBlocked, setStorageBlocked] = useState(false)
+  const [editedEmail, setEditedEmail] = useState<string | null>(null)
+  const [resumeToken, setResumeToken] = useState<string | null>(loaded.resumeToken)
+
+  const pathways = useMemo(() => sortPathways(visas), [visas])
+  const firstName = firstNameOf(leadInfo?.fullName)
+
+  // Um evento por diagnóstico (recarregar /results não conta de novo).
+  // Espera a conta ser confirmada para registrar has_access com o valor certo.
+  const accessKnown = accessView !== 'checking'
+  const hasPaidAccess = accessView === 'active'
+  useEffect(() => {
+    if (!accessKnown) return
+    trackOnce('results_viewed', onceKey, { category, has_access: hasPaidAccess })
+  }, [onceKey, category, accessKnown, hasPaidAccess])
+
+  // Token do "Guardar meu resultado" no aparelho do quiz (posse pelo session_id).
+  const { assessmentId, sessionId } = loaded
+  useEffect(() => {
+    if (resumeToken || paid || !assessmentId || !sessionId) return
+    let active = true
+    void fetchOwnResumeToken(assessmentId, sessionId).then((token) => {
+      if (!active || !token) return
+      rememberResumeToken(token, assessmentId)
+      setResumeToken(token)
+    })
+    return () => {
+      active = false
+    }
+  }, [resumeToken, paid, assessmentId, sessionId])
+
+  const buy = (source: 'paywall' | 'sticky') => {
+    const position = source === 'sticky' ? 'results_sticky' : 'results_paywall'
+    // O resultado está na tela, mas o navegador não guardou o diagnóstico: o
+    // checkout diria "não encontramos seu diagnóstico". Explica o motivo real.
+    if (checkout.mode === 'empty' && !canUseStorage()) {
+      setStorageBlocked(true)
+      track('paywall_cta_clicked', { position })
+      track('checkout_failed', { reason: STORAGE_BLOCKED_ERROR.reason, plan: 'one_time' })
+      if (source === 'sticky') scrollToElement(ctaRef.current, 'center')
+      return
+    }
+    setStorageBlocked(false)
+    buySourceRef.current = source
+    void checkout.start({ position })
+  }
+
+  // Compra iniciada pela barra fixa que voltou com erro ou aviso: leva a pessoa
+  // até o botão da oferta, onde a mensagem e o "Tentar novamente" aparecem.
+  useEffect(() => {
+    if (checkout.phase !== 'error' && checkout.phase !== 'email_sent') return
+    if (buySourceRef.current !== 'sticky') return
+    buySourceRef.current = null
+    scrollToElement(ctaRef.current, 'center')
+  }, [checkout.phase])
+
+  const goToOffer = () => {
+    scrollToElement(document.getElementById(PAYWALL_ID), 'start')
+    document.getElementById(PAYWALL_TITLE_ID)?.focus({ preventScroll: true })
+  }
+
+  const anonymous = checkout.mode === 'anonymous'
+  const email = anonymous ? (editedEmail ?? leadInfo?.email ?? checkout.email) : checkout.email
+
+  const handleEmailSave = async (next: string, source: 'manual' | 'suggestion') => {
+    const outcome = await updateAccessEmail(next)
+    if (outcome === 'saved' || outcome === 'saved_locally') {
+      setEditedEmail(next)
+      track('email_edited', { position: 'results', source })
+      // Um erro anterior (ex.: diagnóstico não encontrado) não vale para o e-mail novo.
+      if (checkout.phase === 'error' || checkout.phase === 'email_sent') checkout.reset()
+    }
+    return outcome
+  }
+
+  return (
+    <div className="min-h-[calc(100dvh-4rem)] bg-background">
+      <Container size="sm" className="space-y-5 py-6 sm:space-y-6 sm:py-10">
+        {notice}
+
+        <ScoreCard ref={scoreRef} score={score} firstName={firstName} onSeeOffer={paid ? undefined : goToOffer} />
+
+        {/* Já pagou (ou a conta não carregou): o atalho para o painel vem logo depois do resultado. */}
+        {accessView !== 'none' && accessView !== 'checking' && (
+          <ResultsAccessCard view={accessView} expiresAt={access?.expiresAt ?? null} onRetry={refreshUser} />
+        )}
+
+        <PathTeaser pathways={pathways} />
+
+        {/* Confirmando a conta: espera no lugar da oferta (sem checkout até saber). */}
+        {accessView === 'checking' && (
+          <ResultsAccessCard view="checking" expiresAt={null} onRetry={refreshUser} />
+        )}
+
+        {accessView === 'none' && (
+          <PaywallCard
+            ctaRef={ctaRef}
+            firstName={firstName}
+            category={category}
+            strongestPath={pathways[0] ?? null}
+            paid={false}
+            onceKey={onceKey}
+            email={email}
+            emailEditable={anonymous}
+            onEmailSave={handleEmailSave}
+            phase={storageBlocked ? 'error' : checkout.phase}
+            isPending={checkout.isPending}
+            error={storageBlocked ? STORAGE_BLOCKED_ERROR : checkout.error}
+            onBuy={() => buy('paywall')}
+          />
+        )}
+
+        <ShareWithFamily placement="results" />
+
+        <div className="flex flex-col items-center gap-4 pt-1">
+          {resumeToken && !paid && <SaveResultLink token={resumeToken} />}
+          {/* Quem já comprou e voltou sem login (outro aparelho, sessão expirada). */}
+          {accessView === 'none' && !session && (
+            <Button asChild variant="link" size="sm" data-testid="results-login-link">
+              <Link to="/login" state={{ returnTo: '/dashboard' }}>
+                <LogIn aria-hidden="true" />
+                Já comprou a análise? Entrar
+              </Link>
+            </Button>
+          )}
+          <Button
+            id="results-restart-btn"
+            variant="ghost"
+            size="sm"
+            onClick={() => navigate('/quiz')}
+            className="text-muted-foreground hover:text-foreground"
+          >
+            <RotateCcw aria-hidden="true" />
+            Refazer o quiz
+          </Button>
+        </div>
+      </Container>
+
+      {!paid && (
+        <StickyBuyBar
+          anchorRef={scoreRef}
+          inlineCtaRef={ctaRef}
+          isPending={checkout.isPending}
+          onBuy={() => buy('sticky')}
+        />
+      )}
     </div>
   )
 }
 
 // ─── Sub-components ────────────────────────────────────────────────────────────
 
-function ScoreCard({ score, leadInfo }: { score: QuizResult['score']; leadInfo: QuizResult['leadInfo'] }) {
-  const firstName = leadInfo?.fullName?.split(' ')[0]
+function CancelledNotice({ onClose }: { onClose: () => void }) {
+  return (
+    <div
+      role="status"
+      data-testid="checkout-cancelled-notice"
+      className="flex items-start gap-3 rounded-lg border border-border bg-muted p-4"
+    >
+      <Info aria-hidden="true" className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
+      <div className="min-w-0 flex-1">
+        <p className="text-base font-semibold text-foreground">Pagamento não concluído. Nada foi cobrado.</p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Sua análise continua disponível para desbloquear quando você quiser.
+        </p>
+      </div>
+      <Button
+        variant="ghost"
+        size="icon"
+        onClick={onClose}
+        aria-label="Fechar aviso"
+        className="-mr-2 -mt-2 shrink-0 text-muted-foreground"
+      >
+        <X aria-hidden="true" />
+      </Button>
+    </div>
+  )
+}
+
+interface ScoreCardProps {
+  score: QuizResult['score']
+  firstName: string | null
+  /** Rola até a oferta ("Ver o que inclui"); ausente para quem já pagou. */
+  onSeeOffer?: () => void
+}
+
+const ScoreCard = forwardRef<HTMLDivElement, ScoreCardProps>(function ScoreCard({ score, firstName, onSeeOffer }, ref) {
+  const presentation = getCategoryPresentation(score.category)
+  const { tone } = presentation
+  const percentage = Math.max(0, Math.min(100, Math.round(score.percentage)))
 
   return (
-    <div data-testid="results-score" className={cn('rounded-2xl border p-6 text-center shadow-sm sm:p-8', score.bgColor)}>
-      {/* Emoji + category */}
-      <div className="mb-3 text-5xl">{score.emoji}</div>
-      {firstName && (
-        <p className="mb-1 text-sm font-medium text-gray-500">
-          {firstName}, o seu resultado é:
-        </p>
-      )}
-      <h1 className={cn('mb-2 text-2xl font-extrabold sm:text-3xl', score.color)}>
-        {score.label}
-      </h1>
-      <p className="mb-6 text-sm text-gray-600 max-w-md mx-auto">{score.sublabel}</p>
-
-      {/* Score gauge */}
-      <div className="mx-auto max-w-xs">
-        <div className="mb-2 flex items-baseline justify-between text-xs text-gray-400">
-          <span>Pontuação</span>
-          <span className={cn('text-lg font-extrabold', score.color)}>
-            {score.percentage}%
-          </span>
+    <Card
+      ref={ref}
+      data-testid="results-score"
+      data-category={presentation.category}
+      className={cn('border-transparent', tone.tint)}
+    >
+      <div className="flex items-center gap-3">
+        <span
+          aria-hidden="true"
+          className={cn(
+            'flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-card shadow-sm',
+            tone.text,
+          )}
+        >
+          <CategoryIcon category={presentation.category} className="h-5 w-5" />
+        </span>
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-muted-foreground">
+            {firstName ? `${firstName}, este é seu resultado` : 'Seu resultado'}
+          </p>
+          <h1 className="text-h2 text-foreground" data-testid="results-title">
+            {presentation.label}
+          </h1>
         </div>
-        <div className="h-3 w-full overflow-hidden rounded-full bg-white/60 shadow-inner">
+      </div>
+
+      <p className="mt-3 text-base text-muted-foreground">{presentation.sublabel}</p>
+
+      {/* Medidor com as faixas reais (baixa < 35% ≤ média < 60% ≤ alta). */}
+      <div className="mt-4">
+        <div className="mb-1.5 flex items-baseline justify-between text-sm text-muted-foreground">
+          <span>Pontuação do diagnóstico</span>
+          <span className={cn('text-base font-bold', tone.text)}>{percentage}%</span>
+        </div>
+        <div
+          role="meter"
+          aria-label="Pontuação de elegibilidade"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={percentage}
+          aria-valuetext={`${percentage}%: ${presentation.label}`}
+          className="relative h-2 w-full overflow-hidden rounded-full bg-card"
+        >
           <div
-            className={cn(
-              'h-full rounded-full transition-all duration-1000',
-              score.category === 'alta' && 'bg-emerald-500',
-              score.category === 'media' && 'bg-amber-500',
-              score.category === 'baixa' && 'bg-blue-500',
-            )}
-            style={{ width: `${score.percentage}%` }}
+            className={cn('h-full rounded-full transition-[width] duration-slow ease-out', tone.bar)}
+            style={{ width: `${percentage}%` }}
+          />
+          <span
+            aria-hidden="true"
+            className="absolute inset-y-0 w-0.5 bg-background"
+            style={{ left: `${CATEGORY_THRESHOLDS.media}%` }}
+          />
+          <span
+            aria-hidden="true"
+            className="absolute inset-y-0 w-0.5 bg-background"
+            style={{ left: `${CATEGORY_THRESHOLDS.alta}%` }}
           />
         </div>
-        <div className="mt-1.5 flex justify-between text-[10px] text-gray-400">
-          <span>Baixa</span>
-          <span>Média</span>
-          <span>Alta</span>
+        <div aria-hidden="true" className="mt-1 flex text-xs text-muted-foreground">
+          <span style={{ width: `${CATEGORY_THRESHOLDS.media}%` }}>Baixa</span>
+          <span className="text-center" style={{ width: `${CATEGORY_THRESHOLDS.alta - CATEGORY_THRESHOLDS.media}%` }}>
+            Média
+          </span>
+          <span className="flex-1 text-right">Alta</span>
         </div>
       </div>
-    </div>
+
+      {onSeeOffer && (
+        <button
+          type="button"
+          onClick={onSeeOffer}
+          className="mt-3 inline-flex min-h-11 items-center gap-1.5 rounded-xl text-sm font-semibold text-primary underline decoration-primary/40 underline-offset-4 transition-colors duration-fast ease-out hover:decoration-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          data-testid="results-see-offer"
+        >
+          Ver o que inclui a análise completa
+          <ChevronDown aria-hidden="true" className="h-4 w-4" />
+        </button>
+      )}
+    </Card>
+  )
+})
+
+function ResumeLoading() {
+  return (
+    <Container size="sm" className="flex min-h-[60dvh] items-center justify-center py-10">
+      <p
+        role="status"
+        className="flex items-center gap-2 text-base text-muted-foreground"
+        data-testid="results-resume-loading"
+      >
+        <Loader2 aria-hidden="true" className="h-5 w-5 animate-spin text-primary" />
+        Abrindo seu resultado…
+      </p>
+    </Container>
   )
 }
 
-function VisaTeaserCard({ visas }: { visas: VisaSuggestion[] }) {
-  const topVisas = visas.slice(0, 3)
-
+function ResumeProblem({
+  kind,
+  onRetry,
+  onShowLocal,
+}: {
+  kind: 'invalid' | 'error'
+  onRetry: () => void
+  /** Há outro resultado salvo neste aparelho. */
+  onShowLocal?: () => void
+}) {
+  const invalid = kind === 'invalid'
+  const Icon = invalid ? Link2Off : WifiOff
   return (
-    <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
-      <div className="mb-4 flex items-center gap-2">
-        <TrendingUp className="h-5 w-5 text-brand-600" />
-        <h2 className="font-bold text-gray-900">Vistos Identificados para o Seu Perfil</h2>
-      </div>
-
-      <div className="space-y-3">
-        {topVisas.map((visa, i) => (
-          <div
-            key={visa.code}
-            className={cn(
-              'relative flex items-start gap-3 rounded-xl border p-4',
-              i === 0
-                ? 'border-brand-200 bg-brand-50'
-                : 'border-gray-100 bg-gray-50',
-            )}
-          >
-            {/* Match indicator */}
-            <div
-              className={cn(
-                'mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold',
-                visa.match === 'strong' && 'bg-emerald-500 text-white',
-                visa.match === 'possible' && 'bg-amber-500 text-white',
-                visa.match === 'weak' && 'bg-gray-400 text-white',
-              )}
-            >
-              {visa.match === 'strong' ? '✓' : visa.match === 'possible' ? '~' : '?'}
-            </div>
-
-            <div className="min-w-0 flex-1">
-              <div className="mb-1 flex flex-wrap items-center gap-2">
-                <span className="font-semibold text-gray-900 text-sm">{visa.name}</span>
-                <span
-                  className={cn(
-                    'rounded-full px-2 py-0.5 text-[10px] font-semibold',
-                    visa.match === 'strong' && 'bg-emerald-100 text-emerald-700',
-                    visa.match === 'possible' && 'bg-amber-100 text-amber-700',
-                    visa.match === 'weak' && 'bg-gray-100 text-gray-500',
-                  )}
-                >
-                  {visa.match === 'strong' ? 'Alta compatibilidade' : visa.match === 'possible' ? 'Compatibilidade possível' : 'A explorar'}
-                </span>
-              </div>
-              {/* Blurred reason — paywall teaser */}
-              <p className="text-xs text-gray-400 line-clamp-1 blur-[3px] select-none">
-                {visa.reason}
-              </p>
-            </div>
-
-            {/* Lock for non-first */}
-            {i > 0 && (
-              <Lock className="mt-0.5 h-4 w-4 shrink-0 text-gray-300" />
-            )}
-          </div>
-        ))}
-      </div>
-
-      {/* Unlock hint */}
-      <div className="mt-4 rounded-xl border border-dashed border-gray-200 bg-gray-50 p-3 text-center text-xs text-gray-500">
-        <Lock className="mx-auto mb-1 h-3.5 w-3.5" />
-        Desbloqueie a análise completa com os detalhes de cada visto, requisitos e lista de documentos.
-      </div>
-    </div>
-  )
-}
-
-function PaywallCard({ firstName, assessmentId }: { firstName?: string; assessmentId?: string | null }) {
-  const features = [
-    { icon: Star, text: 'Análise jurídica completa personalizada' },
-    { icon: CheckCircle, text: 'Top 3 vistos detalhados com requisitos exactos' },
-    { icon: Users, text: 'Lista completa de documentos necessários' },
-    { icon: Zap, text: 'Dashboard pessoal com acompanhamento do processo' },
-  ]
-
-  return (
-    <div className="overflow-hidden rounded-2xl border-2 border-brand-600 bg-brand-700 text-white shadow-xl">
-      <div className="p-6 sm:p-8">
-        {/* Badge */}
-        <div className="mb-4 inline-flex items-center gap-2 rounded-full bg-gold-500 px-3 py-1 text-xs font-bold text-white">
-          <Star className="h-3 w-3" />
-          Diagnóstico Profissional
-        </div>
-
-        <h2 className="mb-2 text-2xl font-extrabold leading-tight">
-          {firstName ? `${firstName}, desbloqueie` : 'Desbloqueie'} a análise completa do seu perfil
-        </h2>
-        <p className="mb-6 text-sm text-blue-200">
-          A nossa equipa de advogados especializados analisará o seu perfil e identificará o caminho mais direto para Portugal.
+    <Container size="sm" className="flex min-h-[60dvh] flex-col justify-center py-10">
+      <div
+        className="flex flex-col items-center gap-4 text-center"
+        data-testid={invalid ? 'results-resume-invalid' : 'results-resume-error'}
+      >
+        <span
+          aria-hidden="true"
+          className="flex h-12 w-12 items-center justify-center rounded-full bg-muted text-primary"
+        >
+          <Icon className="h-6 w-6" />
+        </span>
+        <h1 className="text-h2 text-foreground">
+          {invalid ? 'Não encontramos esse resultado' : 'Não conseguimos abrir seu resultado agora'}
+        </h1>
+        <p className="max-w-md text-base text-muted-foreground">
+          {invalid
+            ? 'O link pode estar incompleto ou ter expirado. Refaça o quiz grátis para ver seu resultado de novo.'
+            : 'Verifique sua conexão e tente de novo.'}
         </p>
-
-        {/* Features */}
-        <ul className="mb-6 space-y-2.5">
-          {features.map(({ icon: Icon, text }) => (
-            <li key={text} className="flex items-center gap-2.5 text-sm text-blue-100">
-              <Icon className="h-4 w-4 shrink-0 text-blue-300" />
-              {text}
-            </li>
-          ))}
-        </ul>
-
-        {/* Pricing */}
-        <div className="mb-4 flex items-baseline gap-2">
-          <span className="text-4xl font-extrabold">€30</span>
-          <span className="text-blue-300">pagamento único</span>
+        <div className="flex w-full max-w-sm flex-col gap-3">
+          {invalid ? (
+            <Button asChild size="md" className="w-full">
+              <Link to="/quiz">
+                Refazer o quiz grátis
+                <ArrowRight aria-hidden="true" />
+              </Link>
+            </Button>
+          ) : (
+            <Button size="md" className="w-full" onClick={onRetry}>
+              <RotateCcw aria-hidden="true" />
+              Tentar de novo
+            </Button>
+          )}
+          {onShowLocal && (
+            <Button variant="secondary" size="md" className="w-full" onClick={onShowLocal}>
+              Ver o resultado salvo neste aparelho
+            </Button>
+          )}
+          {invalid ? (
+            <Button asChild variant="ghost" size="md" className="w-full">
+              <Link to="/login" state={{ returnTo: '/dashboard' }}>
+                Já paguei, entrar
+              </Link>
+            </Button>
+          ) : (
+            <Button asChild variant="ghost" size="md" className="w-full">
+              <Link to="/quiz">Refazer o quiz grátis</Link>
+            </Button>
+          )}
         </div>
-
-        {/* CTA buttons */}
-        <div className="space-y-3">
-          <Link
-            id="results-unlock-btn"
-            data-testid="results-cta-paywall"
-            to="/checkout"
-            state={{ plan: 'one_time', assessmentId }}
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-white py-3.5 text-base font-bold text-brand-700 shadow-md transition hover:bg-blue-50"
-          >
-            Desbloquear por €30
-            <ArrowRight className="h-4 w-4" />
-          </Link>
-
-          <Link
-            id="results-subscribe-btn"
-            to="/checkout"
-            state={{ plan: 'recurring', assessmentId }}
-            className="block w-full rounded-xl border-2 border-white/30 py-3 text-center text-sm font-semibold text-white transition hover:border-white/60"
-          >
-            Ou acompanhamento mensal por €4,90/mês →
-          </Link>
-        </div>
-
-        {/* Trust */}
-        <p className="mt-4 text-center text-xs text-blue-300">
-          🔒 Pagamento seguro · Resultado em 24h · Garantia de satisfação
-        </p>
       </div>
-    </div>
+    </Container>
   )
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function categoryLabel(category: string) {
-  if (category === 'alta')
-    return {
-      label: 'Perfil de Alta Elegibilidade',
-      sublabel: 'O seu perfil indica fortes probabilidades de elegibilidade para Portugal.',
-      color: 'text-emerald-700',
-      bgColor: 'bg-emerald-50',
-      emoji: '🌟',
-    }
-  if (category === 'media')
-    return {
-      label: 'Perfil de Média Elegibilidade',
-      sublabel: 'O seu perfil tem boas chances, mas podem existir condições a cumprir.',
-      color: 'text-amber-700',
-      bgColor: 'bg-amber-50',
-      emoji: '⚡',
-    }
+const MATCHES: readonly VisaSuggestion['match'][] = ['strong', 'possible', 'weak']
+
+function asText(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value : null
+}
+
+function storedVisas(raw: unknown): VisaSuggestion[] {
+  if (!Array.isArray(raw)) return []
+  const out: VisaSuggestion[] = []
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue
+    const v = item as Record<string, unknown>
+    if (typeof v.code !== 'string' || typeof v.name !== 'string') continue
+    const match = MATCHES.includes(v.match as VisaSuggestion['match']) ? (v.match as VisaSuggestion['match']) : 'weak'
+    out.push({ code: v.code, name: v.name, match, reason: asText(v.reason) ?? '' })
+  }
+  return out
+}
+
+function storedAnswers(raw: unknown): Record<string, string> | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const entries = Object.entries(raw as Record<string, unknown>).filter(
+    (entry): entry is [string, string] => typeof entry[1] === 'string',
+  )
+  return entries.length > 0 ? Object.fromEntries(entries) : null
+}
+
+/** Score no formato da tela, com rótulos da apresentação única (DI-029). */
+function toScore(raw: { total?: unknown; max?: unknown; percentage: number; category?: unknown }): QuizResult['score'] {
+  const percentage = Math.round(raw.percentage)
+  // Categoria antiga/inválida: deduzida do percentual (nunca "?").
+  const category = isScoreCategory(raw.category) ? raw.category : categoryForPercentage(percentage)
+  const { label, sublabel } = getCategoryPresentation(category)
   return {
-    label: 'Perfil em Desenvolvimento',
-    sublabel: 'Existem opções a explorar. A análise completa identificará os caminhos disponíveis.',
-    color: 'text-blue-700',
-    bgColor: 'bg-blue-50',
-    emoji: '🔍',
+    total: typeof raw.total === 'number' ? raw.total : 0,
+    max: typeof raw.max === 'number' ? raw.max : 0,
+    percentage,
+    category,
+    label,
+    sublabel,
+  }
+}
+
+/**
+ * Resultado salvo (localStorage ou o registro recém-criado pelo link de
+ * retomada) no formato da tela. As vias são recalculadas das respostas, como no
+ * painel, para que recarregar e abrir em outro aparelho mostrem o mesmo.
+ */
+function parseStoredResult(parsed: Record<string, unknown> | null): LoadedResult | null {
+  if (!parsed) return null
+  const rawScore = parsed.score as
+    { total?: unknown; max?: unknown; percentage?: unknown; category?: unknown } | undefined
+  if (!rawScore || typeof rawScore.percentage !== 'number' || !Number.isFinite(rawScore.percentage)) return null
+  const answers = storedAnswers(parsed.answers)
+  const visas = answers ? suggestVisas(pruneAnswers(answers)) : storedVisas(parsed.visas)
+  const lead = parsed.leadInfo as { fullName?: unknown; email?: unknown; phone?: unknown } | null | undefined
+  const sessionId = asText(parsed.sessionId)
+  const assessmentId = asText(parsed.assessmentId)
+  return {
+    key: sessionId ?? assessmentId ?? asText(parsed.completedAt),
+    sessionId,
+    assessmentId,
+    resumeToken: readStoredResumeToken(),
+    result: {
+      score: toScore({ ...rawScore, percentage: rawScore.percentage }),
+      visas,
+      leadInfo:
+        lead && typeof lead === 'object'
+          ? {
+              fullName: asText(lead.fullName) ?? '',
+              email: asText(lead.email) ?? '',
+              ...(asText(lead.phone) ? { phone: asText(lead.phone) as string } : {}),
+            }
+          : null,
+    },
+  }
+}
+
+/**
+ * Resultado a mostrar: o do roteador (vindo direto do quiz) ou o salvo neste
+ * aparelho. `key` identifica o envio do quiz (session_id), estável mesmo quando
+ * o assessmentId só aparece depois, ao salvar de novo.
+ */
+function loadResult(state: unknown): LoadedResult | null {
+  const stored = readStoredCheckoutData()
+  const routerState = (state ?? null) as { result?: QuizResult; assessmentId?: string | null } | null
+  if (routerState?.result?.score) {
+    const { result } = routerState
+    return {
+      key: stored?.sessionId ?? routerState.assessmentId ?? stored?.assessmentId ?? null,
+      sessionId: stored?.sessionId ?? null,
+      assessmentId: stored?.assessmentId ?? routerState.assessmentId ?? null,
+      resumeToken: readStoredResumeToken(),
+      result: {
+        score: toScore(result.score),
+        visas: Array.isArray(result.visas) ? result.visas : [],
+        leadInfo: result.leadInfo ?? null,
+      },
+    }
+  }
+  try {
+    const raw = localStorage.getItem(QUIZ_RESULT_STORAGE_KEY)
+    const parsed: unknown = raw ? JSON.parse(raw) : null
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parseStoredResult(parsed as Record<string, unknown>)
+      : null
+  } catch {
+    // JSON inválido ou sem storage: mostra o estado vazio
+    return null
   }
 }
