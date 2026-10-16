@@ -1,229 +1,576 @@
-// SuccessPage.tsx — Day 4
-// Confirmation page after successful Stripe payment
-// Reads Stripe session_id from URL, shows personalised success state
-// and redirects the user to the dashboard after a delay.
+// SuccessPage.tsx — retorno do Stripe depois do pagamento (DI-026).
+//
+// À prova de falha: nunca afirma "pagamento confirmado" sem confirmação do
+// servidor e nunca manda para /login por tempo. Fluxo (regras em success-flow.ts):
+//   verifying (claim-session) → signing_in (verifyOtp) → confirming (polling de
+//   refreshUser a cada 2 s, até 30 s) → ready (vai para o painel)
+// com os ramos email_sent, processing (claim 403), delayed, fallback (e-mail
+// mascarado + reenvio + contato) e missing.
+// O session_id sai da URL ao montar (fica só na sessionStorage desta aba) e não
+// aparece na tela. `purchase` é enviado uma vez por compra (trackOnce).
 
-import { useEffect, useRef, useState } from 'react'
-import { useNavigate, useSearchParams, Link } from 'react-router-dom'
-import { track } from '@/lib/analytics'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import {
+  AlertCircle,
+  ArrowRight,
+  Check,
+  CheckCircle2,
+  Clock,
+  Info,
+  Loader2,
+  MailCheck,
+  RotateCcw,
+  type LucideIcon,
+} from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/hooks/useAuth'
+import { trackOnce } from '@/lib/analytics'
+import { Sentry } from '@/lib/sentry'
+import { OFFER } from '@/lib/offer'
+import { TimeoutError, toUserError } from '@/lib/errors'
+import { HAS_WHATSAPP, SUPPORT_EMAIL, WHATSAPP_URL, mailtoHref } from '@/config/contact'
+import { readStoredQuizIdentity } from '@/lib/stored-quiz-result'
+import { cn } from '@/lib/utils'
+import { Button, Card, Container } from '@/components/ui'
 import {
-  CheckCircle2,
-  ArrowRight,
-  Loader2,
-  LayoutDashboard,
-  Mail,
-  Clock,
-} from 'lucide-react'
+  CHECKOUT_SESSION_STORAGE_KEY,
+  CLAIM_TIMEOUT_MS,
+  CONFIRM_POLL_MS,
+  CONFIRM_TIMEOUT_MS,
+  PROCESSING_MAX_RETRIES,
+  PROCESSING_RETRY_MS,
+  RESEND_COOLDOWN_S,
+  classifyClaim,
+  maskEmail,
+  purchaseOnceKey,
+  takeCheckoutSessionId,
+  type SuccessState,
+} from './success-flow'
 
-// ── Animation utility: count up number ──────────────────────────────────────
-function useCountUp(target: number, duration = 1200) {
-  const [value, setValue] = useState(0)
-  useEffect(() => {
-    let start = 0
-    const step = target / (duration / 16)
-    const timer = setInterval(() => {
-      start += step
-      if (start >= target) {
-        setValue(target)
-        clearInterval(timer)
-      } else {
-        setValue(Math.floor(start))
-      }
-    }, 16)
-    return () => clearInterval(timer)
-  }, [target, duration])
-  return value
+function sessionStore(): Storage | null {
+  try {
+    return window.sessionStorage
+  } catch {
+    return null
+  }
 }
 
-// ─── Component ──────────────────────────────────────────────────────────────
+/** Estados em que ainda estamos trabalhando (mostra os passos). */
+const WORKING_STATES: ReadonlySet<SuccessState> = new Set(['init', 'verifying', 'signing_in', 'confirming'])
 
 export function SuccessPage() {
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const navigate = useNavigate()
-  const { authUser } = useAuth()
-  const sessionId = searchParams.get('session_id')
-  const [countdown, setCountdown] = useState(8)
-  // Guard so the auto-login claim runs at most once per mount.
-  const claimedRef = useRef(false)
-  // True when claim-session sent a login link by email instead of auto-login.
-  const [emailSent, setEmailSent] = useState(false)
-  // Set after verifyOtp succeeds; we navigate only once AuthContext has loaded
-  // the user, otherwise ProtectedRoute sees authUser=null and bounces to /login.
-  const [claimed, setClaimed] = useState(false)
+  const { authUser, loading, hasAccess, refreshUser } = useAuth()
+  const [sessionId] = useState(() => takeCheckoutSessionId(searchParams, sessionStore()))
+  const [state, setState] = useState<SuccessState>('init')
+  const [paymentConfirmed, setPaymentConfirmed] = useState(false)
+  const [claimBusy, setClaimBusy] = useState(false)
+  const [resent, setResent] = useState(false)
+  const [cooldown, setCooldown] = useState(0)
 
-  const percentage = useCountUp(100, 1500)
+  const paid = hasAccess('dashboard')
+  const quizEmail = useMemo(() => readStoredQuizIdentity()?.email ?? null, [])
+  const maskedEmail = maskEmail(authUser?.user.email ?? quizEmail)
 
-  // Fire conversion event once on mount
+  const mountedRef = useRef(true)
+  const startedRef = useRef(false)
+  const claimInFlightRef = useRef(false)
+  const processingRetriesRef = useRef(0)
+  const processingTimerRef = useRef<number | undefined>(undefined)
+  const confirmDeadlineRef = useRef(0)
+  const headingRef = useRef<HTMLHeadingElement>(null)
+  /** Referência estável para as novas consultas agendadas (pagamento em processamento). */
+  const runClaimRef = useRef<(options?: { silent?: boolean }) => Promise<void>>(async () => undefined)
+
   useEffect(() => {
-    track('checkout_completed', { session_id: sessionId })
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      window.clearTimeout(processingTimerRef.current)
+    }
+  }, [])
+
+  // O session_id não fica na URL (histórico, prints, analytics): sai ao montar.
+  useEffect(() => {
+    if (!searchParams.has('session_id')) return
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        next.delete('session_id')
+        return next
+      },
+      { replace: true },
+    )
+  }, [searchParams, setSearchParams])
+
+  const markPaymentConfirmed = useCallback(() => {
+    setPaymentConfirmed(true)
+    if (sessionId) {
+      trackOnce('purchase', purchaseOnceKey(sessionId), {
+        value: OFFER.price,
+        currency: OFFER.currency,
+        plan: 'one_time',
+      })
+    }
   }, [sessionId])
 
-  // P0 funnel (2026-06-30): post-payment auto-login for the anonymous flow.
-  // If there's no authenticated user but we have a Stripe session_id, exchange it
-  // for a Supabase session via claim-session → verifyOtp, then go to /dashboard.
-  // On any failure we fall back to the countdown/CTA below (non-breaking).
-  useEffect(() => {
-    if (authUser || !sessionId || claimedRef.current) return
-    claimedRef.current = true
+  const runClaim = useCallback(
+    async (options: { resend?: boolean; silent?: boolean } = {}) => {
+      if (!sessionId || claimInFlightRef.current) return
+      claimInFlightRef.current = true
+      window.clearTimeout(processingTimerRef.current)
+      setClaimBusy(true)
+      // Reenvio e novas consultas automáticas mantêm a tela atual (sem piscar).
+      if (!options.resend && !options.silent) setState('verifying')
 
-    ;(async () => {
+      const controller = new AbortController()
+      const timer = window.setTimeout(() => controller.abort(new TimeoutError()), CLAIM_TIMEOUT_MS)
       try {
         const { data, error } = await supabase.functions.invoke('claim-session', {
           body: { session_id: sessionId },
+          signal: controller.signal,
         })
-        if (error) throw error
-        // Existing account (already used before): no auto-login, link sent by email.
-        if (data?.status === 'email_sent') {
-          setEmailSent(true)
+        const described = error ? await toUserError(error) : null
+        const outcome = classifyClaim(data, described)
+        if (!mountedRef.current) return
+
+        if (outcome.kind === 'token') {
+          markPaymentConfirmed()
+          setState('signing_in')
+          const { error: verifyError } = await supabase.auth.verifyOtp({
+            type: 'magiclink',
+            token_hash: outcome.tokenHash,
+          })
+          if (verifyError) {
+            Sentry.captureMessage('checkout-success: verifyOtp falhou', {
+              level: 'warning',
+              tags: { area: 'checkout_success' },
+            })
+            if (mountedRef.current) setState('fallback')
+          }
+          // Sucesso: o AuthContext carrega a conta e o efeito abaixo segue para 'confirming'.
           return
         }
-        const tokenHash = data?.token_hash as string | undefined
-        if (!tokenHash) return
 
-        const { error: verifyErr } = await supabase.auth.verifyOtp({
-          type: 'magiclink',
-          token_hash: tokenHash,
-        })
-        if (verifyErr) throw verifyErr
+        if (outcome.kind === 'email_sent') {
+          markPaymentConfirmed()
+          setResent(Boolean(options.resend))
+          setState('email_sent')
+          return
+        }
 
-        setClaimed(true)
-      } catch {
-        // Non-fatal: keep showing the success page and let the user navigate
-        // manually (CTA) or wait for the countdown fallback.
+        if (outcome.kind === 'processing') {
+          setState('processing')
+          if (processingRetriesRef.current < PROCESSING_MAX_RETRIES) {
+            processingRetriesRef.current += 1
+            processingTimerRef.current = window.setTimeout(
+              () => void runClaimRef.current({ silent: true }),
+              PROCESSING_RETRY_MS,
+            )
+          }
+          return
+        }
+
+        if (described && (described.kind === 'unknown' || (described.status ?? 0) >= 500)) {
+          Sentry.captureException(error, { tags: { area: 'checkout_success', reason: outcome.reason } })
+        } else {
+          Sentry.captureMessage('checkout-success: claim-session sem login', {
+            level: 'warning',
+            tags: { area: 'checkout_success', reason: outcome.reason },
+          })
+        }
+        setState('fallback')
+      } catch (cause) {
+        // Falha inesperada (ex.: verifyOtp lançou): nunca fica preso no spinner.
+        Sentry.captureException(cause, { tags: { area: 'checkout_success', reason: 'unexpected' } })
+        if (mountedRef.current) setState('fallback')
+      } finally {
+        window.clearTimeout(timer)
+        claimInFlightRef.current = false
+        if (mountedRef.current) setClaimBusy(false)
       }
-    })()
-  }, [authUser, sessionId, navigate])
+    },
+    [sessionId, markPaymentConfirmed],
+  )
 
   useEffect(() => {
-    if (claimed && authUser) navigate('/dashboard', { replace: true })
-  }, [claimed, authUser, navigate])
+    runClaimRef.current = runClaim
+  }, [runClaim])
 
-  // Auto-redirect to dashboard
-  // (paused when the login link was emailed — /dashboard would bounce to /login)
+  // Ponto de partida, quando já sabemos se há sessão.
   useEffect(() => {
-    if (emailSent) return
-    if (countdown === 0) {
-      navigate('/dashboard', { replace: true })
+    if (startedRef.current || loading) return
+    startedRef.current = true
+    if (paid) setState('ready')
+    else if (authUser) setState('confirming')
+    else if (sessionId) void runClaim()
+    else setState('missing')
+  }, [loading, paid, authUser, sessionId, runClaim])
+
+  // Login concluído (aqui ou em outra aba) e acesso liberado.
+  useEffect(() => {
+    if (state === 'init' || state === 'ready') return
+    if (paid) {
+      setState('ready')
       return
     }
-    const t = setTimeout(() => setCountdown((c) => c - 1), 1000)
-    return () => clearTimeout(t)
-  }, [countdown, navigate, emailSent])
+    if (authUser && (state === 'signing_in' || state === 'email_sent' || state === 'fallback' || state === 'missing')) {
+      setState('confirming')
+    }
+  }, [state, paid, authUser])
+
+  // verifyOtp concluído mas a conta não carregou: não fica preso no spinner.
+  useEffect(() => {
+    if (state !== 'signing_in') return
+    const timer = window.setTimeout(() => {
+      if (mountedRef.current) setState((s) => (s === 'signing_in' ? 'fallback' : s))
+    }, CLAIM_TIMEOUT_MS)
+    return () => window.clearTimeout(timer)
+  }, [state])
+
+  // confirming: o webhook do Stripe pode chegar alguns segundos depois do login.
+  useEffect(() => {
+    if (state !== 'confirming') return
+    if (!confirmDeadlineRef.current) confirmDeadlineRef.current = Date.now() + CONFIRM_TIMEOUT_MS
+    const interval = window.setInterval(() => {
+      if (Date.now() >= confirmDeadlineRef.current) {
+        setState((s) => (s === 'confirming' ? 'delayed' : s))
+        return
+      }
+      void refreshUser()
+    }, CONFIRM_POLL_MS)
+    return () => window.clearInterval(interval)
+  }, [state, refreshUser])
+
+  // ready: conta a compra (uma vez), esquece o session_id e abre o painel.
+  useEffect(() => {
+    if (state !== 'ready') return
+    markPaymentConfirmed()
+    try {
+      sessionStore()?.removeItem(CHECKOUT_SESSION_STORAGE_KEY)
+    } catch {
+      // ignora
+    }
+    const timer = window.setTimeout(() => navigate('/dashboard', { replace: true }), 1500)
+    return () => window.clearTimeout(timer)
+  }, [state, markPaymentConfirmed, navigate])
+
+  // Leva o foco ao título quando o estado muda de verdade (leitores de tela).
+  useEffect(() => {
+    if (WORKING_STATES.has(state)) return
+    headingRef.current?.focus()
+  }, [state])
+
+  // Espera entre reenvios do link.
+  useEffect(() => {
+    if (cooldown <= 0) return
+    const timer = window.setTimeout(() => setCooldown((c) => c - 1), 1000)
+    return () => window.clearTimeout(timer)
+  }, [cooldown])
+
+  const goToLogin = () =>
+    navigate('/login', {
+      state: { returnTo: '/dashboard', postPurchase: true, ...(quizEmail ? { email: quizEmail } : {}) },
+    })
+
+  const resendLink = () => {
+    if (!sessionId) {
+      goToLogin()
+      return
+    }
+    setCooldown(RESEND_COOLDOWN_S)
+    void runClaim({ resend: true })
+  }
+
+  const recheckAccess = () => {
+    confirmDeadlineRef.current = 0
+    setState('confirming')
+    void refreshUser()
+  }
+
+  const retryClaim = () => {
+    processingRetriesRef.current = 0
+    void runClaim()
+  }
+
+  const view = describeState(state, { hasSession: Boolean(sessionId), maskedEmail, resent })
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-gradient-to-br from-emerald-50 via-white to-brand-50 px-4 py-16">
-      {/* Animated checkmark */}
-      <div className="relative mb-8 flex h-28 w-28 items-center justify-center rounded-full bg-emerald-100">
-        <div
-          className="absolute inset-0 animate-ping rounded-full bg-emerald-200 opacity-40"
-          style={{ animationDuration: '2s' }}
-        />
-        <CheckCircle2 className="h-14 w-14 text-emerald-500" strokeWidth={1.5} />
-      </div>
+    <Container size="sm" className="flex min-h-[calc(100dvh-4rem)] flex-col items-center justify-center py-10 sm:py-16">
+      <div className="w-full max-w-md text-center">
+        <StateIcon icon={view.icon} tone={view.tone} spinning={view.spinning} />
 
-      <h1 data-testid="checkout-success" className="mb-2 text-center text-3xl font-extrabold text-gray-900 sm:text-4xl">
-        Pagamento confirmado! 🎉
-      </h1>
-      <p className="mb-10 max-w-md text-center text-gray-500">
-        O seu perfil de imigração está agora a ser analisado pela nossa equipa jurídica.
-        Receberá o resultado completo no seu dashboard em até <strong>24h úteis</strong>.
-      </p>
-
-      {/* Progress bar animation */}
-      <div className="mb-10 w-full max-w-sm">
-        <div className="mb-1.5 flex items-center justify-between text-sm">
-          <span className="font-medium text-gray-700">A preparar a sua análise</span>
-          <span className="font-bold text-emerald-600">{percentage}%</span>
-        </div>
-        <div className="h-2.5 w-full overflow-hidden rounded-full bg-gray-100">
-          <div
-            className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-emerald-600 transition-all"
-            style={{ width: `${percentage}%` }}
-          />
-        </div>
-      </div>
-
-      {/* Next steps */}
-      <div className="mb-10 w-full max-w-md space-y-3">
-        {[
-          {
-            icon: Mail,
-            title: 'Email de confirmação',
-            desc: 'Enviámos um recibo para o seu email.',
-            done: true,
-          },
-          {
-            icon: Clock,
-            title: 'Análise jurídica em curso',
-            desc: 'A nossa equipa recebeu o seu perfil e está a trabalhar.',
-            done: false,
-          },
-          {
-            icon: LayoutDashboard,
-            title: 'Dashboard desbloqueado',
-            desc: 'Aceda à análise completa a qualquer momento.',
-            done: false,
-          },
-        ].map(({ icon: Icon, title, desc, done }) => (
-          <div
-            key={title}
-            className="flex items-start gap-3 rounded-xl border border-gray-100 bg-white p-4 shadow-sm"
+        <div aria-live="polite">
+          <h1
+            ref={headingRef}
+            tabIndex={-1}
+            data-testid="checkout-success"
+            data-state={state}
+            className="text-2xl font-bold leading-tight text-foreground outline-none [text-wrap:balance] sm:text-3xl"
           >
-            <div
-              className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
-                done ? 'bg-emerald-100' : 'bg-gray-100'
-              }`}
-            >
-              <Icon className={`h-4 w-4 ${done ? 'text-emerald-600' : 'text-gray-400'}`} />
-            </div>
-            <div>
-              <p className="font-semibold text-gray-900 text-sm">{title}</p>
-              <p className="text-xs text-gray-500">{desc}</p>
-            </div>
-            {done && (
-              <CheckCircle2 className="ml-auto h-4 w-4 shrink-0 text-emerald-500" />
-            )}
-          </div>
-        ))}
-      </div>
-
-      {emailSent && (
-        <div
-          data-testid="checkout-success-email-sent"
-          className="mb-6 flex w-full max-w-md items-start gap-3 rounded-xl border border-brand-100 bg-brand-50 p-4 text-sm text-brand-800"
-        >
-          <Mail className="mt-0.5 h-4 w-4 shrink-0" />
-          <p>
-            Este email já tem conta no Doutor Imigrante. Enviámos-lhe um{' '}
-            <strong>link de acesso</strong> — abra-o para entrar no seu dashboard.
-          </p>
+            {view.title}
+          </h1>
+          <p className="mt-2 text-base text-muted-foreground [text-wrap:pretty]">{view.description}</p>
         </div>
-      )}
 
-      {/* CTA */}
-      <Link
-        to="/dashboard"
-        className="flex items-center gap-2 rounded-xl bg-brand-700 px-8 py-4 text-base font-bold text-white shadow-md transition hover:bg-brand-600"
-      >
-        <LayoutDashboard className="h-4 w-4" />
-        Ir para o Dashboard
-        <ArrowRight className="h-4 w-4" />
-      </Link>
+        {WORKING_STATES.has(state) && (
+          <ProgressSteps
+            paymentConfirmed={paymentConfirmed || paid}
+            signedIn={Boolean(authUser)}
+            accessReady={paid}
+          />
+        )}
 
-      {/* Auto-redirect notice */}
-      {!emailSent && (
-        <p className="mt-4 flex items-center gap-1.5 text-sm text-gray-400">
-          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          Redirecionando automaticamente em {countdown}s...
-        </p>
-      )}
+        <div className="mt-6 flex flex-col gap-3">
+          {state === 'ready' && (
+            <Button asChild size="lg" className="w-full">
+              <Link to="/dashboard" replace>
+                Abrir meu painel
+                <ArrowRight aria-hidden="true" />
+              </Link>
+            </Button>
+          )}
 
-      {/* Debug session id */}
-      {sessionId && (
-        <p className="mt-6 text-xs text-gray-300">Ref: {sessionId}</p>
-      )}
+          {state === 'email_sent' && (
+            <div data-testid="checkout-success-email-sent" className="flex flex-col gap-3">
+              <Button
+                variant="secondary"
+                size="md"
+                className="w-full"
+                onClick={resendLink}
+                loading={claimBusy}
+                disabled={cooldown > 0}
+              >
+                {cooldown > 0 ? `Reenviar link (${cooldown}s)` : 'Reenviar link'}
+              </Button>
+              <p className="text-sm text-muted-foreground">Não chegou? Confira também a caixa de spam.</p>
+            </div>
+          )}
+
+          {state === 'processing' && (
+            <Button variant="secondary" size="md" className="w-full" onClick={retryClaim} loading={claimBusy}>
+              <RotateCcw aria-hidden="true" />
+              Verificar agora
+            </Button>
+          )}
+
+          {state === 'delayed' && (
+            <Button size="md" className="w-full" onClick={recheckAccess}>
+              <RotateCcw aria-hidden="true" />
+              Verificar de novo
+            </Button>
+          )}
+
+          {state === 'fallback' && (
+            <>
+              {sessionId && (
+                <Button size="md" className="w-full" onClick={retryClaim} loading={claimBusy}>
+                  <RotateCcw aria-hidden="true" />
+                  Tentar de novo
+                </Button>
+              )}
+              <Button
+                data-testid="checkout-success-resend"
+                variant={sessionId ? 'secondary' : 'primary'}
+                size="md"
+                className="w-full"
+                onClick={goToLogin}
+              >
+                Receber link de acesso
+              </Button>
+            </>
+          )}
+
+          {state === 'missing' && (
+            <Button size="md" className="w-full" onClick={goToLogin}>
+              Entrar com o e-mail da compra
+            </Button>
+          )}
+        </div>
+
+        {view.showSupport && <SupportLine />}
+      </div>
+    </Container>
+  )
+}
+
+// ─── Apresentação de cada estado ────────────────────────────────────────────
+
+type Tone = 'primary' | 'success' | 'warning'
+
+interface StateView {
+  title: string
+  description: string
+  icon: LucideIcon
+  tone: Tone
+  spinning?: boolean
+  showSupport?: boolean
+}
+
+function describeState(
+  state: SuccessState,
+  ctx: { hasSession: boolean; maskedEmail: string | null; resent: boolean },
+): StateView {
+  const toEmail = ctx.maskedEmail ? `para ${ctx.maskedEmail}` : 'para o e-mail usado na compra'
+  switch (state) {
+    case 'ready':
+      return {
+        title: ctx.hasSession ? 'Pagamento confirmado' : 'Seu acesso está liberado',
+        description: 'Sua análise completa já está disponível. Abrindo seu painel…',
+        icon: CheckCircle2,
+        tone: 'success',
+      }
+    case 'email_sent':
+      return {
+        title: 'Pagamento confirmado',
+        description: ctx.resent
+          ? `Enviamos um novo link de acesso ${toEmail}. Abra o e-mail neste aparelho para entrar no painel.`
+          : `Enviamos um link de acesso ${toEmail}. Abra o e-mail neste aparelho para entrar no painel.`,
+        icon: MailCheck,
+        tone: 'success',
+        showSupport: true,
+      }
+    case 'processing':
+      return {
+        title: 'Pagamento em processamento',
+        description:
+          'O pagamento ainda está sendo confirmado. Esta página verifica de novo sozinha; você também pode verificar agora.',
+        icon: Clock,
+        tone: 'warning',
+        showSupport: true,
+      }
+    case 'delayed':
+      return {
+        title: 'Liberando seu acesso',
+        description:
+          'Ainda não recebemos a confirmação do pagamento para liberar seu painel. Isso pode levar alguns minutos.',
+        icon: Clock,
+        tone: 'warning',
+        showSupport: true,
+      }
+    case 'fallback':
+      return {
+        title: 'Não conseguimos abrir sua conta automaticamente',
+        description: `Se você concluiu o pagamento, seu acesso fica no e-mail usado na compra${
+          ctx.maskedEmail ? ` (${ctx.maskedEmail})` : ''
+        }. Peça um link de acesso para entrar.`,
+        icon: AlertCircle,
+        tone: 'warning',
+        showSupport: true,
+      }
+    case 'missing':
+      return {
+        title: 'Não encontramos os dados da compra nesta página',
+        description: 'Se você já pagou, entre com o e-mail usado na compra para abrir sua análise.',
+        icon: Info,
+        tone: 'primary',
+        showSupport: true,
+      }
+    default:
+      return {
+        title: ctx.hasSession ? 'Confirmando seu pagamento' : 'Abrindo seu acesso',
+        description: 'Isso leva só alguns segundos. Não feche esta página.',
+        icon: Loader2,
+        tone: 'primary',
+        spinning: true,
+      }
+  }
+}
+
+const TONE_CLASSES: Record<Tone, string> = {
+  primary: 'bg-primary/[.08] text-primary',
+  success: 'bg-[hsl(var(--success)/0.1)] text-[hsl(var(--success))]',
+  warning: 'bg-[hsl(var(--warning)/0.1)] text-[hsl(var(--warning))]',
+}
+
+function StateIcon({ icon: Icon, tone, spinning }: { icon: LucideIcon; tone: Tone; spinning?: boolean }) {
+  return (
+    <div
+      aria-hidden="true"
+      className={cn('mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-full', TONE_CLASSES[tone])}
+    >
+      <Icon className={cn('h-8 w-8', spinning && 'animate-spin')} strokeWidth={1.75} />
     </div>
+  )
+}
+
+/** Passos reais (no lugar da antiga barra de progresso fictícia). */
+function ProgressSteps({
+  paymentConfirmed,
+  signedIn,
+  accessReady,
+}: {
+  paymentConfirmed: boolean
+  signedIn: boolean
+  accessReady: boolean
+}) {
+  const steps = [
+    { label: 'Pagamento recebido', done: paymentConfirmed },
+    { label: 'Entrando na sua conta', done: signedIn },
+    { label: 'Liberando seu acesso', done: accessReady },
+  ]
+  const current = steps.findIndex((s) => !s.done)
+
+  return (
+    <Card className="mt-6 text-left" aria-label="Andamento">
+      <ol className="space-y-3">
+        {steps.map((step, i) => {
+          const active = i === current
+          return (
+            <li key={step.label} className="flex items-center gap-3">
+              <span
+                aria-hidden="true"
+                className={cn(
+                  'flex h-7 w-7 shrink-0 items-center justify-center rounded-full',
+                  step.done ? 'bg-[hsl(var(--success)/0.1)] text-[hsl(var(--success))]' : 'bg-muted text-muted-foreground',
+                )}
+              >
+                {step.done ? (
+                  <Check className="h-4 w-4" />
+                ) : active ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                )}
+              </span>
+              <span className={cn('text-base', step.done || active ? 'text-foreground' : 'text-muted-foreground')}>
+                {step.label}
+                <span className="sr-only">{step.done ? ' (concluído)' : active ? ' (em andamento)' : ' (pendente)'}</span>
+              </span>
+            </li>
+          )
+        })}
+      </ol>
+    </Card>
+  )
+}
+
+function SupportLine() {
+  return (
+    <p className="mt-6 text-sm text-muted-foreground [text-wrap:pretty]">
+      Precisa de ajuda? Escreva para{' '}
+      <a
+        href={mailtoHref(SUPPORT_EMAIL, 'Acesso depois do pagamento')}
+        className="font-medium text-primary underline underline-offset-4"
+      >
+        {SUPPORT_EMAIL}
+      </a>
+      {HAS_WHATSAPP && (
+        <>
+          {' '}ou{' '}
+          <a
+            href={WHATSAPP_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-medium text-primary underline underline-offset-4"
+          >
+            fale pelo WhatsApp
+          </a>
+        </>
+      )}
+      .
+    </p>
   )
 }

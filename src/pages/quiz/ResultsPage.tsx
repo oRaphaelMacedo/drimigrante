@@ -1,386 +1,517 @@
-// ResultsPage.tsx — Day 2: Quiz Engine I — Pre-result + CTA
-// Day 3: Updated CTAs to route to /checkout
-// P0 (2026-06-30): "Desbloquear €30" calls create-checkout-session directly
-// (anonymous funnel) and redirects to Stripe. The €4,90 button was removed.
-import { useLocation, useNavigate, Link } from 'react-router-dom'
-import { useEffect, useState } from 'react'
-import { ArrowRight, CheckCircle, Loader2, Lock, RotateCcw, Star, TrendingUp, Users } from 'lucide-react'
+// ResultsPage.tsx — pré-resultado do quiz + oferta da análise completa.
+//
+// DI-011: o botão de compra usa useStartCheckout (1 clique, sem login; salva
+//   o diagnóstico de novo se faltar o assessmentId). Volta do Stripe com
+//   ?checkout=cancelled mostra um aviso neutro ("Nada foi cobrado").
+// DI-010: textos da oferta vêm de OFFER (nada de promessa que o produto não cumpre).
+// DI-032: erro do pagamento em português, logo abaixo do botão, com
+//   "Tentar novamente".
+// DI-033: results_viewed/quiz_completed uma vez por diagnóstico, paywall_viewed
+//   quando a oferta aparece na tela, checkout_cancelled ao voltar do Stripe.
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import {
+  ArrowRight,
+  Check,
+  CircleDot,
+  Compass,
+  Info,
+  Lock,
+  RotateCcw,
+  Sparkles,
+  TrendingUp,
+  X,
+  type LucideIcon,
+} from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { supabase } from '@/lib/supabase'
-import { toast } from 'sonner'
 import type { QuizResult } from '@/hooks/useQuiz'
 import type { VisaSuggestion } from '@/data/quiz-questions'
-import { track } from '@/lib/analytics'
+import { track, trackOnce } from '@/lib/analytics'
+import { OFFER } from '@/lib/offer'
+import { useAuth } from '@/hooks/useAuth'
+import { readStoredCheckoutData, useStartCheckout } from '@/hooks/useStartCheckout'
+import { QUIZ_RESULT_STORAGE_KEY } from '@/lib/stored-quiz-result'
+import { Badge, Button, Card, Container } from '@/components/ui'
+import { CheckoutFeedback } from '@/components/checkout/CheckoutFeedback'
 
-// Read sessionId from localStorage — set by useQuiz on submit.
-function getStoredSessionId(): string | null {
-  try {
-    const raw = localStorage.getItem('dr_imigrante_quiz_result')
-    return raw ? (JSON.parse(raw)?.sessionId as string | null) ?? null : null
-  } catch {
-    return null
-  }
-}
+type ScoreCategory = QuizResult['score']['category']
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export function ResultsPage() {
   const location = useLocation()
   const navigate = useNavigate()
-  const [result, setResult] = useState<QuizResult | null>(null)
-  const [assessmentId, setAssessmentId] = useState<string | null>(null)
+  const [searchParams, setSearchParams] = useSearchParams()
+  const { hasAccess } = useAuth()
+  // Derivado na renderização (sem piscar o estado vazio antes de ler o aparelho).
+  const loaded = useMemo(() => loadResult(location.state), [location.state])
+  const result = loaded?.result ?? null
+  const resultKey = loaded?.key ?? null
+  const [showCancelled, setShowCancelled] = useState(() => searchParams.get('checkout') === 'cancelled')
+  const cancelHandledRef = useRef(false)
 
+  // Volta do Stripe sem pagar: aviso neutro, evento único e URL limpa
+  // (recarregar a página não repete o aviso nem o evento).
   useEffect(() => {
-    // Try router state first (direct from quiz), then localStorage fallback
-    if (location.state?.result) {
-      setResult(location.state.result as QuizResult)
-      if (location.state?.assessmentId) setAssessmentId(location.state.assessmentId as string)
-      return
-    }
-    try {
-      const stored = localStorage.getItem('dr_imigrante_quiz_result')
-      if (stored) {
-        const parsed = JSON.parse(stored)
-        if (parsed.assessmentId) setAssessmentId(parsed.assessmentId)
-        setResult({
-          score: {
-            total: parsed.score.total,
-            max: parsed.score.max,
-            percentage: parsed.score.percentage,
-            category: parsed.score.category,
-            label: categoryLabel(parsed.score.category).label,
-            sublabel: categoryLabel(parsed.score.category).sublabel,
-            color: categoryLabel(parsed.score.category).color,
-            bgColor: categoryLabel(parsed.score.category).bgColor,
-            emoji: categoryLabel(parsed.score.category).emoji,
-          },
-          visas: parsed.visas || [],
-          leadInfo: parsed.leadInfo || null,
-        })
-      }
-    } catch {
-      // ignore parse errors
-    }
-  }, [location.state])
+    if (searchParams.get('checkout') !== 'cancelled' || cancelHandledRef.current) return
+    cancelHandledRef.current = true
+    setShowCancelled(true)
+    track('checkout_cancelled', { plan: 'one_time' })
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        next.delete('checkout')
+        return next
+      },
+      { replace: true, state: location.state },
+    )
+  }, [searchParams, setSearchParams, location.state])
 
-  // Fire quiz_completed once per result load
+  const paid = hasAccess('dashboard')
+
+  // Um evento por diagnóstico (recarregar /results não conta de novo).
   useEffect(() => {
-    if (result) {
-      track('quiz_completed', {
-        score: result.score.percentage,
-        category: result.score.category,
-        top_visa: result.visas?.[0]?.code,
-      })
-    }
-  }, [result])
+    if (!result) return
+    const key = resultKey ?? `${result.score.category}:${result.score.percentage}`
+    trackOnce('quiz_completed', key, {
+      score: result.score.percentage,
+      category: result.score.category,
+      top_visa: result.visas?.[0]?.code,
+    })
+    trackOnce('results_viewed', key, { category: result.score.category, has_access: paid })
+  }, [result, resultKey, paid])
+
+  const cancelledNotice = showCancelled ? <CancelledNotice onClose={() => setShowCancelled(false)} /> : null
 
   if (!result) {
     return (
-      <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4 text-center">
-        <p className="text-gray-500">Não encontrámos nenhum resultado de quiz.</p>
-        <Link
-          to="/quiz"
-          className="rounded-xl bg-brand-700 px-6 py-2.5 text-sm font-semibold text-white hover:bg-brand-600"
-        >
-          Fazer o Quiz →
-        </Link>
-      </div>
+      <Container size="sm" className="flex min-h-[60dvh] flex-col justify-center gap-6 py-10">
+        {cancelledNotice}
+        <div className="flex flex-col items-center gap-4 text-center">
+          <p className="text-base text-muted-foreground [text-wrap:pretty]">
+            Não encontramos nenhum resultado do quiz neste aparelho.
+          </p>
+          <div className="flex w-full max-w-sm flex-col gap-3">
+            <Button asChild size="md" className="w-full">
+              <Link to="/quiz">
+                Fazer o quiz grátis
+                <ArrowRight aria-hidden="true" />
+              </Link>
+            </Button>
+            <Button asChild variant="secondary" size="md" className="w-full">
+              <Link to="/login" state={{ returnTo: '/dashboard' }}>
+                Já paguei, entrar
+              </Link>
+            </Button>
+          </div>
+        </div>
+      </Container>
     )
   }
 
   const { score, visas, leadInfo } = result
+  const onceKey = resultKey ?? `${score.category}:${score.percentage}`
 
   return (
-    <div className="min-h-[calc(100vh-64px)] bg-gradient-to-b from-brand-50/40 to-white">
-      <div className="container py-8 sm:py-12">
-        <div className="mx-auto max-w-2xl space-y-6">
+    <div className="min-h-[calc(100dvh-4rem)] bg-background">
+      <Container size="sm" className="space-y-5 py-6 sm:space-y-6 sm:py-10">
+        {cancelledNotice}
 
-          {/* ── Score Card ── */}
-          <ScoreCard score={score} leadInfo={leadInfo} />
+        {/* ── Pontuação ── */}
+        <ScoreCard score={score} leadInfo={leadInfo} />
 
-          {/* ── Visa suggestions (teaser) ── */}
-          <VisaTeaserCard visas={visas} />
+        {/* ── Caminhos (teaser) ── */}
+        <VisaTeaserCard visas={visas} />
 
-          {/* ── Paywall CTA ── */}
-          <PaywallCard
-            firstName={leadInfo?.fullName?.split(' ')[0]}
-            assessmentId={assessmentId}
-            email={leadInfo?.email ?? null}
-          />
+        {/* ── Oferta ── */}
+        <PaywallCard
+          firstName={leadInfo?.fullName?.split(' ')[0]}
+          paid={paid}
+          onceKey={onceKey}
+        />
 
-          {/* ── Restart ── */}
-          <div className="text-center">
-            <button
-              id="results-restart-btn"
-              onClick={() => navigate('/quiz')}
-              className="inline-flex items-center gap-1.5 text-sm text-gray-400 hover:text-gray-600 transition"
-            >
-              <RotateCcw className="h-3.5 w-3.5" />
-              Refazer o quiz
-            </button>
-          </div>
+        {/* ── Refazer ── */}
+        <div className="flex justify-center">
+          <Button
+            id="results-restart-btn"
+            variant="ghost"
+            size="sm"
+            onClick={() => navigate('/quiz')}
+            className="text-muted-foreground hover:text-foreground"
+          >
+            <RotateCcw aria-hidden="true" />
+            Refazer o quiz
+          </Button>
         </div>
-      </div>
+      </Container>
     </div>
   )
 }
 
 // ─── Sub-components ────────────────────────────────────────────────────────────
 
+function CancelledNotice({ onClose }: { onClose: () => void }) {
+  return (
+    <div
+      role="status"
+      data-testid="checkout-cancelled-notice"
+      className="flex items-start gap-3 rounded-lg border border-border bg-muted p-4"
+    >
+      <Info aria-hidden="true" className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
+      <div className="min-w-0 flex-1">
+        <p className="text-base font-semibold text-foreground">Pagamento não concluído. Nada foi cobrado.</p>
+        <p className="mt-1 text-sm text-muted-foreground [text-wrap:pretty]">
+          Sua análise continua disponível para desbloquear quando você quiser.
+        </p>
+      </div>
+      <Button
+        variant="ghost"
+        size="icon"
+        onClick={onClose}
+        aria-label="Fechar aviso"
+        className="-mr-2 -mt-2 shrink-0 text-muted-foreground"
+      >
+        <X aria-hidden="true" />
+      </Button>
+    </div>
+  )
+}
+
+const CATEGORY_TONE: Record<ScoreCategory, { icon: LucideIcon; text: string; tint: string; bar: string }> = {
+  alta: {
+    icon: Sparkles,
+    text: 'text-[hsl(var(--success))]',
+    tint: 'bg-[hsl(var(--success)/0.08)]',
+    bar: 'bg-[hsl(var(--success))]',
+  },
+  media: {
+    icon: TrendingUp,
+    text: 'text-[hsl(var(--warning))]',
+    tint: 'bg-[hsl(var(--warning)/0.08)]',
+    bar: 'bg-[hsl(var(--warning))]',
+  },
+  baixa: {
+    icon: Compass,
+    text: 'text-primary',
+    tint: 'bg-primary/[.08]',
+    bar: 'bg-primary',
+  },
+}
+
+function toneFor(category: string) {
+  return CATEGORY_TONE[category as ScoreCategory] ?? CATEGORY_TONE.baixa
+}
+
 function ScoreCard({ score, leadInfo }: { score: QuizResult['score']; leadInfo: QuizResult['leadInfo'] }) {
   const firstName = leadInfo?.fullName?.split(' ')[0]
+  const tone = toneFor(score.category)
+  const presentation = categoryPresentation(score.category)
+  const Icon = tone.icon
+  const percentage = Math.max(0, Math.min(100, Math.round(score.percentage)))
 
   return (
-    <div data-testid="results-score" className={cn('rounded-2xl border p-6 text-center shadow-sm sm:p-8', score.bgColor)}>
-      {/* Emoji + category */}
-      <div className="mb-3 text-5xl">{score.emoji}</div>
-      {firstName && (
-        <p className="mb-1 text-sm font-medium text-gray-500">
-          {firstName}, o seu resultado é:
-        </p>
-      )}
-      <h1 className={cn('mb-2 text-2xl font-extrabold sm:text-3xl', score.color)}>
-        {score.label}
+    <Card data-testid="results-score" className={cn('text-center', tone.tint)}>
+      <div
+        aria-hidden="true"
+        className={cn('mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-card', tone.text)}
+      >
+        <Icon className="h-6 w-6" />
+      </div>
+      {firstName && <p className="mb-1 text-sm font-medium text-muted-foreground">{firstName}, seu resultado é:</p>}
+      <h1 className={cn('mb-2 text-2xl font-bold leading-tight [text-wrap:balance] sm:text-3xl', tone.text)}>
+        {presentation.label}
       </h1>
-      <p className="mb-6 text-sm text-gray-600 max-w-md mx-auto">{score.sublabel}</p>
+      <p className="mx-auto mb-5 max-w-md text-base text-muted-foreground [text-wrap:pretty]">
+        {presentation.sublabel}
+      </p>
 
-      {/* Score gauge */}
+      {/* Medidor */}
       <div className="mx-auto max-w-xs">
-        <div className="mb-2 flex items-baseline justify-between text-xs text-gray-400">
+        <div className="mb-2 flex items-baseline justify-between text-sm text-muted-foreground">
           <span>Pontuação</span>
-          <span className={cn('text-lg font-extrabold', score.color)}>
-            {score.percentage}%
-          </span>
+          <span className={cn('text-lg font-bold', tone.text)}>{percentage}%</span>
         </div>
-        <div className="h-3 w-full overflow-hidden rounded-full bg-white/60 shadow-inner">
+        <div
+          role="meter"
+          aria-label="Pontuação de elegibilidade"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={percentage}
+          className="h-3 w-full overflow-hidden rounded-full bg-card shadow-inner"
+        >
           <div
-            className={cn(
-              'h-full rounded-full transition-all duration-1000',
-              score.category === 'alta' && 'bg-emerald-500',
-              score.category === 'media' && 'bg-amber-500',
-              score.category === 'baixa' && 'bg-blue-500',
-            )}
-            style={{ width: `${score.percentage}%` }}
+            className={cn('h-full rounded-full transition-[width] [transition-duration:400ms]', tone.bar)}
+            style={{ width: `${percentage}%` }}
           />
         </div>
-        <div className="mt-1.5 flex justify-between text-[10px] text-gray-400">
+        <div aria-hidden="true" className="mt-1.5 flex justify-between text-xs text-muted-foreground">
           <span>Baixa</span>
           <span>Média</span>
           <span>Alta</span>
         </div>
       </div>
-    </div>
+    </Card>
   )
+}
+
+const MATCH_LABEL: Record<VisaSuggestion['match'], string> = {
+  strong: 'Alta compatibilidade',
+  possible: 'Compatibilidade possível',
+  weak: 'A explorar',
+}
+
+const MATCH_BADGE: Record<VisaSuggestion['match'], 'success' | 'warning' | 'neutral'> = {
+  strong: 'success',
+  possible: 'warning',
+  weak: 'neutral',
 }
 
 function VisaTeaserCard({ visas }: { visas: VisaSuggestion[] }) {
   const topVisas = visas.slice(0, 3)
+  if (topVisas.length === 0) return null
 
   return (
-    <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
+    <Card>
       <div className="mb-4 flex items-center gap-2">
-        <TrendingUp className="h-5 w-5 text-brand-600" />
-        <h2 className="font-bold text-gray-900">Vistos Identificados para o Seu Perfil</h2>
+        <TrendingUp aria-hidden="true" className="h-5 w-5 shrink-0 text-primary" />
+        <h2 className="text-lg font-semibold text-foreground [text-wrap:balance]">
+          Caminhos identificados para o seu perfil
+        </h2>
       </div>
 
-      <div className="space-y-3">
+      <ul className="space-y-3">
         {topVisas.map((visa, i) => (
-          <div
+          <li
             key={visa.code}
             className={cn(
-              'relative flex items-start gap-3 rounded-xl border p-4',
-              i === 0
-                ? 'border-brand-200 bg-brand-50'
-                : 'border-gray-100 bg-gray-50',
+              'flex items-start gap-3 rounded-xl border p-4',
+              i === 0 ? 'border-primary/20 bg-primary/[.05]' : 'border-border bg-muted',
             )}
           >
-            {/* Match indicator */}
-            <div
-              className={cn(
-                'mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold',
-                visa.match === 'strong' && 'bg-emerald-500 text-white',
-                visa.match === 'possible' && 'bg-amber-500 text-white',
-                visa.match === 'weak' && 'bg-gray-400 text-white',
-              )}
-            >
-              {visa.match === 'strong' ? '✓' : visa.match === 'possible' ? '~' : '?'}
-            </div>
-
+            <CircleDot aria-hidden="true" className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
             <div className="min-w-0 flex-1">
               <div className="mb-1 flex flex-wrap items-center gap-2">
-                <span className="font-semibold text-gray-900 text-sm">{visa.name}</span>
-                <span
-                  className={cn(
-                    'rounded-full px-2 py-0.5 text-[10px] font-semibold',
-                    visa.match === 'strong' && 'bg-emerald-100 text-emerald-700',
-                    visa.match === 'possible' && 'bg-amber-100 text-amber-700',
-                    visa.match === 'weak' && 'bg-gray-100 text-gray-500',
-                  )}
-                >
-                  {visa.match === 'strong' ? 'Alta compatibilidade' : visa.match === 'possible' ? 'Compatibilidade possível' : 'A explorar'}
-                </span>
+                <span className="text-base font-semibold text-foreground">{visa.name}</span>
+                <Badge size="sm" variant={MATCH_BADGE[visa.match] ?? 'neutral'}>
+                  {MATCH_LABEL[visa.match] ?? MATCH_LABEL.weak}
+                </Badge>
               </div>
-              {/* Blurred reason — paywall teaser */}
-              <p className="text-xs text-gray-400 line-clamp-1 blur-[3px] select-none">
+              {/* Teaser com desfoque: o detalhe é da análise paga. */}
+              <p aria-hidden="true" className="line-clamp-1 select-none text-sm text-muted-foreground blur-[3px]">
                 {visa.reason}
               </p>
+              <span className="sr-only">Detalhes disponíveis na análise completa.</span>
             </div>
-
-            {/* Lock for non-first */}
-            {i > 0 && (
-              <Lock className="mt-0.5 h-4 w-4 shrink-0 text-gray-300" />
-            )}
-          </div>
+            {i > 0 && <Lock aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />}
+          </li>
         ))}
-      </div>
+      </ul>
 
-      {/* Unlock hint */}
-      <div className="mt-4 rounded-xl border border-dashed border-gray-200 bg-gray-50 p-3 text-center text-xs text-gray-500">
-        <Lock className="mx-auto mb-1 h-3.5 w-3.5" />
-        Desbloqueie a análise completa com os detalhes de cada visto, requisitos e lista de documentos.
-      </div>
-    </div>
+      <p className="mt-4 flex items-start gap-2 rounded-xl border border-dashed border-border bg-muted p-3 text-sm text-muted-foreground">
+        <Lock aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />
+        Na análise completa você vê os detalhes de cada caminho, os requisitos e os documentos.
+      </p>
+    </Card>
   )
 }
 
+/** Motivo de azulejo (tile 48px, 1 cor, ~7% de opacidade) só no card da oferta. */
+const AZULEJO_TILE = `url("data:image/svg+xml,${encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48" fill="none" stroke="#1f41c7" stroke-width="1.5"><path d="M24 4 44 24 24 44 4 24Z"/><circle cx="24" cy="24" r="6"/><path d="M0 0h48v48H0z"/></svg>',
+)}")`
+
 function PaywallCard({
   firstName,
-  assessmentId,
-  email,
+  paid,
+  onceKey,
 }: {
   firstName?: string
-  assessmentId?: string | null
-  email?: string | null
+  paid: boolean
+  onceKey: string
 }) {
-  const [isProcessing, setIsProcessing] = useState(false)
+  const cardRef = useRef<HTMLDivElement>(null)
+  const { phase, isPending, error, email, start } = useStartCheckout()
 
-  const features = [
-    { icon: Star, text: 'Análise jurídica completa personalizada' },
-    { icon: CheckCircle, text: 'Top 3 vistos detalhados com requisitos exactos' },
-    { icon: Users, text: 'Lista completa de documentos necessários' },
-    { icon: CheckCircle, text: 'Dashboard pessoal com acompanhamento do processo' },
-  ]
-
-  const handleUnlock = async () => {
-    const sessionId = getStoredSessionId()
-    if (!assessmentId || !sessionId || !email) {
-      toast.error('Não foi possível iniciar o pagamento', {
-        description: 'Faltam dados do quiz. Por favor, refaça o quiz.',
-        duration: 6000,
-      })
+  // paywall_viewed: quando metade da oferta aparece na tela (uma vez por diagnóstico).
+  useEffect(() => {
+    const el = cardRef.current
+    if (!el || paid) return
+    if (typeof IntersectionObserver === 'undefined') {
+      trackOnce('paywall_viewed', onceKey, { position: 'results' })
       return
     }
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (!entry?.isIntersecting) return
+        trackOnce('paywall_viewed', onceKey, { position: 'results' })
+        observer.disconnect()
+      },
+      { threshold: 0.5 },
+    )
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [onceKey, paid])
 
-    setIsProcessing(true)
-    track('checkout_started', { plan: 'one_time', assessment_id: assessmentId })
-    try {
-      const { data, error } = await supabase.functions.invoke('create-checkout-session', {
-        body: { plan: 'one_time', assessmentId, sessionId, email },
-      })
+  const handleUnlock = () => {
+    void start({ position: 'results_paywall' })
+  }
 
-      if (error) throw error
-      if (!data?.url) throw new Error('Stripe session URL não recebida.')
-
-      // Redirect to Stripe Hosted Checkout (anonymous funnel — account created post-payment)
-      window.location.href = data.url
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err)
-      toast.error('Erro ao iniciar pagamento', {
-        description: message,
-        duration: 6000,
-      })
-      setIsProcessing(false)
-    }
+  if (paid) {
+    return (
+      <Card variant="elevated" data-testid="results-paid">
+        <h2 className="mb-2 text-xl font-bold text-foreground [text-wrap:balance]">
+          Você já tem acesso à análise completa
+        </h2>
+        <p className="mb-5 text-base text-muted-foreground [text-wrap:pretty]">
+          Abra seu painel para ver os detalhes de cada caminho, os requisitos e os próximos passos.
+        </p>
+        <Button asChild size="lg" className="w-full">
+          <Link to="/dashboard/analysis">
+            Abrir minha análise
+            <ArrowRight aria-hidden="true" />
+          </Link>
+        </Button>
+      </Card>
+    )
   }
 
   return (
-    <div className="overflow-hidden rounded-2xl border-2 border-brand-600 bg-brand-700 text-white shadow-xl">
-      <div className="p-6 sm:p-8">
-        {/* Badge */}
-        <div className="mb-4 inline-flex items-center gap-2 rounded-full bg-gold-500 px-3 py-1 text-xs font-bold text-white">
-          <Star className="h-3 w-3" />
-          Diagnóstico Profissional
-        </div>
+    <Card
+      ref={cardRef}
+      variant="elevated"
+      padding="none"
+      role="region"
+      aria-labelledby="results-offer-title"
+      className="relative overflow-hidden border-primary/25"
+    >
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 opacity-[.07]"
+        style={{ backgroundImage: AZULEJO_TILE, backgroundSize: '48px 48px' }}
+      />
+      <div className="relative p-5 sm:p-6">
+        <Badge variant="primary" size="sm" className="mb-3">
+          Análise completa
+        </Badge>
 
-        <h2 className="mb-2 text-2xl font-extrabold leading-tight">
-          {firstName ? `${firstName}, desbloqueie` : 'Desbloqueie'} a análise completa do seu perfil
+        <h2
+          id="results-offer-title"
+          className="mb-2 text-2xl font-bold leading-tight text-foreground [text-wrap:balance]"
+        >
+          {firstName ? `${firstName}, desbloqueie` : 'Desbloqueie'} a análise completa do seu caminho
         </h2>
-        <p className="mb-6 text-sm text-blue-200">
-          A nossa equipa de advogados especializados analisará o seu perfil e identificará o caminho mais direto para Portugal.
+        <p className="mb-5 text-base text-muted-foreground [text-wrap:pretty]">
+          Gerada a partir das suas respostas e da Lei da Nacionalidade. {OFFER.delivery}.
         </p>
 
-        {/* Features */}
-        <ul className="mb-6 space-y-2.5">
-          {features.map(({ icon: Icon, text }) => (
-            <li key={text} className="flex items-center gap-2.5 text-sm text-blue-100">
-              <Icon className="h-4 w-4 shrink-0 text-blue-300" />
-              {text}
+        <ul className="mb-5 space-y-2.5">
+          {OFFER.includes.map((item) => (
+            <li key={item} className="flex items-start gap-2.5 text-base text-foreground">
+              <Check aria-hidden="true" className="mt-0.5 h-5 w-5 shrink-0 text-[hsl(var(--success))]" />
+              {item}
             </li>
           ))}
         </ul>
 
-        {/* Pricing */}
-        <div className="mb-4 flex items-baseline gap-2">
-          <span className="text-4xl font-extrabold">€30</span>
-          <span className="text-blue-300">pagamento único</span>
+        <div className="mb-4 flex flex-wrap items-baseline gap-x-2 gap-y-1">
+          <span className="text-4xl font-bold text-foreground">{OFFER.priceLabel}</span>
+          <span className="text-sm text-muted-foreground">
+            pagamento único · acesso por {OFFER.accessDays} dias
+          </span>
         </div>
 
-        {/* CTA button — calls create-checkout-session directly (anon funnel) */}
-        <div className="space-y-3">
-          <button
-            id="results-unlock-btn"
-            data-testid="results-cta-paywall"
-            onClick={handleUnlock}
-            disabled={isProcessing}
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-white py-3.5 text-base font-bold text-brand-700 shadow-md transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {isProcessing ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin" />
-                A processar...
-              </>
-            ) : (
-              <>
-                Desbloquear por €30
-                <ArrowRight className="h-4 w-4" />
-              </>
-            )}
-          </button>
-        </div>
+        <Button
+          id="results-unlock-btn"
+          data-testid="results-cta-paywall"
+          variant="pay"
+          size="lg"
+          className="w-full"
+          loading={isPending}
+          onClick={handleUnlock}
+        >
+          {isPending ? (
+            'Abrindo o pagamento…'
+          ) : (
+            <>
+              Desbloquear por {OFFER.priceLabel}
+              <ArrowRight aria-hidden="true" />
+            </>
+          )}
+        </Button>
 
-        {/* Trust */}
-        <p className="mt-4 text-center text-xs text-blue-300">
-          🔒 Pagamento seguro · Resultado em 24h · Garantia de satisfação
+        <CheckoutFeedback phase={phase} error={error} onRetry={handleUnlock} email={email} />
+
+        {email && phase !== 'email_sent' && (
+          <p className="mt-3 break-words text-center text-sm text-muted-foreground">
+            O acesso será liberado para <span className="font-medium text-foreground">{email}</span>
+          </p>
+        )}
+
+        <p className="mt-4 text-center text-sm text-muted-foreground [text-wrap:balance]">
+          <Lock aria-hidden="true" className="-mt-0.5 mr-1.5 inline h-4 w-4 align-middle" />
+          Pagamento seguro pela Stripe{'\u00a0'}· sem renovação automática
         </p>
       </div>
-    </div>
+    </Card>
   )
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function categoryLabel(category: string) {
+/**
+ * Resultado a mostrar: o do roteador (vindo direto do quiz) ou o salvo neste
+ * aparelho. `key` identifica o envio do quiz (session_id), estável mesmo quando
+ * o assessmentId só aparece depois, ao salvar de novo.
+ */
+function loadResult(state: unknown): { result: QuizResult; key: string | null } | null {
+  const stored = readStoredCheckoutData()
+  const routerState = (state ?? null) as { result?: QuizResult; assessmentId?: string | null } | null
+  if (routerState?.result) {
+    return { result: routerState.result, key: stored?.sessionId ?? routerState.assessmentId ?? stored?.assessmentId ?? null }
+  }
+  try {
+    const raw = localStorage.getItem(QUIZ_RESULT_STORAGE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    if (!parsed?.score) return null
+    const presentation = categoryPresentation(parsed.score.category)
+    return {
+      key: parsed.sessionId ?? parsed.assessmentId ?? parsed.completedAt ?? null,
+      result: {
+        score: {
+          total: parsed.score.total,
+          max: parsed.score.max,
+          percentage: parsed.score.percentage,
+          category: parsed.score.category,
+          label: presentation.label,
+          sublabel: presentation.sublabel,
+          color: '',
+          bgColor: '',
+          emoji: '',
+        },
+        visas: Array.isArray(parsed.visas) ? parsed.visas : [],
+        leadInfo: parsed.leadInfo || null,
+      },
+    }
+  } catch {
+    // JSON inválido ou sem storage: mostra o estado vazio
+    return null
+  }
+}
+
+function categoryPresentation(category: string): { label: string; sublabel: string } {
   if (category === 'alta')
     return {
-      label: 'Perfil de Alta Elegibilidade',
-      sublabel: 'O seu perfil indica fortes probabilidades de elegibilidade para Portugal.',
-      color: 'text-emerald-700',
-      bgColor: 'bg-emerald-50',
-      emoji: '🌟',
+      label: 'Perfil de alta elegibilidade',
+      sublabel: 'Suas respostas indicam boas chances de elegibilidade para a nacionalidade portuguesa.',
     }
   if (category === 'media')
     return {
-      label: 'Perfil de Média Elegibilidade',
-      sublabel: 'O seu perfil tem boas chances, mas podem existir condições a cumprir.',
-      color: 'text-amber-700',
-      bgColor: 'bg-amber-50',
-      emoji: '⚡',
+      label: 'Perfil de média elegibilidade',
+      sublabel: 'Seu perfil tem chances, mas pode haver condições a cumprir antes do pedido.',
     }
   return {
-    label: 'Perfil em Desenvolvimento',
-    sublabel: 'Existem opções a explorar. A análise completa identificará os caminhos disponíveis.',
-    color: 'text-blue-700',
-    bgColor: 'bg-blue-50',
-    emoji: '🔍',
+    label: 'Perfil em desenvolvimento',
+    sublabel: 'Existem opções a explorar. A análise completa mostra os caminhos disponíveis para você.',
   }
 }
