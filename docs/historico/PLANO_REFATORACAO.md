@@ -1,3 +1,7 @@
+> **Documento histórico, não normativo.** Arquitetura atual:
+> [docs/arquitetura.md](../arquitetura.md). Contexto:
+> [docs/historico/README.md](README.md).
+
 # Plano de Refatoração Arquitetural — Doutor Imigrante
 
 Com base na auditoria arquitetural realizada após o lançamento da v1.0, este documento estabelece um roteiro (roadmap) em 4 fases para eliminar dívidas técnicas, melhorar a segurança e garantir que a aplicação consiga escalar sem gargalos.

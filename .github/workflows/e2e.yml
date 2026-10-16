@@ -1,66 +1,99 @@
-# ATENÇÃO (DI-003): os specs E2E atuais gravam no banco com a service role
-# (e2e/fixtures/seeded.ts) e usam a Edge Function e2e-login. Este workflow só
-# pode rodar contra Supabase LOCAL ou de STAGING — nunca contra produção
-# (projeto krjirhlmdnxqqrpzmowz / www.drimigrante.com).
+# E2E (Playwright) contra um Supabase LOCAL no próprio runner (DI-060).
 #
-# Por isso ele NÃO roda em pull_request: só manualmente (workflow_dispatch), com
-# os secrets E2E_* apontando para staging. O primeiro passo aborta se algum deles
-# apontar para produção. A parte autenticada do spec 04 e o spec 05 ficam em skip
-# sem E2E_LOGIN_SECRET (ver docs/testes.md).
-name: E2E Tests
+# - Chamado pelo ci.yml em todo PR e também disponível manualmente.
+# - Não usa nenhum secret: URL e chaves vêm do `supabase start` do runner, e os
+#   segredos da e2e-login são aleatórios, gerados a cada execução.
+# - Stripe, OpenAI e Resend nunca são chamados: as functions locais sobem sem
+#   essas chaves e os specs respondem a essas chamadas com page.route (stubs).
+# - A trava scripts/lib/test-target-guard.mjs (no playwright.config.ts, no
+#   cliente admin dos fixtures e no passo "Conferir alvo") recusa o projeto e os
+#   domínios de produção e qualquer host remoto.
+name: E2E
 
 on:
+  workflow_call:
   workflow_dispatch:
 
-jobs:
-  test:
-    timeout-minutes: 15
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2, 3]
-    env:
-      E2E_BASE_URL: ${{ secrets.E2E_BASE_URL }}
-      VITE_SUPABASE_URL: ${{ secrets.E2E_SUPABASE_URL }}
-      VITE_SUPABASE_ANON_KEY: ${{ secrets.E2E_SUPABASE_ANON_KEY }}
-      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.E2E_SUPABASE_SERVICE_ROLE_KEY }}
-      E2E_LOGIN_SECRET: ${{ secrets.E2E_LOGIN_SECRET }}
-    steps:
-      - name: Bloquear execução contra produção
-        run: |
-          set -euo pipefail
-          if [ -z "${VITE_SUPABASE_URL:-}" ]; then
-            echo "::error::Defina o secret E2E_SUPABASE_URL com o Supabase de staging (ver docs/testes.md)."
-            exit 1
-          fi
-          for value in "${VITE_SUPABASE_URL:-}" "${E2E_BASE_URL:-}"; do
-            case "${value}" in
-              *krjirhlmdnxqqrpzmowz*|*drimigrante.com*)
-                echo "::error::Os secrets E2E apontam para PRODUÇÃO. Execução abortada."
-                exit 1
-                ;;
-            esac
-          done
+permissions:
+  contents: read
 
+jobs:
+  playwright:
+    name: playwright
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # Só o essencial do stack local: banco, Auth, REST, Storage e Functions.
+      SUPABASE_EXCLUDE: studio,imgproxy,vector,logflare,supavisor,postgres-meta
+    steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
-          cache: 'npm'
+          node-version-file: .nvmrc
+          cache: npm
 
       - run: npm ci
 
-      - name: Install Playwright browsers
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.98.2
+
+      # Runner novo = banco vazio: o start aplica todas as migrations e o
+      # supabase/seed.sql (o mesmo que `npm run supabase:reset` faz localmente).
+      - name: Subir o Supabase local
+        run: npm run supabase:start -- -x "$SUPABASE_EXCLUDE"
+
+      - name: Gravar URL e chaves locais em .env.test.local
+        run: npm run supabase:env -- --target test
+
+      - name: Servir as Edge Functions com a e2e-login (segredos aleatórios)
+        run: |
+          nohup npm run supabase:functions:e2e > supabase-functions.log 2>&1 &
+          # Pronta quando a e2e-login responde 403 a um pedido sem segredo.
+          for attempt in $(seq 1 60); do
+            status="$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+              -H 'Content-Type: application/json' -d '{}' \
+              http://127.0.0.1:54321/functions/v1/e2e-login || true)"
+            if [ "$status" = "403" ] && grep -q '^E2E_LOGIN_SECRET=' .env.test.local; then
+              echo "Edge Functions prontas (tentativa $attempt)."
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::A e2e-login não respondeu a tempo (veja supabase-functions.log)."
+          tail -n 50 supabase-functions.log || true
+          exit 1
+
+      - name: Conferir alvo (nunca produção)
+        run: npm run test:e2e:guard
+
+      - name: Instalar navegadores do Playwright
         run: npx playwright install --with-deps chromium webkit
 
-      - name: Run Playwright tests (shard ${{ matrix.shard }}/3)
-        run: npx playwright test --shard=${{ matrix.shard }}/3
+      - name: Playwright (Supabase local)
+        run: npm run test:e2e
+
+      # Testes do spec 06 que mockam o Supabase inteiro por *.supabase.co: rodam
+      # com um host fictício e sem nenhuma credencial (ver playwright.config.ts).
+      - name: Playwright (Supabase 100% mockado)
+        if: success() || failure()
+        run: npm run test:e2e:mock
+
+      # O globalTeardown apaga as contas e2e+…@drimigrante.test; aqui fica o registro.
+      - name: Contas de teste restantes no banco local
+        if: always()
+        run: |
+          docker exec supabase_db_drimigrante psql -U postgres -tAc \
+            "select count(*) from auth.users where email like 'e2e+%@drimigrante.test'" \
+            || true
 
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: playwright-report-shard-${{ matrix.shard }}
-          path: playwright-report/
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+            supabase-functions.log
           retention-days: 7

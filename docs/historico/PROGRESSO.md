@@ -1,3 +1,10 @@
+> **Documento histórico (dias 1 a 7, maio de 2026), não normativo.** O funil e
+> os planos descritos aqui mudaram (checkout direto do resultado, €30 com 30
+> dias de acesso, €4,90/mês só depois do €30). Estado atual:
+> [README.md](../../README.md), [docs/arquitetura.md](../arquitetura.md) e
+> [docs/modelo-comercial.md](../modelo-comercial.md). Contexto:
+> [docs/historico/README.md](README.md).
+
 # Doutor Imigrante — Progresso do Desenvolvimento
 
 > **Stack:** React 18 + Vite + TypeScript + Tailwind CSS + Supabase + React Router v6

@@ -1,0 +1,78 @@
+# CI do Doutor Imigrante (DI-060). Roda em todo PR e em todo push na main.
+#
+# Nunca toca produção: não usa nenhum secret do repositório. O E2E sobe um
+# Supabase LOCAL no próprio runner (ver e2e.yml) e o Playwright recusa o
+# projeto e os domínios de produção (scripts/lib/test-target-guard.mjs).
+#
+# A proteção da main deve exigir os checks "ci", "functions" e "e2e / playwright".
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  ci:
+    name: ci
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
+      - name: Variáveis de ambiente (código × exemplos)
+        run: npm run check-env
+
+      - name: Tipos (app)
+        run: npm run typecheck
+
+      - name: Tipos (E2E e playwright.config)
+        run: npm run typecheck:e2e
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Testes unitários (Vitest)
+        run: npm test
+
+      - name: Testes dos scripts (node --test)
+        run: npm run test:scripts
+
+      # Sem VITE_* de produção: o build só precisa compilar. O app valida as
+      # variáveis em tempo de execução (src/lib/env.ts).
+      - name: Build
+        run: npm run build
+
+  functions:
+    name: functions
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      # Handlers puros, sem rede nem chaves: nada de Stripe, OpenAI ou Resend.
+      - name: Testes das Edge Functions (Deno)
+        run: deno test --no-config supabase/functions
+
+  e2e:
+    name: e2e
+    uses: ./.github/workflows/e2e.yml
