@@ -24,6 +24,29 @@
     --input: 214.3 31.8% 91.4%;
     --ring: 222 80% 48%;
     --radius: 0.5rem;
+
+    /*
+     * Tokens complementares da direção "Azulejo" usados por src/components/ui.
+     * Os tokens acima continuam com os valores atuais (o W2-01 redefine-os).
+     */
+    --primary-hover: 228 75.5% 38.4%; /* #1836ac */
+    --accent-hover: 41 92% 51%; /* #f5ab0f — texto accent-foreground 8,2:1 */
+    --success: 151 82.9% 25.3%; /* #0b7643 */
+    --success-foreground: 0 0% 100%;
+    --warning: 39 100% 27.1%; /* #8a5a00 */
+    --warning-foreground: 0 0% 100%;
+    --shadow-sm: 0 1px 2px rgb(20 26 41 / 0.06);
+    --shadow-md: 0 8px 24px -8px rgb(31 65 199 / 0.18);
+    --ease-out: cubic-bezier(0.25, 1, 0.5, 1);
+    --duration-fast: 150ms;
+    --duration-base: 250ms;
+    --duration-slow: 400ms;
+
+    /* Altura do CookieBanner, publicada por ele mesmo (0px quando fechado). */
+    --cookie-banner-h: 0px;
+
+    /* Sem modo escuro por agora: impede o navegador de inverter formulários e barras. */
+    color-scheme: only light;
   }
 }
 
@@ -31,14 +54,64 @@
   * {
     @apply border-border;
   }
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
   body {
     @apply bg-background text-foreground;
     font-feature-settings: "rlig" 1, "calt" 1;
+  }
+
+  /*
+   * Foco visível padrão para qualquer elemento focável pelo teclado.
+   * Componentes que desenham o próprio anel (focus-visible:ring-*) sobrescrevem
+   * com focus-visible:outline-none.
+   */
+  :focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+  }
+  /* Contêineres que recebem foco só por script (tabindex=-1) não ganham contorno. */
+  [tabindex='-1']:focus-visible {
+    outline: none;
   }
 }
 
 @layer utilities {
   .container {
     @apply mx-auto max-w-6xl px-4 sm:px-6 lg:px-8;
+  }
+}
+
+/*
+ * Anti-zoom do iOS (DI-044) — fora de @layer de propósito, para valer sobre
+ * text-sm/text-xs nos campos. O Safari do iOS dá zoom ao focar campos com
+ * fonte < 16px. Campos com classe de fonte maior (text-lg+) mantêm o tamanho.
+ * Desktop (≥768px) inalterado.
+ */
+@media (max-width: 767px) {
+  input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):not([type='color']):not([type='button']):not([type='submit']):not([type='reset']):not([type='image']):not([type='hidden']):not(.text-lg):not(.text-xl):not(.text-2xl):not(.text-3xl):not(.text-4xl),
+  select:not(.text-lg):not(.text-xl):not(.text-2xl),
+  textarea:not(.text-lg):not(.text-xl):not(.text-2xl) {
+    font-size: 16px !important;
+  }
+}
+
+/*
+ * Movimento reduzido: zera animações e transições para quem pediu no sistema.
+ * 0.01ms (e não 0) para que animationend/transitionend continuem disparando
+ * (o Radix Presence depende disso para desmontar sheets e diálogos).
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
+    scroll-behavior: auto !important;
   }
 }

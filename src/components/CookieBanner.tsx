@@ -1,14 +1,45 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState, type RefObject } from 'react'
 import { Cookie, X } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { getConsent, setConsent } from '@/lib/analytics'
+import { Button } from '@/components/ui/Button'
+
+const HEIGHT_VAR = '--cookie-banner-h'
+
+/**
+ * Publica a altura do banner em `--cookie-banner-h` no <html> para que barras
+ * fixas (StickyCTA, barra do quiz…) fiquem acima dele. Zera ao fechar.
+ */
+function usePublishHeight(ref: RefObject<HTMLElement>, active: boolean) {
+  useEffect(() => {
+    const root = document.documentElement
+    const el = ref.current
+    if (!active || !el) {
+      root.style.setProperty(HEIGHT_VAR, '0px')
+      return
+    }
+    const publish = () => root.style.setProperty(HEIGHT_VAR, `${Math.ceil(el.getBoundingClientRect().height)}px`)
+    publish()
+    const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(publish) : null
+    observer?.observe(el)
+    window.addEventListener('resize', publish)
+    return () => {
+      observer?.disconnect()
+      window.removeEventListener('resize', publish)
+      root.style.setProperty(HEIGHT_VAR, '0px')
+    }
+  }, [ref, active])
+}
 
 export function CookieBanner() {
   const [visible, setVisible] = useState(false)
+  const bannerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     setVisible(getConsent() === 'pending')
   }, [])
+
+  usePublishHeight(bannerRef, visible)
 
   if (!visible) return null
 
@@ -23,6 +54,7 @@ export function CookieBanner() {
 
   return (
     <div
+      ref={bannerRef}
       role="dialog"
       aria-label="Aviso de cookies"
       data-testid="cookie-banner"
@@ -42,28 +74,29 @@ export function CookieBanner() {
           </Link>
           .
         </p>
+        {/* Rejeitar e Aceitar com o mesmo peso visual (mesma variante, tamanho e largura). */}
         <div className="flex gap-2">
-          <button
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={reject}
             data-testid="cookie-reject"
-            className="rounded-lg border border-border bg-background px-4 py-2 text-sm font-semibold hover:bg-muted"
+            className="min-h-11 flex-1 md:flex-none"
           >
             Rejeitar
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={accept}
             data-testid="cookie-accept"
-            className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700"
+            className="min-h-11 flex-1 md:flex-none"
           >
             Aceitar
-          </button>
-          <button
-            onClick={reject}
-            aria-label="Fechar"
-            className="rounded-lg p-2 text-muted-foreground hover:bg-muted md:hidden"
-          >
-            <X className="h-4 w-4" />
-          </button>
+          </Button>
+          <Button variant="ghost" size="icon" onClick={reject} aria-label="Fechar" className="text-muted-foreground md:hidden">
+            <X />
+          </Button>
         </div>
       </div>
     </div>
