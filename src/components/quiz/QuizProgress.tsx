@@ -54,7 +54,7 @@ export function QuizProgress({ label, themeName, percentage, segments = [] }: Qu
               style={{ flexGrow: Math.max(1, segment.total), flexBasis: 0 }}
             >
               <div
-                className="h-full w-full origin-left rounded-full bg-primary transition-transform duration-[400ms] ease-[cubic-bezier(.25,1,.5,1)]"
+                className="h-full w-full origin-left rounded-full bg-primary transition-transform duration-slow ease-out"
                 style={{ transform: `scaleX(${segment.total > 0 ? segment.answered / segment.total : 0})` }}
               />
             </div>

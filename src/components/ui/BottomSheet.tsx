@@ -113,7 +113,7 @@ export function BottomSheet({
         <Dialog.Overlay
           className={cn(
             'fixed inset-0 z-[60] flex items-end justify-center bg-foreground/50 sm:items-center sm:p-6',
-            'data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:duration-[250ms]',
+            'data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:duration-base',
             'data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:duration-150',
           )}
         >
@@ -121,7 +121,7 @@ export function BottomSheet({
             className={cn(
               'relative flex max-h-[90dvh] w-full flex-col overflow-hidden bg-card text-card-foreground shadow-[var(--shadow-md)] focus:outline-none',
               'rounded-t-2xl sm:max-w-lg sm:rounded-2xl',
-              'data-[state=open]:animate-in data-[state=open]:slide-in-from-bottom data-[state=open]:duration-[250ms] data-[state=open]:ease-[cubic-bezier(.25,1,.5,1)]',
+              'data-[state=open]:animate-in data-[state=open]:slide-in-from-bottom data-[state=open]:duration-base data-[state=open]:ease-out',
               'data-[state=closed]:animate-out data-[state=closed]:slide-out-to-bottom data-[state=closed]:duration-150',
               'sm:data-[state=open]:slide-in-from-bottom-4 sm:data-[state=open]:zoom-in-95 sm:data-[state=closed]:slide-out-to-bottom-4 sm:data-[state=closed]:zoom-out-95',
               className,

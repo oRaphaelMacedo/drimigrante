@@ -345,7 +345,7 @@ export function QuizPage() {
                 data-testid="quiz-nav"
                 className={cn(
                   'fixed inset-x-0 z-30 border-t bg-card/95 px-4 pt-3 pb-[calc(.75rem+env(safe-area-inset-bottom))] shadow-[0_-8px_24px_-12px_rgb(20_26_41/0.12)] backdrop-blur',
-                  'transition-[transform,opacity,visibility] duration-[250ms] ease-[cubic-bezier(.25,1,.5,1)] motion-reduce:transition-none',
+                  'transition-[transform,opacity,visibility] duration-base ease-out motion-reduce:transition-none',
                   'data-[state=hidden]:pointer-events-none data-[state=hidden]:invisible data-[state=hidden]:translate-y-full data-[state=hidden]:opacity-0',
                   'sm:static sm:z-auto sm:translate-y-0 sm:border-0 sm:bg-transparent sm:p-0 sm:shadow-none sm:backdrop-blur-none',
                   'sm:data-[state=hidden]:pointer-events-auto sm:data-[state=hidden]:visible sm:data-[state=hidden]:translate-y-0 sm:data-[state=hidden]:opacity-100',

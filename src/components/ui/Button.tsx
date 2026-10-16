@@ -11,7 +11,7 @@ import { cn } from '@/lib/utils'
 export const buttonVariants = cva(
   [
     'relative inline-flex select-none items-center justify-center gap-2 rounded-xl text-center font-semibold leading-tight',
-    'transition-[background-color,border-color,color,box-shadow,transform] duration-150 ease-[cubic-bezier(.25,1,.5,1)]',
+    'transition-[background-color,border-color,color,box-shadow,transform] duration-150 ease-out',
     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background',
     'active:scale-[.98] disabled:pointer-events-none disabled:opacity-60 aria-disabled:pointer-events-none aria-disabled:opacity-60',
     '[&_svg]:pointer-events-none [&_svg]:shrink-0',

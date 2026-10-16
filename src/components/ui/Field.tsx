@@ -23,7 +23,7 @@ export interface FieldBaseProps {
 export const fieldControlClass = cn(
   'w-full rounded-xl border border-input bg-card text-base text-foreground shadow-[var(--shadow-sm)]',
   'placeholder:text-muted-foreground',
-  'transition-[border-color,box-shadow] duration-150 ease-[cubic-bezier(.25,1,.5,1)]',
+  'transition-[border-color,box-shadow] duration-150 ease-out',
   'focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
   'disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground',
   'aria-[invalid=true]:border-destructive aria-[invalid=true]:focus-visible:border-destructive aria-[invalid=true]:focus-visible:ring-destructive',

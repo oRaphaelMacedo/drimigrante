@@ -172,7 +172,7 @@ export function StickyCTA({
         data-testid="sticky-cta"
         className={cn(
           'fixed inset-x-0 z-30 border-t bg-card/95 px-4 pt-3 pb-[calc(.75rem+env(safe-area-inset-bottom))] shadow-[0_-8px_24px_-12px_rgb(20_26_41/0.12)] backdrop-blur',
-          'transition-[transform,opacity,visibility] duration-[250ms] ease-[cubic-bezier(.25,1,.5,1)]',
+          'transition-[transform,opacity,visibility] duration-base ease-out',
           'data-[state=hidden]:pointer-events-none data-[state=hidden]:invisible data-[state=hidden]:translate-y-full data-[state=hidden]:opacity-0',
           !showOnDesktop && 'md:hidden',
           className,

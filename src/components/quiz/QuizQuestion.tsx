@@ -127,7 +127,7 @@ export function QuizQuestionCard({
 const optionClass = (selected: boolean) =>
   cn(
     'flex min-h-[3.25rem] w-full select-none items-center gap-3 rounded-xl border-2 px-3.5 py-3 text-left text-base font-medium leading-snug text-foreground',
-    'transition-[border-color,background-color,box-shadow,transform] duration-150 ease-[cubic-bezier(.25,1,.5,1)] [-webkit-tap-highlight-color:transparent]',
+    'transition-[border-color,background-color,box-shadow,transform] duration-150 ease-out [-webkit-tap-highlight-color:transparent]',
     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 active:scale-[.99]',
     selected
       ? 'border-primary bg-brand-50 shadow-[var(--shadow-sm)]'

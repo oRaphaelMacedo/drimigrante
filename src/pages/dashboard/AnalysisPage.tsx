@@ -679,7 +679,7 @@ function AccordionItem({ section, open, onToggle }: { section: MarkdownSection; 
           <span className="[text-wrap:balance]">{section.title}</span>
           <ChevronDown
             className={cn(
-              'h-5 w-5 shrink-0 text-muted-foreground transition-transform duration-200 ease-[cubic-bezier(.25,1,.5,1)] print:hidden',
+              'h-5 w-5 shrink-0 text-muted-foreground transition-transform duration-200 ease-out print:hidden',
               open && 'rotate-180',
             )}
             aria-hidden="true"
