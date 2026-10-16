@@ -1,3 +1,8 @@
+> **Documento histórico, não normativo.** Este plano rodava os testes contra
+> produção — isso não é mais permitido. Como rodar hoje (Supabase local, CI):
+> "Testes" no [README.md](../../README.md) e [docs/testes.md](../testes.md).
+> Contexto: [docs/historico/README.md](README.md).
+
 # Plano de Testes E2E — Playwright (TypeScript)
 
 > **Como usar este documento:** abra uma nova sessão Claude Code na raiz de `/Users/rmb/drImigrante/` e diga:

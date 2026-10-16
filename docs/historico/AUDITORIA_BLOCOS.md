@@ -1,3 +1,8 @@
+> **Documento histórico (maio de 2026), não normativo.** Os bloqueios de Stripe
+> e de chaves descritos aqui já foram resolvidos ou substituídos. Estado atual:
+> [README.md](../../README.md) e [docs/arquitetura.md](../arquitetura.md).
+> Contexto: [docs/historico/README.md](README.md).
+
 # Auditoria por Blocos — Doutor Imigrante
 
 > Plano arquitetural para revisão sistemática do código em busca de erros e melhorias.

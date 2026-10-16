@@ -1,3 +1,9 @@
+> **Documento histórico (14/05/2026), não normativo.** As decisões pendentes
+> daqui foram tomadas depois — por exemplo, o €30 dá acesso por 30 dias (não
+> vitalício) e o €4,90/mês só aparece no painel. O modelo vigente está em
+> [docs/modelo-comercial.md](../modelo-comercial.md). Contexto:
+> [docs/historico/README.md](README.md).
+
 # Backlog — Doutor Imigrante
 
 > Tarefas a executar **após** terminarmos os testes de live mode.
