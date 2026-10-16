@@ -18,10 +18,15 @@
 //  3. no endpoint do Stripe, assinar também: checkout.session.async_payment_succeeded,
 //     checkout.session.async_payment_failed, charge.refunded,
 //     charge.dispute.created e customer.subscription.updated.
+//
+// E-mails: payment_confirmed sai sempre (como antes). subscription_cancelled (DI-077, em
+// customer.subscription.deleted) só sai com LIFECYCLE_EMAILS_DRY_RUN=false, depois da
+// migration 20261030000000_lifecycle_emails.sql (modelo revisado e índice de dedupe_key).
 
 import { createClient } from 'npm:@supabase/supabase-js@2.105.4'
 import Stripe from 'npm:stripe@14.14.0'
 import { withoutCors } from '../_shared/cors.ts'
+import { parseDryRun } from '../_shared/email-lifecycle.ts'
 import { createObservability } from '../_shared/observability.ts'
 import { getAppUrl } from '../_shared/origin.ts'
 import { createStripeWebhookHandler, type StripeWebhookClient } from './handler.ts'
@@ -45,6 +50,7 @@ const handler =
       webhookSecret,
       appUrl: getAppUrl(),
       internalSecret: Deno.env.get('INTERNAL_SECRET') ?? '',
+      emailDryRun: parseDryRun(Deno.env.get('LIFECYCLE_EMAILS_DRY_RUN')),
     })
     : null
 

@@ -9,6 +9,18 @@
 // visíveis, limiares 60/35, bônus do caso E), sobre as perguntas ativas do banco. Toda
 // leitura acontece antes de qualquer escrita: se uma query falhar, a resposta é 500 e
 // nada é gravado (antes, o erro PGRST201 virava score 0/'baixa' para todo mundo).
+//
+// DI-077: o welcome_free sai DAQUI (antes saía do generate-explanation, depois da
+// OpenAI — se a IA falhasse, ninguém recebia). Regras:
+//   · com a categoria já calculada aqui (rótulo de src/lib/category.ts) e o link de
+//     retomada /results?r=<token> (DI-024), mais o link de descadastro (HMAC);
+//   · no máximo um por assessment (email_send_log) e um por destinatário em 24 h;
+//   · só para o dono (session_id/JWT) — chamadas da service role (scripts) não enviam;
+//   · respeita o descadastro geral ('all'); não depende do opt-in de marketing (é o
+//     resultado que a pessoa pediu);
+//   · DRY-RUN por padrão (LIFECYCLE_EMAILS_DRY_RUN): só loga 'welcome_email_dry_run';
+//   · roda depois da resposta (defer → EdgeRuntime.waitUntil) e nunca muda o resultado:
+//     qualquer erro vira log e o score continua 200.
 
 import {
   canAccessAssessment,
@@ -16,7 +28,20 @@ import {
   isUuid,
   resolveCaller,
 } from '../_shared/assessment-access.ts'
+import {
+  buildResultUrl,
+  buildUnsubscribeUrl,
+  categoryLabel,
+  createUnsubscribeToken,
+  DAY_MS,
+  emailHash,
+  greetingFor,
+  isSuppressedFor,
+  isUsableSecret,
+  isWaitlistAnswers,
+} from '../_shared/email-lifecycle.ts'
 import { corsHeaders, errorCode, jsonResponse, type Logger, readJsonBody } from '../_shared/http.ts'
+import { normalizeEmail } from '../_shared/payments.ts'
 import { type DbScoringQuestionRow, scoreAssessment } from '../_shared/quiz-engine.ts'
 import { evaluateRule } from './scoring.ts'
 
@@ -25,6 +50,8 @@ export interface EligibilityAssessment {
   user_id: string | null
   session_id: string | null
   answers: unknown
+  email?: string | null
+  full_name?: string | null
 }
 
 export interface SafeResult {
@@ -67,6 +94,25 @@ export interface EligibilityRepo {
     computed_at: string
   }): Promise<SafeResult>
   markCompleted(assessmentId: string, completedAtIso: string): Promise<void>
+  /** assessments.resume_token (migration 20261025000200). Lança se a coluna não existir. */
+  getResumeToken(assessmentId: string): Promise<string | null>
+  /** Já existe welcome_free (enviado ou com falha) para este assessment. */
+  hasWelcomeEmail(assessmentId: string): Promise<boolean>
+  /** Já saiu welcome_free para este e-mail desde `sinceIso`. */
+  hasRecentWelcomeTo(email: string, sinceIso: string): Promise<boolean>
+  /** Escopos de descadastro do hash do e-mail (tabela email_suppressions). */
+  getSuppressionScopes(emailHash: string): Promise<Set<string>>
+}
+
+export interface WelcomeEmailConfig {
+  /** LIFECYCLE_EMAILS_DRY_RUN (parseDryRun): true salvo "false" explícito. */
+  dryRun: boolean
+  appUrl: string
+  unsubscribeSecret?: string
+  /** URL pública da function unsubscribe. */
+  unsubscribeUrl: string
+  /** send-email com o INTERNAL_SECRET (devolve o { error } do invoke). */
+  send(body: Record<string, unknown>): Promise<{ error: unknown | null }>
 }
 
 export interface ComputeEligibilityDeps {
@@ -74,6 +120,103 @@ export interface ComputeEligibilityDeps {
   log: Logger
   now(): number
   env: { serviceRoleKey?: string }
+  /** Sem esta configuração, nenhum e-mail é considerado. */
+  welcome?: WelcomeEmailConfig
+  /** Mantém a tarefa viva depois da resposta (EdgeRuntime.waitUntil). Sem ela, espera. */
+  defer?(task: Promise<unknown>): void
+}
+
+/** Um welcome_free por destinatário neste intervalo (ex.: o mesmo resultado aberto em outro aparelho e comprado lá). */
+export const WELCOME_RECIPIENT_WINDOW_MS = DAY_MS
+
+/** welcome_free do quiz recém-calculado. Nunca lança: tudo vira log. */
+async function sendWelcomeEmail(
+  deps: ComputeEligibilityDeps,
+  assessment: EligibilityAssessment,
+  category: string,
+  nowMs: number,
+): Promise<void> {
+  const cfg = deps.welcome
+  if (!cfg) return
+  const { repo, log } = deps
+  const assessmentId = assessment.id
+  const skip = (reason: string) => log('info', 'welcome_email_skipped', { assessment_id: assessmentId, reason })
+
+  const email = normalizeEmail(assessment.email)
+  if (!email) return skip('no_email')
+  if (isWaitlistAnswers(assessment.answers)) return skip('waitlist')
+
+  try {
+    if (await repo.hasWelcomeEmail(assessmentId)) return skip('already_logged')
+    if (await repo.hasRecentWelcomeTo(email, new Date(nowMs - WELCOME_RECIPIENT_WINDOW_MS).toISOString())) {
+      return skip('recent_for_recipient')
+    }
+
+    const secret = cfg.unsubscribeSecret
+    const secretOk = isUsableSecret(secret)
+    if (!secretOk && !cfg.dryRun) {
+      // Sem segredo não há como conferir o descadastro nem montar o link: não envia.
+      log('error', 'config_missing', { key: 'EMAIL_UNSUBSCRIBE_SECRET' })
+      return
+    }
+    let unsubscribeLink = ''
+    if (secretOk) {
+      const hash = await emailHash(secret, email)
+      if (hash && isSuppressedFor('service', await repo.getSuppressionScopes(hash))) return skip('suppressed')
+      const token = await createUnsubscribeToken(secret, email, 'all')
+      if (token) unsubscribeLink = buildUnsubscribeUrl(cfg.unsubscribeUrl, token)
+    }
+
+    let resumeToken: string | null = null
+    try {
+      resumeToken = await repo.getResumeToken(assessmentId)
+    } catch (err) {
+      log('warn', 'welcome_resume_token_unavailable', { assessment_id: assessmentId, code: errorCode(err) })
+    }
+    // Sem o link de retomada o e-mail prometeria algo que não abre em outro aparelho.
+    if (!resumeToken) return skip('no_resume_token')
+
+    if (cfg.dryRun) {
+      log('info', 'welcome_email_dry_run', {
+        assessment_id: assessmentId,
+        category,
+        suppression_checked: secretOk,
+      })
+      return
+    }
+
+    const label = categoryLabel(category)
+    const resultLink = buildResultUrl(cfg.appUrl, resumeToken)
+    const { error } = await cfg.send({
+      trigger_key: 'welcome_free',
+      recipient_email: email,
+      ...(assessment.user_id ? { user_id: assessment.user_id } : {}),
+      variables: {
+        greeting: greetingFor(assessment.full_name),
+        category_label: label,
+        result_link: resultLink,
+        unsubscribe_link: unsubscribeLink,
+        assessment_id: assessmentId,
+        dedupe_key: `welcome_free:${assessmentId}`,
+        // Compatíveis com o modelo antigo, caso a migration 20261030000000 ainda não
+        // tenha sido aplicada quando o envio for ligado.
+        name: assessment.full_name?.trim() || 'Cliente',
+        score_category: label,
+        cta_link: resultLink,
+      },
+    })
+    if (error) {
+      log('error', 'welcome_email_failed', {
+        trigger_key: 'welcome_free',
+        assessment_id: assessmentId,
+        code: errorCode(error),
+      })
+    } else {
+      log('info', 'welcome_email_sent', { trigger_key: 'welcome_free', assessment_id: assessmentId })
+    }
+  } catch (err) {
+    log('error', 'welcome_email_failed', { trigger_key: 'welcome_free', assessment_id: assessmentId, code: errorCode(err) })
+  }
 }
 
 export function createComputeEligibilityHandler(deps: ComputeEligibilityDeps) {
@@ -149,6 +292,13 @@ export function createComputeEligibilityHandler(deps: ComputeEligibilityDeps) {
         computed_at: nowIso,
       })
       await repo.markCompleted(assessmentId, nowIso)
+
+      // DI-077: welcome_free sem depender da OpenAI, depois da resposta.
+      if (deps.welcome && !caller.isServiceRole) {
+        const task = sendWelcomeEmail(deps, assessment, score.category, deps.now())
+        if (deps.defer) deps.defer(task)
+        else await task
+      }
 
       return jsonResponse(200, { result })
     } catch (err) {

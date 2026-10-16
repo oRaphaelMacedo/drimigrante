@@ -1,5 +1,7 @@
 // compute-eligibility/repo.ts — acesso ao banco (service role) usado pelo handler.
 // Toda query checa `error` e lança: o handler responde 500 sem gravar nada (DI-006).
+// As leituras do welcome_free (DI-077) rodam depois da resposta e o handler trata os
+// erros delas (ex.: migration 20261030000000 ainda não aplicada) sem afetar o score.
 
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2.105.4'
 import { type DbScoringQuestionRow, QUIZ_SCORING_SELECT } from '../_shared/quiz-engine.ts'
@@ -19,7 +21,7 @@ export function createEligibilityRepo(db: SupabaseClient): EligibilityRepo {
     async getAssessment(assessmentId) {
       const { data, error } = await db
         .from('assessments')
-        .select('id, user_id, session_id, answers')
+        .select('id, user_id, session_id, answers, email, full_name')
         .eq('id', assessmentId)
         .maybeSingle()
       if (error) throw error
@@ -92,6 +94,49 @@ export function createEligibilityRepo(db: SupabaseClient): EligibilityRepo {
         .update({ status: 'completed', completed_at: completedAtIso })
         .eq('id', assessmentId)
       if (error) throw error
+    },
+
+    async getResumeToken(assessmentId) {
+      // Consulta separada: sem a migration 20261025000200 a coluna não existe e só o
+      // welcome_free é afetado (o select do score continua igual).
+      const { data, error } = await db
+        .from('assessments')
+        .select('resume_token')
+        .eq('id', assessmentId)
+        .maybeSingle()
+      if (error) throw error
+      const token = (data as { resume_token?: unknown } | null)?.resume_token
+      return typeof token === 'string' && /^[0-9a-f]{64}$/.test(token) ? token : null
+    },
+
+    async hasWelcomeEmail(assessmentId) {
+      // Qualquer linha conta (enviada ou com falha): no máximo uma tentativa por assessment.
+      const { data, error } = await db
+        .from('email_send_log')
+        .select('id, email_templates!inner(trigger_key)')
+        .eq('email_templates.trigger_key', 'welcome_free')
+        .eq('variables_used->>assessment_id', assessmentId)
+        .limit(1)
+      if (error) throw error
+      return (data?.length ?? 0) > 0
+    },
+
+    async hasRecentWelcomeTo(email, sinceIso) {
+      const { data, error } = await db
+        .from('email_send_log')
+        .select('id, email_templates!inner(trigger_key)')
+        .eq('email_templates.trigger_key', 'welcome_free')
+        .eq('recipient_email', email)
+        .gte('created_at', sinceIso)
+        .limit(1)
+      if (error) throw error
+      return (data?.length ?? 0) > 0
+    },
+
+    async getSuppressionScopes(emailHash) {
+      const { data, error } = await db.from('email_suppressions').select('scope').eq('email_hash', emailHash)
+      if (error) throw error
+      return new Set(((data ?? []) as Array<{ scope: string }>).map((r) => r.scope))
     },
   }
 }

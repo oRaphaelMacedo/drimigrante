@@ -23,6 +23,10 @@
 //  - Reembolso total e disputa revogam o acesso do €30; disputa em cobrança
 //    da assinatura cancela a assinatura no Stripe e revoga o acesso recorrente.
 //  - Falha de pagamento da assinatura só revoga na última tentativa.
+//  - DI-077: customer.subscription.deleted manda o subscription_cancelled (no máximo
+//    um por assinatura, pela dedupe_key em email_send_log). Só com o envio ligado
+//    (emailDryRun false, de LIFECYCLE_EMAILS_DRY_RUN); falha no e-mail NÃO faz o
+//    Stripe reenviar o evento — o acesso já foi atualizado e o e-mail é só aviso.
 
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2.105.4'
 import { findOrCreateBuyer } from '../_shared/buyer.ts'
@@ -118,6 +122,11 @@ export interface WebhookDeps {
   appUrl: string
   /** INTERNAL_SECRET exigido pela function send-email. */
   internalSecret: string
+  /**
+   * Dry-run dos e-mails do ciclo de vida (DI-077), hoje só o subscription_cancelled.
+   * Padrão true: só envia com false explícito. Não afeta o payment_confirmed.
+   */
+  emailDryRun?: boolean
   now?: () => Date
 }
 
@@ -169,8 +178,9 @@ function numberOrNull(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
-function formatEur(cents: number | null | undefined): string {
-  return `€${((cents ?? 0) / 100).toFixed(2)}`
+/** Valor para o e-mail em pt-BR: 3000 → "€30,00". */
+export function formatEur(cents: number | null | undefined): string {
+  return `€${((cents ?? 0) / 100).toFixed(2).replace('.', ',')}`
 }
 
 export interface MinimalEventPayload {
@@ -624,6 +634,40 @@ async function handleSubscriptionUpdated(
   return { userId: row.user_id }
 }
 
+/**
+ * subscription_cancelled (DI-077): aviso transacional, no máximo um por assinatura.
+ * Nunca lança — o evento já foi aplicado e um reenvio do Stripe não deve depender do
+ * e-mail (o reenvio também não duplicaria: a dedupe_key fica em email_send_log).
+ */
+async function notifySubscriptionCancelled(ctx: Ctx, userId: string, subscriptionId: string): Promise<void> {
+  const dedupeKey = `subscription_cancelled:${subscriptionId}`
+  if (ctx.emailDryRun !== false) {
+    console.log(`stripe-webhook: subscription_cancelled em dry-run (${subscriptionId}) — e-mail não enviado`)
+    return
+  }
+  try {
+    const { data, error } = await ctx.supabase
+      .from('email_send_log')
+      .select('id')
+      .eq('variables_used->>dedupe_key', dedupeKey)
+    if (error) throw new Error(`email_send_log read failed: ${error.message}`)
+    if (Array.isArray(data) && data.length > 0) {
+      console.log(`stripe-webhook: subscription_cancelled já registrado (${subscriptionId})`)
+      return
+    }
+    await sendEmail(ctx, {
+      trigger_key: 'subscription_cancelled',
+      user_id: userId,
+      variables: {
+        dashboard_link: `${ctx.appUrl}/dashboard`,
+        dedupe_key: dedupeKey,
+      },
+    })
+  } catch (err) {
+    console.error(`stripe-webhook: e-mail subscription_cancelled falhou (${subscriptionId}): ${errorMessage(err)}`)
+  }
+}
+
 async function handleSubscriptionDeleted(
   ctx: Ctx,
   subscription: SubscriptionObject,
@@ -637,6 +681,7 @@ async function handleSubscriptionDeleted(
       unixToIso(subscription.ended_at ?? subscription.canceled_at) ?? now.toISOString(),
     recurring_cancel_at: unixToIso(subscription.cancel_at),
   })
+  await notifySubscriptionCancelled(ctx, row.user_id, subscription.id)
   return { userId: row.user_id }
 }
 

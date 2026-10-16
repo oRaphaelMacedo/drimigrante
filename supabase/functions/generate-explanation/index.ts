@@ -3,7 +3,9 @@
 //
 // Corpo: { assessment_id: uuid, session_id?: string, mode?: 'short' | 'full' }  (padrão: 'short')
 //
-// mode 'short' — fim do quiz (useQuiz). Gera SÓ o resumo grátis (+ welcome_free, no máximo um).
+// mode 'short' — fim do quiz (useQuiz). Gera SÓ o resumo grátis. Não envia e-mail: o
+//   welcome_free sai do compute-eligibility, sem depender da OpenAI (DI-077) — publicar
+//   as duas functions no MESMO deploy para não haver dois remetentes.
 //   Posse: JWT do dono OU session_id do assessment ainda anônimo → senão 404.
 //   200 { status: 'ready', short, cached? }
 // mode 'full' — AnalysisPage, sob demanda, depois do pagamento (DI-018).
@@ -21,7 +23,7 @@
 //
 // CORS: allowlist de _shared/cors.ts (chamada pelo navegador: fim do quiz e AnalysisPage).
 // Observabilidade: _shared/observability.ts (logs JSON e Sentry com SENTRY_DSN_BACKEND).
-// Env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, OPENAI_API_KEY, INTERNAL_SECRET, APP_URL,
+// Env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, OPENAI_API_KEY,
 //      AI_HOURLY_CAP (opcional; padrão 60 gerações/hora em toda a plataforma);
 //      opcionais CORS_ALLOWED_ORIGINS, SENTRY_DSN_BACKEND, SENTRY_ENVIRONMENT, SENTRY_RELEASE.
 
@@ -36,25 +38,16 @@ const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
 const supabase = createClient(Deno.env.get('SUPABASE_URL') ?? '', serviceRoleKey, {
   auth: { persistSession: false, autoRefreshToken: false },
 })
-const internalSecret = Deno.env.get('INTERNAL_SECRET') ?? ''
 
 const handler = createGenerateExplanationHandler({
   repo: createExplanationRepo(supabase),
   fetch: (input, init) => fetch(input, init),
-  async sendWelcomeEmail(body) {
-    const { error } = await supabase.functions.invoke('send-email', {
-      body,
-      headers: { 'x-internal-secret': internalSecret },
-    })
-    return { error: error ?? null }
-  },
   log: obs.log,
   now: () => Date.now(),
   env: {
     openaiKey: Deno.env.get('OPENAI_API_KEY') ?? undefined,
     serviceRoleKey,
     hourlyCap: parseHourlyCap(Deno.env.get('AI_HOURLY_CAP')),
-    appUrl: Deno.env.get('APP_URL') ?? 'https://www.drimigrante.com',
   },
 })
 
