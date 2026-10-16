@@ -15,6 +15,40 @@ import { useQuizState, type QuizFlowState } from './useQuizState'
 import { useQuizQuestions } from './useQuizQuestions'
 import { supabase } from '@/lib/supabase'
 
+// Atribuição (UTMs) — contrato com o W1-07: src/lib/attribution.ts exporta
+// getAttribution(): { utm_source?, utm_medium?, utm_campaign? } (first-touch).
+// O glob abaixo usa o módulo quando ele existe e cai para a URL atual quando não.
+// TODO(W1-07): depois do merge, trocar por `import { getAttribution } from '@/lib/attribution'`.
+interface Attribution {
+  utm_source?: string | null
+  utm_medium?: string | null
+  utm_campaign?: string | null
+}
+const attributionModules = import.meta.glob<{ getAttribution?: () => Attribution }>(
+  '../lib/attribution.ts',
+  { eager: true },
+)
+
+function readAttribution(): Attribution {
+  const params = new URLSearchParams(window.location.search)
+  const fromUrl: Attribution = {
+    utm_source: params.get('utm_source'),
+    utm_medium: params.get('utm_medium'),
+    utm_campaign: params.get('utm_campaign'),
+  }
+  let stored: Attribution = {}
+  try {
+    stored = Object.values(attributionModules)[0]?.getAttribution?.() ?? {}
+  } catch {
+    stored = {}
+  }
+  return {
+    utm_source: stored.utm_source || fromUrl.utm_source || null,
+    utm_medium: stored.utm_medium || fromUrl.utm_medium || null,
+    utm_campaign: stored.utm_campaign || fromUrl.utm_campaign || null,
+  }
+}
+
 export type QuizState = QuizFlowState
 export type { QuizSession }
 
@@ -107,7 +141,7 @@ export function useQuiz() {
         // Persist to Supabase (fails gracefully)
         let assessmentId: string | null = null
         try {
-          const urlParams = new URLSearchParams(window.location.search)
+          const attribution = readAttribution()
           const { assessment } = await persistAssessment({
             sessionId: session.sessionId,
             answers: session.answers,
@@ -116,9 +150,9 @@ export function useQuiz() {
             phone: leadInfo.phone,
             questionsAnswered: Object.keys(session.answers).length,
             totalQuestions: visibleQuestions.length,
-            utmSource: urlParams.get('utm_source'),
-            utmMedium: urlParams.get('utm_medium'),
-            utmCampaign: urlParams.get('utm_campaign'),
+            utmSource: attribution.utm_source,
+            utmMedium: attribution.utm_medium,
+            utmCampaign: attribution.utm_campaign,
           })
           if (assessment) {
             assessmentId = assessment.id
@@ -152,14 +186,15 @@ export function useQuiz() {
         if (assessmentId) {
           try {
             // 1. Compute eligibility score and visa suggestions (server-side, writes to assessment_results)
+            // session_id prova a posse do assessment anônimo (DI-004).
             const { error: eligErr } = await supabase.functions.invoke('compute-eligibility', {
-              body: { assessment_id: assessmentId },
+              body: { assessment_id: assessmentId, session_id: session.sessionId },
             })
             if (eligErr) console.warn('[useQuiz] compute-eligibility failed:', eligErr)
 
             // 2. Generate AI explanation (requires assessment_results row from step 1)
             const { error: explErr } = await supabase.functions.invoke('generate-explanation', {
-              body: { assessment_id: assessmentId },
+              body: { assessment_id: assessmentId, session_id: session.sessionId },
             })
             if (explErr) console.warn('[useQuiz] generate-explanation failed:', explErr)
           } catch (fnErr) {
