@@ -24,6 +24,7 @@ import { useKeyboardActivation } from '@/components/quiz/keyboard-activation'
 import { Badge, Button, Container, Input } from '@/components/ui'
 import { usePublishStickyBarHeight } from '@/components/ui/sticky-bar'
 import { Sentry } from '@/lib/sentry'
+import { track } from '@/lib/analytics'
 import { cn } from '@/lib/utils'
 
 /** Espera entre o toque numa opção de escolha única e o avanço (critério: ≤400ms). */
@@ -520,7 +521,10 @@ export function QuizPage() {
                 <Button
                   variant="outline"
                   data-testid="quiz-crosssell-nationality"
-                  onClick={switchToNationality}
+                  onClick={() => {
+                    track('waitlist_nationality_clicked', { placement: 'quiz_waitlist' })
+                    switchToNationality()
+                  }}
                   className="mt-4 w-full sm:w-auto"
                 >
                   Verificar se tenho direito à nacionalidade
