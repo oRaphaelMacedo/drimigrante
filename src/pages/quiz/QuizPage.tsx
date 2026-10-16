@@ -4,18 +4,22 @@
 // ícone e "Próximo" largo; ao trocar de pergunta, a tela volta ao topo e o foco
 // vai para o título; nas perguntas de escolha única, tocar numa opção avança
 // sozinho (só toque/clique/Enter/Espaço — nunca as setas do teclado).
+//
+// Tela "em breve" (DI-037): a lista de espera grava pela RPC anônima (o insert
+// direto era barrado pela RLS e o e-mail se perdia) e só confirma depois que o
+// servidor respondeu; há um atalho para o diagnóstico de nacionalidade.
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { z } from 'zod'
 import { AlertTriangle, ArrowLeft, ArrowRight, CheckCircle2, Loader2, Mail, RotateCcw } from 'lucide-react'
 import { useQuiz, type QuizNextAction } from '@/hooks/useQuiz'
 import { useQuizQuestions } from '@/hooks/useQuizQuestions'
 import { QuizIntro } from '@/components/quiz/QuizIntro'
 import { QuizProgress } from '@/components/quiz/QuizProgress'
 import { QuizQuestionCard, type QuizAnswerMeta } from '@/components/quiz/QuizQuestion'
-import { QuizCaptureForm } from '@/components/quiz/QuizCaptureForm'
+import { CAPTURE_TITLE_ID, QuizCaptureForm } from '@/components/quiz/QuizCaptureForm'
+import { useKeyboardActivation } from '@/components/quiz/keyboard-activation'
 import { Badge, Button, Container, Input } from '@/components/ui'
-import { supabase } from '@/lib/supabase'
 import { Sentry } from '@/lib/sentry'
-import { track } from '@/lib/analytics'
 import { cn } from '@/lib/utils'
 
 /** Espera entre o toque numa opção de escolha única e o avanço (critério: ≤400ms). */
@@ -28,6 +32,8 @@ const AUTO_ADVANCE_MS = 250
  */
 const GHOST_TAP_MS = 500
 const REQUIRED_HINT_ID = 'quiz-required-hint'
+const NOTIFY_ERROR_ID = 'quiz-notify-error'
+const EMAIL_SCHEMA = z.string().email()
 
 // Sem prometer advogado nem serviço que não existe (DI-065).
 const COMING_SOON_LABELS: Record<string, { title: string; description: string }> = {
@@ -44,9 +50,11 @@ const COMING_SOON_LABELS: Record<string, { title: string; description: string }>
   nao_sei: {
     title: 'Orientação guiada em breve',
     description:
-      'Estamos preparando um caminho guiado para quem ainda não sabe por onde começar. Se o seu objetivo for a nacionalidade portuguesa, você já pode fazer o diagnóstico: volte e escolha essa opção.',
+      'Estamos preparando um caminho guiado para quem ainda não sabe por onde começar. Deixe seu e-mail para saber quando ele estiver disponível.',
   },
 }
+
+type NotifyStatus = 'idle' | 'sending' | 'done' | 'failed'
 
 const NEXT_LABELS: Record<QuizNextAction, string> = {
   next: 'Próximo',
@@ -157,29 +165,44 @@ export function QuizPage() {
     prevQuestion,
     leadsToAnotherStep,
     submitQuiz,
+    backFromCapture,
     backFromComingSoon,
+    switchToNationality,
+    joinWaitlist,
   } = useQuiz()
 
   // Mesma query do useQuiz (cache compartilhado): usada só para recarregar.
   const { refetch: refetchQuestions, isFetching: isFetchingQuestions } = useQuizQuestions()
 
-  // Coming soon — email capture state
+  // "Em breve": lista de espera
   const [notifyEmail, setNotifyEmail] = useState('')
-  const [notifyLoading, setNotifyLoading] = useState(false)
-  const [notifyDone, setNotifyDone] = useState(false)
-  const [notifyFailed, setNotifyFailed] = useState(false)
+  const [notifyStatus, setNotifyStatus] = useState<NotifyStatus>('idle')
+  const [notifyFieldError, setNotifyFieldError] = useState<string | null>(null)
+  const notifyInputRef = useRef<HTMLInputElement>(null)
+  const notifyDoneRef = useRef<HTMLDivElement>(null)
 
   // "Responda para continuar": só depois de tocar no "Próximo" sem resposta.
   const [requiredHint, setRequiredHint] = useState(false)
 
   const textFieldFocused = useTextFieldFocused()
+  const nextActivation = useKeyboardActivation()
   const [navRef, navHeight] = useElementHeight<HTMLElement>()
   const headingRef = useRef<HTMLHeadingElement>(null)
-  const sectionRef = useRef<HTMLDivElement>(null)
+  const sectionRef = useRef<HTMLElement>(null)
 
-  const comingSoonContent =
-    COMING_SOON_LABELS[session.answers['processo_tipo'] ?? ''] ??
-    COMING_SOON_LABELS['nao_sei']
+  const processoTipo = session.answers['processo_tipo'] ?? ''
+  const comingSoonContent = COMING_SOON_LABELS[processoTipo] ?? COMING_SOON_LABELS['nao_sei']
+
+  // Outro objetivo = outra lista: a confirmação anterior não vale mais.
+  useEffect(() => {
+    setNotifyStatus('idle')
+    setNotifyFieldError(null)
+  }, [processoTipo])
+
+  // O formulário some ao confirmar: o foco vai para a confirmação (e é lida).
+  useEffect(() => {
+    if (notifyStatus === 'done') notifyDoneRef.current?.focus()
+  }, [notifyStatus])
 
   // Guarda (DI-066): estado de pergunta sem pergunta para mostrar nunca fica em branco.
   const isQuestionMissing = quizState === 'question' && !currentQuestion
@@ -226,9 +249,10 @@ export function QuizPage() {
   }, [])
 
   const handleAnswer = useCallback(
-    (value: string, { commit }: QuizAnswerMeta) => {
+    (value: string, { commit, keyboard }: QuizAnswerMeta) => {
       if (!currentQuestion) return
-      if (consumeGhostTap() && commit) return
+      // Toque fantasma é coisa de dedo: Enter/Espaço nunca é descartado.
+      if (consumeGhostTap() && commit && !keyboard) return
       const key = currentQuestion.key
       answerQuestion(key, value)
       setRequiredHint(false)
@@ -245,9 +269,9 @@ export function QuizPage() {
     [currentQuestion, consumeGhostTap, answerQuestion, leadsToAnotherStep],
   )
 
-  const handleNext = () => {
+  const handleNext = ({ keyboard = false }: { keyboard?: boolean } = {}) => {
     window.clearTimeout(autoAdvanceTimer.current)
-    if (consumeGhostTap()) return
+    if (consumeGhostTap() && !keyboard) return
     if (!nextQuestion()) setRequiredHint(true)
   }
 
@@ -266,28 +290,20 @@ export function QuizPage() {
 
   const handleNotifySubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!notifyEmail.trim() || notifyLoading) return
-    setNotifyLoading(true)
-    setNotifyFailed(false)
-    try {
-      // Save as incomplete assessment so admin can see waitlist leads
-      const { error } = await supabase.from('assessments').insert({
-        email: notifyEmail.trim(),
-        status: 'incomplete',
-        answers: { processo_tipo: session.answers['processo_tipo'] ?? 'nao_sei', waitlist: true },
-        questions_answered: 1,
-        total_questions: 1,
-        completion_percentage: 0,
-      })
-      if (error) throw error
-      setNotifyDone(true)
-      track('waitlist_joined', { processo_tipo: session.answers['processo_tipo'] ?? 'nao_sei' })
-    } catch {
-      // Não confirmar um cadastro que não foi salvo.
-      setNotifyFailed(true)
-    } finally {
-      setNotifyLoading(false)
+    if (notifyStatus === 'sending') return
+    const email = notifyEmail.trim()
+    if (!EMAIL_SCHEMA.safeParse(email).success) {
+      setNotifyFieldError(
+        email ? 'Confira o e-mail: ele parece incompleto (ex.: nome@email.com).' : 'Informe o seu e-mail.',
+      )
+      notifyInputRef.current?.focus()
+      return
     }
+    setNotifyFieldError(null)
+    setNotifyStatus('sending')
+    // Só confirma depois que o servidor gravou (nada de "Pronto!" sem salvar).
+    const saved = await joinWaitlist(email)
+    setNotifyStatus(saved ? 'done' : 'failed')
   }
 
   const progressLabel =
@@ -330,7 +346,7 @@ export function QuizPage() {
                   question={currentQuestion}
                   answer={currentAnswer}
                   onChange={handleAnswer}
-                  onSubmit={handleNext}
+                  onSubmit={() => handleNext({ keyboard: true })}
                   animationDirection={animationDirection}
                   headingRef={headingRef}
                   errorId={showRequiredHint ? REQUIRED_HINT_ID : undefined}
@@ -379,7 +395,9 @@ export function QuizPage() {
                     <Button
                       id="quiz-next-btn"
                       data-testid="quiz-next"
-                      onClick={handleNext}
+                      onPointerDown={nextActivation.onPointerDown}
+                      onKeyDown={nextActivation.onKeyDown}
+                      onClick={() => handleNext({ keyboard: nextActivation.consumeKeyboard() })}
                       className="flex-1 sm:min-w-[12rem] sm:flex-none"
                     >
                       {NEXT_LABELS[nextAction]}
@@ -432,68 +450,113 @@ export function QuizPage() {
 
           {/* ── EM BREVE ── */}
           {quizState === 'comingsoon' && (
-            <div
+            <section
               ref={sectionRef}
               tabIndex={-1}
               aria-labelledby="quiz-comingsoon-title"
-              className="animate-in fade-in-0 slide-in-from-bottom-4 space-y-4 duration-300 focus:outline-none"
+              className="animate-in fade-in-0 slide-in-from-bottom-4 space-y-4 duration-300 focus:outline-none motion-reduce:animate-none"
             >
-              <div className="rounded-[var(--radius)] border border-border bg-card p-5 text-center shadow-[var(--shadow-sm)] sm:p-8">
-                <div className="mb-4 inline-flex h-12 w-12 items-center justify-center rounded-xl bg-brand-50">
-                  <Mail className="h-6 w-6 text-primary" aria-hidden="true" />
+              <div className="rounded-[var(--radius)] border border-border bg-card p-5 shadow-[var(--shadow-sm)] sm:p-8">
+                <div className="text-center">
+                  <div className="mb-4 inline-flex h-12 w-12 items-center justify-center rounded-xl bg-brand-50">
+                    <Mail className="h-6 w-6 text-primary" aria-hidden="true" />
+                  </div>
+                  <h2 id="quiz-comingsoon-title" className="mb-2 text-h2 text-foreground">
+                    {comingSoonContent.title}
+                  </h2>
+                  <p className="mx-auto mb-6 max-w-sm text-base leading-relaxed text-muted-foreground">
+                    {comingSoonContent.description}
+                  </p>
                 </div>
 
-                <h2
-                  id="quiz-comingsoon-title"
-                  className="mb-2 text-2xl font-bold text-foreground [text-wrap:balance]"
-                >
-                  {comingSoonContent.title}
-                </h2>
-                <p className="mx-auto mb-6 max-w-sm text-base leading-relaxed text-muted-foreground [text-wrap:pretty]">
-                  {comingSoonContent.description}
-                </p>
-
-                {notifyDone ? (
+                {notifyStatus === 'done' ? (
                   <div
+                    ref={notifyDoneRef}
                     role="status"
-                    className="flex items-center justify-center gap-2 rounded-xl bg-[hsl(var(--success)/0.08)] px-4 py-3 text-base font-medium text-[hsl(var(--success))]"
+                    tabIndex={-1}
+                    data-testid="quiz-notify-done"
+                    className="flex items-start justify-center gap-2 rounded-xl focus:outline-none bg-[hsl(var(--success)/0.08)] px-4 py-3 text-left text-base font-medium text-[hsl(var(--success))]"
                   >
-                    <CheckCircle2 className="h-5 w-5 shrink-0" aria-hidden="true" />
-                    Pronto! Vamos avisar você quando estiver disponível.
+                    <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0" aria-hidden="true" />
+                    Pronto! Seu e-mail foi salvo. Vamos avisar você quando estiver disponível.
                   </div>
                 ) : (
-                  <form onSubmit={handleNotifySubmit} className="flex flex-col gap-2 text-left sm:flex-row">
+                  <form
+                    noValidate
+                    onSubmit={handleNotifySubmit}
+                    aria-label="Lista de espera"
+                    className="flex flex-col gap-3 sm:flex-row sm:items-start"
+                  >
                     <Input
+                      ref={notifyInputRef}
                       id="quiz-notify-email"
+                      label="Seu e-mail"
+                      hideLabel
                       type="email"
                       inputMode="email"
                       autoComplete="email"
-                      required
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      spellCheck={false}
+                      enterKeyHint="send"
                       value={notifyEmail}
-                      onChange={(e) => setNotifyEmail(e.target.value)}
-                      placeholder="Seu e-mail"
-                      aria-label="Seu e-mail"
-                      aria-invalid={notifyFailed || undefined}
-                      aria-describedby={notifyFailed ? 'quiz-notify-error' : undefined}
-                      className="min-w-0 sm:flex-1"
+                      onChange={(e) => {
+                        setNotifyEmail(e.target.value)
+                        if (notifyFieldError) setNotifyFieldError(null)
+                      }}
+                      placeholder="nome@email.com"
+                      error={notifyFieldError}
+                      aria-describedby={notifyStatus === 'failed' ? NOTIFY_ERROR_ID : undefined}
+                      containerClassName="min-w-0 sm:flex-1"
                     />
-                    <Button type="submit" loading={notifyLoading} className="shrink-0">
-                      Quero ser avisado(a)
+                    <Button
+                      type="submit"
+                      data-testid="quiz-notify-submit"
+                      loading={notifyStatus === 'sending'}
+                      className="w-full sm:w-auto sm:shrink-0"
+                    >
+                      {notifyStatus === 'failed' ? (
+                        <>
+                          <RotateCcw aria-hidden="true" />
+                          Tentar de novo
+                        </>
+                      ) : (
+                        'Quero ser avisado(a)'
+                      )}
                     </Button>
                   </form>
                 )}
-                {notifyFailed && !notifyDone && (
-                  <p id="quiz-notify-error" role="alert" className="mt-3 text-sm font-medium text-destructive">
-                    Não conseguimos salvar seu e-mail agora. Tente novamente mais tarde.
+                {notifyStatus === 'failed' && (
+                  <p id={NOTIFY_ERROR_ID} role="alert" className="mt-3 text-sm font-medium text-destructive">
+                    Não conseguimos salvar seu e-mail agora. Confira a conexão e toque em “Tentar de novo”.
                   </p>
                 )}
+              </div>
+
+              {/* Atalho: o diagnóstico que já existe (DI-037) */}
+              <div className="rounded-[var(--radius)] border border-border bg-muted p-5 sm:p-6">
+                <h3 className="text-h3 font-semibold text-foreground">
+                  O diagnóstico de nacionalidade portuguesa já está disponível
+                </h3>
+                <p className="mt-1 text-base text-muted-foreground">
+                  É gratuito e leva cerca de 5 minutos.
+                </p>
+                <Button
+                  variant="outline"
+                  data-testid="quiz-crosssell-nationality"
+                  onClick={switchToNationality}
+                  className="mt-4 w-full sm:w-auto"
+                >
+                  Verificar se tenho direito à nacionalidade
+                  <ArrowRight aria-hidden="true" />
+                </Button>
               </div>
 
               <Button variant="ghost" onClick={backFromComingSoon} className="mx-auto flex text-muted-foreground">
                 <ArrowLeft aria-hidden="true" />
                 Voltar e escolher outra opção
               </Button>
-            </div>
+            </section>
           )}
 
           {/* ── CAPTURE ── */}
@@ -503,16 +566,16 @@ export function QuizPage() {
                 id="quiz-capture-back"
                 variant="ghost"
                 size="sm"
-                onClick={prevQuestion}
+                onClick={backFromCapture}
                 className="-ml-2 text-muted-foreground"
               >
                 <ArrowLeft aria-hidden="true" />
                 Voltar às perguntas
               </Button>
-              <div
+              <section
                 ref={sectionRef}
                 tabIndex={-1}
-                aria-label="Seus dados para ver o resultado"
+                aria-labelledby={CAPTURE_TITLE_ID}
                 className="rounded-[var(--radius)] border border-border bg-card p-4 shadow-[var(--shadow-sm)] focus:outline-none sm:p-8"
               >
                 <div className="mb-6">
@@ -523,7 +586,7 @@ export function QuizPage() {
                   />
                 </div>
                 <QuizCaptureForm onSubmit={submitQuiz} isSubmitting={isSubmitting} />
-              </div>
+              </section>
             </div>
           )}
 

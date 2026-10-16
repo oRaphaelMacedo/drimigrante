@@ -32,13 +32,13 @@ const cases = [
 
 export function QuizIntro({ onStart, resume }: QuizIntroProps) {
   return (
-    <div className="animate-in fade-in-0 slide-in-from-bottom-4 space-y-8 duration-500">
+    <div className="animate-in fade-in-0 slide-in-from-bottom-4 space-y-8 duration-500 motion-reduce:animate-none">
       {/* Cabeçalho */}
       <header className="text-center">
         <Badge variant="primary" className="mb-3">
           Diagnóstico gratuito de elegibilidade
         </Badge>
-        <h1 className="mb-3 text-[1.75rem] font-bold leading-tight text-foreground [text-wrap:balance] sm:text-4xl">
+        <h1 className="mb-3 text-h1 text-foreground">
           Descubra se você tem direito à <span className="text-primary">nacionalidade portuguesa</span>
         </h1>
         <p className="mx-auto max-w-md text-base text-muted-foreground [text-wrap:pretty]">
@@ -88,7 +88,10 @@ export function QuizIntro({ onStart, resume }: QuizIntroProps) {
             onClick={onStart}
           >
             Iniciar diagnóstico gratuito
-            <ArrowRight aria-hidden="true" className="transition-transform group-hover:translate-x-1" />
+            <ArrowRight
+              aria-hidden="true"
+              className="transition-transform group-hover:translate-x-1 motion-reduce:transition-none motion-reduce:group-hover:translate-x-0"
+            />
           </Button>
           <p className="mt-3 text-sm text-muted-foreground">
             Não precisa criar conta. Se sair, você continua de onde parou neste aparelho.
@@ -113,7 +116,7 @@ export function QuizIntro({ onStart, resume }: QuizIntroProps) {
       <section aria-labelledby="quiz-intro-cases" className="rounded-[var(--radius)] bg-muted p-4 sm:p-5">
         <h2
           id="quiz-intro-cases"
-          className="mb-4 text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+          className="mb-4 font-sans text-xs font-semibold uppercase tracking-wider text-muted-foreground"
         >
           Casos cobertos pelo diagnóstico
         </h2>

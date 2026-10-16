@@ -6,6 +6,10 @@
 // - Envio (DI-042): só respostas visíveis (pruneAnswers); persistência e
 //   compute-eligibility com timeout; a análise de IA não segura a navegação.
 // - Eventos por etapa (DI-068): sempre via track()/trackOnce(), sem PII.
+// - Captura (DI-043): "Voltar às perguntas" (BACK_FROM_CAPTURE) e opt-in de
+//   marketing desmarcado em p_answers.
+// - "Em breve" (DI-037): lista de espera pela RPC anônima, com session_id próprio
+//   (`${sid}-wl`), e atalho para o diagnóstico de nacionalidade.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import {
@@ -17,7 +21,7 @@ import {
   type ScoreResult,
   type VisaSuggestion,
 } from '@/data/quiz-questions'
-import { persistAssessment, type PersistAssessmentParams } from '@/hooks/useAssessment'
+import { joinWaitlist as joinWaitlistRpc, persistAssessment, type PersistAssessmentParams } from '@/hooks/useAssessment'
 import { readStoredQuizSession, useQuizPersistence, type QuizSession } from './useQuizPersistence'
 import { useQuizState, type QuizFlowState, type ResumeStep } from './useQuizState'
 import { useQuizQuestions } from './useQuizQuestions'
@@ -46,6 +50,7 @@ import {
   formatStepParam,
   isAnswered,
   isLinkedSessionError,
+  NATIONALITY_ANSWER,
   nextStepAfter,
   parseStepParam,
   resolveResumeStep,
@@ -56,6 +61,8 @@ import {
 
 /** Tempo máximo para gravar o assessment (RPC). */
 const PERSIST_TIMEOUT_MS = 8000
+/** Tempo máximo para gravar o e-mail da lista de espera (RPC). */
+const WAITLIST_TIMEOUT_MS = 8000
 /** Tempo máximo esperando o compute-eligibility antes de abrir o resultado. */
 const ELIGIBILITY_TIMEOUT_MS = 8000
 /** Teto do processamento inteiro: com functions lentas, /results abre em até ~9s. */
@@ -119,6 +126,8 @@ export interface LeadInfo {
   fullName: string
   email: string
   phone?: string
+  /** Aceitou receber novidades por e-mail (checkbox desmarcado por padrão). */
+  marketingOptIn?: boolean
 }
 
 /**
@@ -563,6 +572,12 @@ export function useQuiz() {
       index: currentIndex,
     })
 
+    // Da captura, a última pergunta aparece na hora (BACK_FROM_CAPTURE, DI-043);
+    // a URL acompanha logo em seguida. As respostas continuam na sessão.
+    const lastIndex = quizState === 'capture' && target.kind === 'question' ? target.index : null
+    const fromCapture = lastIndex !== null
+    if (fromCapture) dispatch({ type: 'BACK_FROM_CAPTURE', lastIndex })
+
     const targetMark = formatStepParam(target) ?? INTRO_MARK
     const historyState = latestRef.current.locationState as QuizHistoryState | null
     if (historyState?.quizPrev === targetMark) {
@@ -570,12 +585,61 @@ export function useQuiz() {
       navigate(-1)
       return
     }
-    dispatch({ type: 'GO_TO_STEP', step: target })
+    if (!fromCapture) dispatch({ type: 'GO_TO_STEP', step: target })
     writeStepToUrl(target, { replace: true })
   }, [quizState, currentIndex, visibleQuestions, session.answers, navigate, dispatch, writeStepToUrl])
 
+  /** "Voltar às perguntas" na captura: última pergunta visível, sem perder respostas. */
+  const backFromCapture = prevQuestion
+
   // Voltar da tela "em breve" para a primeira pergunta
   const backFromComingSoon = prevQuestion
+
+  /**
+   * Atalho da tela "em breve" (DI-037): troca o objetivo para nacionalidade e
+   * segue para a pergunta seguinte, sem passar de novo pela primeira.
+   */
+  const switchToNationality = useCallback(() => {
+    if (quizState !== 'comingsoon') return
+    const answers = { ...session.answers, [PROCESS_KEY]: NATIONALITY_ANSWER }
+    updateAnswers(PROCESS_KEY, NATIONALITY_ANSWER)
+    const target = nextStepAfter(answers, allQuestions, PROCESS_KEY)
+    dispatch({ type: 'GO_TO_STEP', step: target })
+    // Substitui a entrada "em breve": o voltar do sistema leva à primeira pergunta.
+    writeStepToUrl(target, { replace: true })
+  }, [quizState, session.answers, allQuestions, updateAnswers, dispatch, writeStepToUrl])
+
+  /**
+   * Lista de espera "Em breve" (DI-037): grava o e-mail pela RPC anônima com
+   * session_id próprio. Devolve true só quando o servidor confirmou.
+   */
+  const joinWaitlist = useCallback(
+    async (email: string): Promise<boolean> => {
+      const processoTipo = session.answers[PROCESS_KEY] || 'nao_sei'
+      const attribution = readAttribution()
+      const attempt = joinWaitlistRpc({
+        quizSessionId: session.sessionId,
+        email,
+        processoTipo,
+        utmSource: attribution.utm_source,
+        utmMedium: attribution.utm_medium,
+        utmCampaign: attribution.utm_campaign,
+      }).catch((err: unknown) => ({ ok: false, error: err instanceof Error ? err.message : String(err) }))
+      const raced = await withTimeout(attempt, WAITLIST_TIMEOUT_MS)
+      const ok = !raced.timedOut && raced.value.ok
+      if (ok) {
+        track('waitlist_joined', { processo_tipo: processoTipo })
+      } else {
+        Sentry.captureMessage('quiz: falha ao gravar a lista de espera', {
+          level: 'warning',
+          tags: { area: 'quiz', step: 'waitlist' },
+          extra: { timedOut: raced.timedOut, error: raced.timedOut ? null : raced.value.error },
+        })
+      }
+      return ok
+    },
+    [session.answers, session.sessionId],
+  )
 
   /** Prévia: escolher `value` em `questionKey` leva a outra pergunta (ou a "em breve")? */
   const leadsToAnotherStep = useCallback(
@@ -642,6 +706,7 @@ export function useQuiz() {
           utmSource: attribution.utm_source,
           utmMedium: attribution.utm_medium,
           utmCampaign: attribution.utm_campaign,
+          marketingOptIn: leadInfo.marketingOptIn === true,
         })
 
         let outcome = await persistWithTimeout(paramsFor(submissionSessionId))
@@ -784,6 +849,9 @@ export function useQuiz() {
     leadsToAnotherStep,
     submitQuiz,
     resetQuiz,
+    backFromCapture,
     backFromComingSoon,
+    switchToNationality,
+    joinWaitlist,
   }
 }
