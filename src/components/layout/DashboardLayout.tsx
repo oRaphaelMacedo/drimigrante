@@ -1,111 +1,140 @@
-import { Outlet, Link, useLocation } from 'react-router-dom'
-import { useNavigate } from 'react-router-dom'
-import { LayoutDashboard, MessageSquare, FileText, FolderUp, Settings, LogOut, ChevronRight, ShieldCheck } from 'lucide-react'
+/**
+ * Layout da área logada (DI-045).
+ *
+ * - Desktop (≥768px): barra lateral como antes.
+ * - Celular: cabeçalho com o logo (leva ao Início) e barra de navegação
+ *   inferior com todas as seções a um toque. Sair fica em Conta, com confirmação.
+ * - O conteúdo reserva espaço para a barra inferior, a safe-area e o banner de
+ *   cookies (`--cookie-banner-h`), para o último bloco nunca ficar escondido.
+ * - ScrollRestoration: cada página nova começa no topo; o "voltar" restaura a rolagem.
+ */
+import { useEffect } from 'react'
+import { Link, Outlet, ScrollRestoration, useLocation } from 'react-router-dom'
+import { ChevronRight, Lock, ShieldCheck } from 'lucide-react'
+import { BottomNav } from '@/components/dashboard/BottomNav'
+import { SignOutButton } from '@/components/dashboard/SignOutButton'
+import { markAnalysisOpened } from '@/components/dashboard/dashboard-storage'
+import { resolveNavItems } from '@/components/dashboard/nav-items'
 import { useAuth } from '@/hooks/useAuth'
-import { cn } from '@/lib/utils'
-import { getInitials } from '@/lib/utils'
-
-const navItems = [
-  { to: '/dashboard', icon: LayoutDashboard, label: 'Início', exact: true },
-  { to: '/dashboard/analysis', icon: FileText, label: 'Minha Análise' },
-  { to: '/dashboard/chat', icon: MessageSquare, label: 'Chat IA' },
-  { to: '/dashboard/documents', icon: FolderUp, label: 'Documentos' },
-  { to: '/dashboard/settings', icon: Settings, label: 'Definições' },
-]
+import { cn, getInitials } from '@/lib/utils'
 
 export function DashboardLayout() {
-  const { authUser, isHubUser, signOut } = useAuth()
+  const { authUser, isHubUser, access, hasAccess } = useAuth()
   const location = useLocation()
-  const navigate = useNavigate()
+  const navItems = resolveNavItems(location.pathname, access, hasAccess)
+  const userId = authUser?.user.id
+  const canReadAnalysis = hasAccess('full_analysis')
 
-  const handleSignOut = async () => {
-    await signOut()
-    navigate('/')
-  }
+  // O upsell de €4,90 só ganha destaque depois que a pessoa abriu a análise (DI-047).
+  useEffect(() => {
+    if (!userId || !canReadAnalysis) return
+    if (location.pathname === '/dashboard/analysis' || location.pathname.startsWith('/dashboard/analysis/')) {
+      markAnalysisOpened(userId)
+    }
+  }, [location.pathname, userId, canReadAnalysis])
+
+  const displayName = authUser?.profile?.full_name?.trim() || 'Sua conta'
 
   return (
-    <div className="flex min-h-screen bg-gray-50">
-      {/* Sidebar */}
-      <aside className="hidden w-64 flex-shrink-0 border-r border-gray-200 bg-white md:flex md:flex-col">
-        {/* Logo */}
-        <div className="flex h-16 items-center border-b border-gray-100 px-6">
-          <Link to="/" className="text-base font-bold text-brand-700">
+    <div className="flex min-h-dvh bg-background">
+      <ScrollRestoration />
+
+      {/* Barra lateral (desktop) */}
+      <aside className="hidden w-64 flex-shrink-0 border-r bg-card md:flex md:flex-col">
+        <div className="flex h-16 items-center border-b px-6">
+          <Link
+            to="/dashboard"
+            className="inline-flex min-h-11 items-center rounded-md text-base font-bold text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
             Doutor Imigrante
           </Link>
         </div>
 
-        {/* Nav */}
-        <nav className="flex-1 space-y-1 px-3 py-4">
-          {navItems.map(({ to, icon: Icon, label, exact }) => {
-            const isActive = exact ? location.pathname === to : location.pathname.startsWith(to)
-            return (
-              <Link
-                key={to}
-                to={to}
-                className={cn(
-                  'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition',
-                  isActive
-                    ? 'bg-brand-50 text-brand-700'
-                    : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900',
-                )}
-              >
-                <Icon className="h-4 w-4" />
-                {label}
-                {isActive && <ChevronRight className="ml-auto h-3.5 w-3.5" />}
-              </Link>
-            )
-          })}
+        <nav aria-label="Navegação do painel" className="flex-1 space-y-1 px-3 py-4">
+          {navItems.map(({ to, href, icon: Icon, label, locked, active }) => (
+            <Link
+              key={to}
+              to={href}
+              aria-current={active ? 'page' : undefined}
+              className={cn(
+                'flex min-h-11 items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors',
+                active ? 'bg-primary/[.08] text-primary' : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+              )}
+            >
+              <Icon aria-hidden="true" className="h-4 w-4" />
+              {label}
+              {locked ? (
+                <>
+                  <Lock aria-hidden="true" className="ml-auto h-3.5 w-3.5" />
+                  <span className="sr-only">(bloqueado)</span>
+                </>
+              ) : (
+                active && <ChevronRight aria-hidden="true" className="ml-auto h-3.5 w-3.5" />
+              )}
+            </Link>
+          ))}
 
           {isHubUser && (
-            <div className="mt-4 border-t border-gray-100 pt-4">
-              <p className="mb-1.5 px-3 text-[10px] font-semibold uppercase tracking-wider text-gray-400">
-                Equipa
-              </p>
+            <div className="mt-4 border-t pt-4">
+              <p className="mb-1.5 px-3 text-xs font-semibold text-muted-foreground">Equipe</p>
               <Link
                 to="/admin"
-                className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-gray-600 transition hover:bg-gray-50 hover:text-gray-900"
+                className="flex min-h-11 items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
               >
-                <ShieldCheck className="h-4 w-4 text-brand-600" />
-                Painel Admin
-                <ChevronRight className="ml-auto h-3.5 w-3.5 text-gray-400" />
+                <ShieldCheck aria-hidden="true" className="h-4 w-4 text-primary" />
+                Painel admin
+                <ChevronRight aria-hidden="true" className="ml-auto h-3.5 w-3.5" />
               </Link>
             </div>
           )}
         </nav>
 
-        {/* User */}
-        <div className="border-t border-gray-100 p-3">
-          <div className="flex items-center gap-3 rounded-lg px-2 py-2">
-            <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-brand-100 text-xs font-semibold text-brand-700">
-              {getInitials(authUser?.profile?.full_name ?? 'U')}
+        <div className="border-t p-3">
+          <div className="flex items-center gap-3 rounded-xl px-2 py-1">
+            <div
+              aria-hidden="true"
+              className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-primary/[.08] text-xs font-semibold text-primary"
+            >
+              {getInitials(authUser?.profile?.full_name || authUser?.user.email || 'U')}
             </div>
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium text-gray-900">
-                {authUser?.profile?.full_name ?? 'Utilizador'}
-              </p>
-              <p className="truncate text-xs text-gray-500">{authUser?.user.email}</p>
+              <p className="truncate text-sm font-medium text-foreground">{displayName}</p>
+              <p className="truncate text-xs text-muted-foreground">{authUser?.user.email}</p>
             </div>
-            <button onClick={handleSignOut} className="text-gray-400 hover:text-gray-600" title="Sair">
-              <LogOut className="h-4 w-4" />
-            </button>
+            <SignOutButton variant="icon" />
           </div>
         </div>
       </aside>
 
-      {/* Main content */}
-      <div className="flex flex-1 flex-col">
-        {/* Mobile header */}
-        <header className="flex h-16 items-center justify-between border-b border-gray-200 bg-white px-4 md:hidden">
-          <Link to="/" className="text-base font-bold text-brand-700">Doutor Imigrante</Link>
-          <button onClick={handleSignOut} className="text-gray-500">
-            <LogOut className="h-5 w-5" />
-          </button>
+      <div className="flex min-w-0 flex-1 flex-col">
+        {/* Cabeçalho (celular) */}
+        <header className="sticky top-0 z-40 border-b bg-card/95 pt-[env(safe-area-inset-top)] backdrop-blur md:hidden">
+          <div className="flex h-16 items-center justify-between gap-3 px-4">
+            <Link
+              to="/dashboard"
+              className="-ml-1 inline-flex min-h-11 items-center rounded-md px-1 text-base font-bold text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              Doutor Imigrante
+            </Link>
+            {isHubUser && (
+              <Link
+                to="/admin"
+                className="inline-flex min-h-11 items-center gap-1.5 rounded-xl px-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              >
+                <ShieldCheck aria-hidden="true" className="h-4 w-4 text-primary" />
+                Admin
+              </Link>
+            )}
+          </div>
         </header>
 
-        <main className="flex-1 p-6">
+        {/* Espaço inferior = barra de navegação (~4rem + safe-area) + banner de cookies, se aberto. */}
+        <main className="flex-1 px-4 pt-4 pb-[calc(5rem+env(safe-area-inset-bottom)+var(--cookie-banner-h,0px))] md:p-6">
           <Outlet />
         </main>
       </div>
+
+      <BottomNav />
     </div>
   )
 }
