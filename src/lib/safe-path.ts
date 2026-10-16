@@ -11,8 +11,13 @@
  *  - precisa começar com exatamente uma barra (`/dashboard`), nunca `//` nem `/\`;
  *  - sem caracteres de controle (o navegador remove tab/quebra de linha e
  *    `/\t/evil.com` viraria `//evil.com`);
- *  - depois de normalizado pelo parser de URL, continua na mesma origem;
+ *  - depois de normalizado pelo parser de URL, continua na mesma origem e o
+ *    resultado passa de novo pelas mesmas regras: a normalização de `.`/`..`
+ *    pode recriar `//host` (`/.//evil.com`, `/a/..//evil.com`, `/%2e//evil.com`);
  *  - não pode apontar para as próprias rotas de autenticação (evita loops).
+ *
+ * A função é idempotente: `safeInternalPath(safeInternalPath(x)) === safeInternalPath(x)`
+ * e nunca devolve uma URL relativa ao protocolo.
  */
 
 /** Destino padrão depois de entrar. */
@@ -35,6 +40,17 @@ function isBlockedPath(pathname: string): boolean {
   )
 }
 
+/** Forma de um caminho interno: uma barra inicial, sem `//`, `/\`, `\` nem controle. */
+function hasSafeShape(path: string): boolean {
+  if (path.length === 0 || path.length > MAX_PATH_LENGTH) return false
+  if (path[0] !== '/') return false
+  // `//host` e `/\host` são URLs relativas ao protocolo para o navegador.
+  if (path[1] === '/' || path[1] === '\\') return false
+  if (path.includes('\\')) return false
+  if (CONTROL_CHARS.test(path)) return false
+  return true
+}
+
 /**
  * Devolve `input` normalizado se for um caminho interno seguro; caso
  * contrário, devolve `fallback`.
@@ -48,13 +64,7 @@ export function safeInternalPath(
   input: unknown,
   fallback: string = DEFAULT_AFTER_LOGIN_PATH,
 ): string {
-  if (typeof input !== 'string') return fallback
-  if (input.length === 0 || input.length > MAX_PATH_LENGTH) return fallback
-  if (input[0] !== '/') return fallback
-  // `//host` e `/\host` são URLs relativas ao protocolo para o navegador.
-  if (input[1] === '/' || input[1] === '\\') return fallback
-  if (input.includes('\\')) return fallback
-  if (CONTROL_CHARS.test(input)) return fallback
+  if (typeof input !== 'string' || !hasSafeShape(input)) return fallback
 
   let url: URL
   try {
@@ -65,7 +75,11 @@ export function safeInternalPath(
   if (url.origin !== PARSE_BASE) return fallback
   if (isBlockedPath(url.pathname)) return fallback
 
-  return `${url.pathname}${url.search}${url.hash}`
+  const normalized = `${url.pathname}${url.search}${url.hash}`
+  // A normalização de `.`/`..` pode recriar `//host` (ex.: `/.//evil.com`):
+  // o resultado precisa obedecer às mesmas regras da entrada.
+  if (!hasSafeShape(normalized)) return fallback
+  return normalized
 }
 
 /** Formato mínimo de `Location` do react-router guardado em `state.from`. */

@@ -143,6 +143,35 @@ export function getAccessState(
   }
 }
 
+/**
+ * Próximo instante em que `getAccessState` muda só com o passar do tempo
+ * (um dia a menos em `daysLeft`, entrada em 'expiring' ou fim do acesso).
+ *
+ * `null` quando o estado não muda sozinho: staff, assinatura ativa, acesso
+ * sem data de fim, já expirado ou quem nunca pagou. O AuthContext usa isto
+ * para recalcular o acesso com a aba aberta, sem depender de um refresh.
+ */
+export function nextAccessChangeAt(
+  sub: AccessSubscription | null | undefined,
+  options: AccessOptions = {},
+): Date | null {
+  const access = getAccessState(sub, options)
+  const nowMs = toMs(options.now)
+  const expiresAt = parseDate(sub?.one_time_access_expires_at)
+  if (!expiresAt || access.isStaff) return null
+  const endMs = expiresAt.getTime()
+  if (nowMs > endMs) return null
+
+  // Pagou, mas as flags estão revogadas: só muda ao passar o prazo ('expired').
+  if (access.state === 'none') return access.hasPaidOnce ? new Date(endMs + 1) : null
+  if (access.state !== 'active' && access.state !== 'expiring') return null
+
+  // daysLeft = ceil(restante / dia) cai de k + 1 para k no instante endMs − k·dia.
+  // Com 0 dias (now === expiresAt ainda tem acesso), a próxima mudança é 1 ms depois.
+  const k = Math.ceil((endMs - nowMs) / DAY_MS) - 1
+  return new Date(k >= 0 ? endMs - k * DAY_MS : endMs + 1)
+}
+
 /** Acesso vigente ao conteúdo pago (€30 no prazo ou assinatura). */
 export function hasActiveAccess(access: AccessState): boolean {
   return (

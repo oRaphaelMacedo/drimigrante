@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   linked: [] as Array<[string, string]>,
   identified: [] as string[],
   resets: 0,
+  consent: 'granted' as 'granted' | 'denied' | 'pending',
 }))
 
 vi.mock('@/lib/supabase', () => {
@@ -68,6 +69,7 @@ vi.mock('@/lib/sentry', () => ({
 }))
 
 vi.mock('@/lib/analytics', () => ({
+  getConsent: () => mocks.consent,
   identify: (userId: string) => {
     mocks.identified.push(userId)
   },
@@ -100,7 +102,9 @@ function Probe() {
         error: userDataError ? userDataError.name : null,
         hasSubscription: Boolean(authUser?.subscription),
         state: access.state,
+        daysLeft: access.daysLeft,
         dashboard: hasAccess('dashboard'),
+        documents: hasAccess('documents_read'),
       })}
     </pre>
   )
@@ -112,7 +116,9 @@ function readProbe() {
     error: string | null
     hasSubscription: boolean
     state: string
+    daysLeft: number | null
     dashboard: boolean
+    documents: boolean
   }
 }
 
@@ -146,6 +152,7 @@ beforeEach(() => {
   mocks.linked = []
   mocks.identified = []
   mocks.resets = 0
+  mocks.consent = 'granted'
   localStorage.clear()
 })
 
@@ -172,13 +179,15 @@ describe('AuthContext', () => {
       error: null,
       hasSubscription: true,
       state: 'active',
+      daysLeft: 20,
       dashboard: true,
+      documents: true,
     })
     expect(mocks.identified).toEqual([USER.id])
   })
 
   it('timeout simulado expõe userDataError (não vira "sem assinatura" silencioso)', async () => {
-    // Nenhuma consulta responde: cada tentativa estoura o timeout de 8 s.
+    // Nenhuma consulta responde: cada tentativa estoura o timeout de 5 s.
     mocks.respond = () => new Promise(() => {})
     render(
       <AuthProvider>
@@ -188,12 +197,13 @@ describe('AuthContext', () => {
     emit('INITIAL_SESSION', SESSION)
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(5_000)
+      await vi.advanceTimersByTimeAsync(4_000)
     })
     expect(readProbe().loading).toBe(true)
 
+    // Pior caso: 3 × 5 s + esperas de 1 s e 2 s = 18 s até a tela de erro.
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(40_000)
+      await vi.advanceTimersByTimeAsync(14_100)
     })
     const probe = readProbe()
     expect(probe.loading).toBe(false)
@@ -279,6 +289,75 @@ describe('AuthContext', () => {
     })
     expect(mocks.linked).toEqual([])
     expect(localStorage.getItem('dr_imigrante_quiz_result')).toBe(stored)
+  })
+
+  it('o prazo passa com a aba aberta: o estado vira expired sem refresh', async () => {
+    const expiresAt = new Date(Date.now() + 1_000).toISOString()
+    mocks.respond = (table: string) =>
+      table === 'subscriptions'
+        ? Promise.resolve({
+            data: { ...paidSubscription(), one_time_access_expires_at: expiresAt },
+            error: null,
+          })
+        : okResponder(table)
+    render(
+      <AuthProvider>
+        <Probe />
+      </AuthProvider>,
+    )
+    emit('INITIAL_SESSION', SESSION)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10)
+    })
+    expect(readProbe()).toMatchObject({ state: 'expiring', daysLeft: 1, dashboard: true })
+    const queriesBefore = mocks.queries.length
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_500)
+    })
+    expect(readProbe()).toMatchObject({
+      state: 'expired',
+      daysLeft: 0,
+      dashboard: false,
+      documents: true,
+    })
+    // Recalculado pelo relógio, sem nova consulta ao banco.
+    expect(mocks.queries.length).toBe(queriesBefore)
+  })
+
+  it('sem consentimento não identifica; identifica quando a pessoa aceita os cookies', async () => {
+    mocks.respond = okResponder
+    mocks.consent = 'pending'
+    render(
+      <AuthProvider>
+        <Probe />
+      </AuthProvider>,
+    )
+    emit('INITIAL_SESSION', SESSION)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10)
+    })
+    expect(mocks.identified).toEqual([])
+
+    // Volta para a aba ainda sem consentimento: continua sem identificar.
+    emit('SIGNED_IN', SESSION)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10)
+    })
+    expect(mocks.identified).toEqual([])
+
+    mocks.consent = 'granted'
+    act(() => {
+      window.dispatchEvent(new CustomEvent('consent-changed', { detail: 'granted' }))
+    })
+    expect(mocks.identified).toEqual([USER.id])
+
+    // Não repete a cada evento de sessão.
+    emit('SIGNED_IN', SESSION)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10)
+    })
+    expect(mocks.identified).toEqual([USER.id])
   })
 
   it('SIGNED_OUT limpa o estado e reseta o analytics', async () => {

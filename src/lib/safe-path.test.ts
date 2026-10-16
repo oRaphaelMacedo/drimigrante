@@ -27,6 +27,14 @@ describe('safeInternalPath', () => {
     ['/\t/evil.com', 'tab que o navegador remove'],
     ['/\n/evil.com', 'quebra de linha que o navegador remove'],
     ['', 'vazio'],
+    // A normalização de `.`/`..` recriaria `//evil.com` (relativa ao protocolo).
+    ['/.//evil.com', 'ponto seguido de barra dupla'],
+    ['/a/..//evil.com', 'ponto-ponto seguido de barra dupla'],
+    ['/%2e//evil.com', 'ponto codificado seguido de barra dupla'],
+    ['/%2e%2e//evil.com', 'ponto-ponto codificado seguido de barra dupla'],
+    ['/a/../..//evil.com', 'subida além da raiz seguida de barra dupla'],
+    ['/./\\evil.com', 'ponto seguido de barra invertida'],
+    ['/.//\\evil.com', 'ponto seguido de barra dupla e invertida'],
   ])('rejeita %j (%s)', (input: string) => {
     expect(safeInternalPath(input)).toBe(DEFAULT_AFTER_LOGIN_PATH)
   })
@@ -54,6 +62,28 @@ describe('safeInternalPath', () => {
     expect(safeInternalPath('//evil.com', '/results')).toBe('/results')
   })
 
+  it('nunca devolve URL relativa ao protocolo e é idempotente', () => {
+    const inputs = [
+      '/dashboard',
+      '/checkout?plan=one_time#x',
+      '/dashboard/../results',
+      '/.//evil.com',
+      '/a/..//evil.com',
+      '/%2e//evil.com',
+      '/./\\evil.com',
+      '/.%2f/evil.com',
+      '/./%5cevil.com',
+      '/%2F%2Fevil.com',
+      '//evil.com',
+    ]
+    for (const input of inputs) {
+      const once = safeInternalPath(input)
+      expect(once.startsWith('//')).toBe(false)
+      expect(once.startsWith('/\\')).toBe(false)
+      expect(safeInternalPath(once)).toBe(once)
+    }
+  })
+
   it('não decodifica de novo: %2F%2F continua sendo caminho interno', () => {
     expect(safeInternalPath('/%2F%2Fevil.com')).toBe('/%2F%2Fevil.com')
     expect(safeInternalPath('%2F%2Fevil.com')).toBe(DEFAULT_AFTER_LOGIN_PATH)
@@ -76,5 +106,6 @@ describe('safePathFromLocation', () => {
     expect(safePathFromLocation(null)).toBe(DEFAULT_AFTER_LOGIN_PATH)
     expect(safePathFromLocation({})).toBe(DEFAULT_AFTER_LOGIN_PATH)
     expect(safePathFromLocation({ pathname: '//evil.com' })).toBe(DEFAULT_AFTER_LOGIN_PATH)
+    expect(safePathFromLocation({ pathname: '/.//evil.com' })).toBe(DEFAULT_AFTER_LOGIN_PATH)
   })
 })

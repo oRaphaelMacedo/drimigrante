@@ -42,7 +42,10 @@ export interface UserDataQueries {
 export interface LoadUserDataOptions {
   /** Número total de tentativas (padrão 3). */
   attempts?: number
-  /** Tempo máximo de cada tentativa, em ms (padrão 8000). */
+  /**
+   * Tempo máximo de cada tentativa, em ms (padrão 5000). Com os padrões, o pior
+   * caso (rede travada) mostra o erro em ~18 s: 3 × 5 s + esperas de 1 s e 2 s.
+   */
   timeoutMs?: number
   /** Espera antes da 2ª tentativa; dobra a cada nova tentativa (padrão 1000). */
   baseDelayMs?: number
@@ -56,7 +59,7 @@ export interface LoadUserDataOptions {
 
 export const USER_DATA_DEFAULTS = {
   attempts: 3,
-  timeoutMs: 8000,
+  timeoutMs: 5000,
   baseDelayMs: 1000,
 } as const
 

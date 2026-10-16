@@ -16,8 +16,13 @@
  *  - `refreshUser()` recarrega os dados (ex.: depois do pagamento). Também há
  *    refresh em segundo plano quando a aba volta a ficar visível (o supabase-js
  *    emite SIGNED_IN nesse momento) e quando a conexão volta.
- *  - Regras de acesso em src/lib/access.ts (`access` e `hasAccess`).
+ *  - Regras de acesso em src/lib/access.ts (`access` e `hasAccess`). O estado
+ *    acompanha o relógio com a aba aberta: é recalculado no instante em que o
+ *    prazo muda de fase (nextAccessChangeAt) e ao voltar para a aba.
  *  - identify()/resetAnalytics() no login/logout; Sentry via '@/lib/sentry'.
+ *    Sem consentimento de cookies, identify() não envia nada: o usuário só é
+ *    marcado como identificado com consentimento, e é identificado quando a
+ *    pessoa aceita os cookies na mesma sessão (evento `consent-changed`).
  *  - Só vincula o assessment anônimo se o e-mail do quiz for o da conta.
  * DI-027: `signInWithMagicLink(email, next)` leva o destino na URL do callback.
  */
@@ -35,11 +40,12 @@ import type { Session, User } from '@supabase/supabase-js'
 import { Sentry } from '@/lib/sentry'
 import { supabase } from '@/lib/supabase'
 import { queryClient } from '@/lib/query-client'
-import { identify, resetAnalytics } from '@/lib/analytics'
+import { getConsent, identify, resetAnalytics } from '@/lib/analytics'
 import { linkAnonAssessmentToUser } from '@/hooks/useAssessment'
 import {
   getAccessState,
   hasFeatureAccess,
+  nextAccessChangeAt,
   type AccessFeature,
   type AccessState,
 } from '@/lib/access'
@@ -99,6 +105,10 @@ export interface UseAuthReturn {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const HUB_ROLES: AppRole[] = ['super_admin', 'hub_admin']
+/** Evento disparado em window pelo analytics/consent ao mudar a escolha de cookies. */
+const CONSENT_CHANGED_EVENT = 'consent-changed'
+/** Maior atraso aceito por setTimeout (~24,8 dias); acima disso ele dispara na hora. */
+const MAX_TIMER_DELAY_MS = 2 ** 31 - 1
 const STAFF_ROLES: AppRole[] = ['super_admin', 'hub_admin', 'lawyer', 'paralegal']
 
 // `.retry(false)`: o postgrest-js já repete GETs sozinho (1s, 2s, 4s), o que
@@ -244,9 +254,25 @@ function useAuthInternal(): UseAuthReturn {
 
   const identifyOnce = useCallback((userId: string) => {
     if (identifiedUserIdRef.current === userId) return
+    // Sem consentimento identify() não envia nada: não marca, para identificar
+    // quando a pessoa aceitar os cookies (listener de consent-changed abaixo).
+    if (getConsent() !== 'granted') return
     identifiedUserIdRef.current = userId
     identify(userId)
   }, [])
+
+  useEffect(() => {
+    const onConsentChanged = () => {
+      if (getConsent() !== 'granted') {
+        identifiedUserIdRef.current = null
+        return
+      }
+      const userId = currentUserIdRef.current
+      if (userId) identifyOnce(userId)
+    }
+    window.addEventListener(CONSENT_CHANGED_EVENT, onConsentChanged)
+    return () => window.removeEventListener(CONSENT_CHANGED_EVENT, onConsentChanged)
+  }, [identifyOnce])
 
   useEffect(() => {
     mountedRef.current = true
@@ -373,10 +399,31 @@ function useAuthInternal(): UseAuthReturn {
   const isStaffUser = authUser?.roles.some((r) => STAFF_ROLES.includes(r)) ?? false
 
   const subscription = authUser?.subscription ?? null
-  const access = useMemo(
-    () => getAccessState(subscription, { isStaff: isStaffUser }),
-    [subscription, isStaffUser],
-  )
+
+  // O prazo do €30 muda de fase com a aba aberta (dias restantes, 'expiring',
+  // 'expired'): `accessTick` avança nesse instante e força o recálculo.
+  const [accessTick, setAccessTick] = useState(0)
+  useEffect(() => {
+    const changeAt = nextAccessChangeAt(subscription, { isStaff: isStaffUser })
+    if (!changeAt) return
+    const bump = () => setAccessTick((n) => n + 1)
+    const delay = Math.min(Math.max(changeAt.getTime() - Date.now(), 0), MAX_TIMER_DELAY_MS)
+    const timer = window.setTimeout(bump, delay)
+    // Com a tela apagada o celular congela timers: confere ao voltar para a aba.
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && Date.now() >= changeAt.getTime()) bump()
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    return () => {
+      window.clearTimeout(timer)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+    }
+  }, [subscription, isStaffUser, accessTick])
+
+  const access = useMemo(() => {
+    void accessTick // dependência de propósito: recalcula com o relógio atual
+    return getAccessState(subscription, { isStaff: isStaffUser })
+  }, [subscription, isStaffUser, accessTick])
 
   const hasAccess = useCallback(
     (feature: AccessFeature) => hasFeatureAccess(subscription, feature, { isStaff: isStaffUser }),

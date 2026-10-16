@@ -5,7 +5,8 @@
  *    sempre validado por safeInternalPath; viaja no link (`/auth/callback?next=`).
  *  - E-mail pré-preenchido com `state.email` ou o e-mail do quiz neste navegador.
  *  - Faixa pós-compra (`state.postPurchase` ou `?pos_compra=1`).
- *  - Reenvio com espera de 30 s; erros de limite do Supabase tratados.
+ *  - Reenvio com espera de 30 s por e-mail (voltar por "Usar outro e-mail" não
+ *    zera a espera do mesmo endereço); erros de limite do Supabase tratados.
  *  - Quem já está logado vai direto para o destino.
  *  - Google como opção secundária, com aviso de usar o mesmo e-mail da compra;
  *    escondido em navegadores embutidos (Instagram, Facebook, TikTok…), com
@@ -79,6 +80,11 @@ const secondaryButtonClass = cn(
 
 const textLinkClass =
   'font-medium text-primary underline underline-offset-4 hover:text-primary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-sm'
+
+/** Chave da espera de reenvio: o mesmo endereço, com ou sem maiúsculas. */
+function cooldownKey(email: string): string {
+  return email.trim().toLowerCase()
+}
 
 /** Segundos de espera pedidos pelo Supabase ("only request this after 42 seconds"). */
 function rateLimitSeconds(error: Error): number | null {
@@ -159,7 +165,10 @@ export function LoginPage() {
     isLocalDevHostname(window.location.hostname)
 
   const [sentEmail, setSentEmail] = useState<string | null>(null)
+  /** Segundos de espera exibidos para o e-mail atual. */
   const [cooldown, setCooldown] = useState(0)
+  /** Fim da espera de cada e-mail (ms), para não reenviar na hora ao voltar ao formulário. */
+  const cooldownUntilRef = useRef(new Map<string, number>())
   const [resending, setResending] = useState(false)
   const [resendStatus, setResendStatus] = useState<string | null>(null)
   const sentHeadingRef = useRef<HTMLHeadingElement>(null)
@@ -190,10 +199,31 @@ export function LoginPage() {
     return <Navigate to={returnTo} replace state={returnState} />
   }
 
+  const startCooldown = (email: string, seconds: number) => {
+    cooldownUntilRef.current.set(cooldownKey(email), Date.now() + seconds * 1000)
+    setCooldown(seconds)
+  }
+
+  const remainingCooldown = (email: string): number => {
+    const until = cooldownUntilRef.current.get(cooldownKey(email))
+    return until ? Math.max(0, Math.ceil((until - Date.now()) / 1000)) : 0
+  }
+
   const onSubmit = async ({ email }: FormValues) => {
+    // Mesmo e-mail ainda na espera (voltou por "Usar outro e-mail"): não reenvia,
+    // volta para a tela do link já enviado com o tempo que falta.
+    const remaining = remainingCooldown(email)
+    if (remaining > 0) {
+      setResendStatus(null)
+      setSentEmail(email)
+      setCooldown(remaining)
+      return
+    }
     persistReturnIntent(returnTo, state?.plan, state?.assessmentId)
     const { error } = await signInWithMagicLink(email, returnTo)
     if (error) {
+      // Só bloqueia o botão: nada foi enviado agora, então não entra no mapa
+      // (que leva à tela "Enviamos um link").
       const wait = rateLimitSeconds(error)
       if (wait) setCooldown(wait)
       setError('email', { message: sendErrorMessage(error) })
@@ -201,7 +231,7 @@ export function LoginPage() {
     }
     setResendStatus(null)
     setSentEmail(email)
-    setCooldown(RESEND_COOLDOWN_SECONDS)
+    startCooldown(email, RESEND_COOLDOWN_SECONDS)
   }
 
   const handleResend = async () => {
@@ -212,11 +242,11 @@ export function LoginPage() {
     setResending(false)
     if (error) {
       const wait = rateLimitSeconds(error)
-      setCooldown(wait ?? RESEND_COOLDOWN_SECONDS)
+      startCooldown(sentEmail, wait ?? RESEND_COOLDOWN_SECONDS)
       setResendStatus(sendErrorMessage(error))
       return
     }
-    setCooldown(RESEND_COOLDOWN_SECONDS)
+    startCooldown(sentEmail, RESEND_COOLDOWN_SECONDS)
     setResendStatus('Enviamos um novo link. Use sempre o e-mail mais recente.')
   }
 
@@ -274,7 +304,8 @@ export function LoginPage() {
               <button
                 type="button"
                 onClick={() => {
-                  // A espera vale para o mesmo e-mail; se o Supabase ainda limitar, o erro informa o tempo.
+                  // A espera continua valendo para este e-mail (cooldownUntilRef);
+                  // o formulário fica livre para digitar outro endereço.
                   setSentEmail(null)
                   setResendStatus(null)
                   setCooldown(0)
@@ -323,7 +354,7 @@ export function LoginPage() {
             Entrar na sua conta
           </h1>
           <p className="mt-2 text-base text-muted-foreground [text-wrap:pretty]">
-            Enviamos um link de acesso para o seu e-mail. Não precisa de senha.
+            Vamos enviar um link de acesso para o seu e-mail. Não precisa de senha.
           </p>
 
           <form onSubmit={handleSubmit(onSubmit)} noValidate className="mt-6 space-y-4">

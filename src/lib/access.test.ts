@@ -6,6 +6,7 @@ import {
   getAccessState,
   hasActiveAccess,
   hasFeatureAccess,
+  nextAccessChangeAt,
   routeFeature,
   type AccessFeature,
   type AccessSubscription,
@@ -294,5 +295,71 @@ describe('accessDeniedRedirect', () => {
         expect(target).not.toMatch(/checkout|results/)
       }
     }
+  })
+})
+
+describe('nextAccessChangeAt', () => {
+  const at = (sub: AccessSubscription | null, now: number) =>
+    nextAccessChangeAt(sub, { now })?.getTime() ?? null
+
+  it('próximo dia a menos em daysLeft (o estado na data devolvida já mudou)', () => {
+    const sub = oneTime({ one_time_access_expires_at: iso(20 * DAY + 6 * 60 * 60 * 1000) })
+    const next = at(sub, NOW.getTime())
+    expect(next).toBe(NOW.getTime() + 6 * 60 * 60 * 1000)
+    expect(getAccessState(sub, { now: NOW.getTime() }).daysLeft).toBe(21)
+    expect(getAccessState(sub, { now: (next as number) - 1 }).daysLeft).toBe(21)
+    expect(getAccessState(sub, { now: next as number }).daysLeft).toBe(20)
+  })
+
+  it('com dias exatos, a mudança é 1 dia depois (nunca o próprio instante)', () => {
+    const sub = oneTime({ one_time_access_expires_at: iso(20 * DAY) })
+    expect(at(sub, NOW.getTime())).toBe(NOW.getTime() + DAY)
+  })
+
+  it(`entrada em 'expiring' quando faltam ${EXPIRING_SOON_DAYS} dias`, () => {
+    const sub = oneTime({ one_time_access_expires_at: iso(EXPIRING_SOON_DAYS * DAY + 1000) })
+    const next = at(sub, NOW.getTime()) as number
+    expect(getAccessState(sub, { now: NOW.getTime() }).state).toBe('active')
+    expect(getAccessState(sub, { now: next }).state).toBe('expiring')
+  })
+
+  it("fim do acesso: em expires_at ainda tem acesso; 1 ms depois vira 'expired'", () => {
+    const sub = oneTime({ one_time_access_expires_at: iso(1000) })
+    const end = NOW.getTime() + 1000
+    expect(at(sub, NOW.getTime())).toBe(end)
+    expect(at(sub, end)).toBe(end + 1)
+    expect(getAccessState(sub, { now: end + 1 }).state).toBe('expired')
+  })
+
+  it('pagou com flags revogadas: muda só ao passar o prazo', () => {
+    const sub = oneTime({
+      has_dashboard_access: false,
+      has_full_analysis: false,
+      has_chat_access: false,
+    })
+    const end = NOW.getTime() + 20 * DAY
+    expect(at(sub, NOW.getTime())).toBe(end + 1)
+    expect(getAccessState(sub, { now: end + 1 }).state).toBe('expired')
+  })
+
+  it('null quando o estado não muda com o tempo', () => {
+    expect(at(null, NOW.getTime())).toBeNull()
+    expect(at(oneTime({ one_time_access_expires_at: iso(-DAY) }), NOW.getTime())).toBeNull()
+    expect(at(oneTime({ one_time_access_expires_at: null }), NOW.getTime())).toBeNull()
+    expect(at(oneTime({ recurring_active: true }), NOW.getTime())).toBeNull()
+    expect(
+      nextAccessChangeAt(oneTime(), { now: NOW.getTime(), isStaff: true }),
+    ).toBeNull()
+    expect(
+      at(
+        oneTime({
+          one_time_paid: false,
+          has_dashboard_access: false,
+          has_full_analysis: false,
+          has_chat_access: false,
+        }),
+        NOW.getTime(),
+      ),
+    ).toBeNull()
   })
 })

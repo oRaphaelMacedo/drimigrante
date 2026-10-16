@@ -1,8 +1,12 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { buildAuthCallbackUrl, getAuthRedirectBase, isLocalDevHostname } from './auth-redirect'
 
 const PROD = { origin: 'https://www.drimigrante.com', hostname: 'www.drimigrante.com' }
 const LOCAL = { origin: 'http://localhost:34220', hostname: 'localhost' }
+const PREVIEW = {
+  origin: 'https://drimigrante-git-feat.vercel.app',
+  hostname: 'drimigrante-git-feat.vercel.app',
+}
 
 describe('isLocalDevHostname', () => {
   it('aceita só hosts locais', () => {
@@ -30,10 +34,28 @@ describe('getAuthRedirectBase', () => {
     ).toBe('https://www.drimigrante.com')
   })
 
+  // `undefined` aciona o parâmetro padrão (import.meta.env.VITE_APP_URL, que o
+  // .env.local define): "sem env" é string vazia ou env zerada com stubEnv.
   it('sem VITE_APP_URL válida, cai na origem atual', () => {
-    expect(getAuthRedirectBase(undefined, PROD)).toBe(PROD.origin)
+    expect(getAuthRedirectBase('', PROD)).toBe(PROD.origin)
     expect(getAuthRedirectBase('não é url', PROD)).toBe(PROD.origin)
     expect(getAuthRedirectBase('javascript:alert(1)', PROD)).toBe(PROD.origin)
+  })
+
+  describe('lendo VITE_APP_URL do ambiente', () => {
+    afterEach(() => {
+      vi.unstubAllEnvs()
+    })
+
+    it('usa a env quando nenhum valor é passado', () => {
+      vi.stubEnv('VITE_APP_URL', 'https://www.drimigrante.com')
+      expect(getAuthRedirectBase(undefined, PREVIEW)).toBe('https://www.drimigrante.com')
+    })
+
+    it('com a env vazia, cai na origem atual', () => {
+      vi.stubEnv('VITE_APP_URL', '')
+      expect(getAuthRedirectBase(undefined, PREVIEW)).toBe(PREVIEW.origin)
+    })
   })
 })
 
