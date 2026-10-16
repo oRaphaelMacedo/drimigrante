@@ -134,6 +134,10 @@ export function StickyCTA({
   const bottomOverlay = useBottomOverlayHeight()
 
   // O rodapé público já reserva a altura da barra: sem espaçador duplicado.
+  // Premissa: o Footer monta antes ou no mesmo commit que o StickyCTA (o Layout
+  // público o renderiza junto com a página, sem lazy/Suspense próprio), então
+  // basta checar na montagem. Se o rodapé passar a montar depois, trocar por
+  // um MutationObserver no <body>.
   React.useLayoutEffect(() => {
     setFooterReserves(document.querySelector(`[${STICKY_CTA_RESERVE_ATTR}]`) !== null)
   }, [])

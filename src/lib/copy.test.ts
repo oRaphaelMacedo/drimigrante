@@ -4,11 +4,14 @@
  * - findPtPtMarkers acha as construções de pt-PT do glossário, com acentos, e
  *   ignora os termos oficiais portugueses e o inglês dos identificadores;
  * - nenhum arquivo do funil público (landing, quiz, checkout, login, páginas
- *   legais do pacote, layout público, index.html) tem marcador de pt-PT.
+ *   legais do pacote, layout público, index.html) tem marcador de pt-PT;
+ * - o glossário (lookbehind e `\p{L}`) fica fora do bundle do cliente: só
+ *   testes importam copy-glossary.ts, e copy.ts não monta regex.
  */
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { OFFICIAL_PT_TERMS, PT_BR_GLOSSARY, QUIZ_CTA_LABEL, findPtPtMarkers } from './copy'
+import { QUIZ_CTA_LABEL } from './copy'
+import { OFFICIAL_PT_TERMS, PT_BR_GLOSSARY, findPtPtMarkers } from './copy-glossary'
 
 const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8')
 
@@ -37,7 +40,14 @@ const FUNNEL_FILES = [
   '../pages/legal/TermsPage.tsx',
   '../pages/legal/CookiesPage.tsx',
   '../pages/legal/LegalLayout.tsx',
+  './copy.ts',
 ]
+
+/** Arquivos .ts/.tsx de src que vão para o bundle (sem testes nem src/test), relativos a src/. */
+const clientSourceFiles = (): string[] =>
+  readdirSync(new URL('../', import.meta.url), { recursive: true, encoding: 'utf8' })
+    .map((path) => path.split('\\').join('/'))
+    .filter((path) => /\.tsx?$/.test(path) && !/\.test\.tsx?$/.test(path) && !path.startsWith('test/'))
 
 describe('findPtPtMarkers', () => {
   it.each([
@@ -110,5 +120,23 @@ describe('funil público em pt-BR (DI-074)', () => {
 
   it('o CTA do quiz tem um rótulo só', () => {
     expect(QUIZ_CTA_LABEL).toBe('Fazer o diagnóstico grátis')
+  })
+})
+
+describe('glossário fora do bundle do cliente', () => {
+  it('copy.ts (importado por Header, Landing e 404) não monta regex', () => {
+    const source = read('./copy.ts')
+      // Ignora comentários: só o código conta.
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/^\s*\/\/.*$/gm, '')
+    expect(source).not.toMatch(/new RegExp|\(\?<[=!]|\\p\{/)
+  })
+
+  it('nenhum arquivo do cliente importa copy-glossary.ts', () => {
+    const files = clientSourceFiles()
+    expect(files).toContain('lib/copy.ts')
+    // Qualquer especificador de módulo que aponte para ele (import, export ou import()).
+    const importers = files.filter((path) => /['"][^'"\n]*\/copy-glossary(?:\.ts)?['"]/.test(read(`../${path}`)))
+    expect(importers).toEqual([])
   })
 })

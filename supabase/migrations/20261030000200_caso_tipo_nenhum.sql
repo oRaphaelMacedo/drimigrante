@@ -6,8 +6,12 @@
 -- (dono / Tech Lead), no SQL Editor ou com `supabase db push`.
 --
 -- Ordem de release:
+--   - APLICAR SÓ DEPOIS DO DEPLOY DO FRONT que traz a opção exclusiva (W4-04:
+--     toggleMultiAnswer/isExclusiveOption em src/data/quiz-questions.ts). O
+--     front antigo lê a opção nova do banco e a mostra como checkbox comum,
+--     NÃO exclusiva: daria para marcar "Nenhuma destas situações" junto com A–F.
 --   - Não depende de nenhuma migration nova nem de deploy de function para
---     funcionar: o front trata a chave 'nenhum' como opção exclusiva e o
+--     funcionar: o front novo trata a chave 'nenhum' como opção exclusiva e o
 --     servidor só pontua/sugere a partir das chaves A–F ('nenhum' não soma
 --     pontos e leva à "análise personalizada").
 --   - Recomendado: publicar antes as functions que usam _shared/pathways.ts

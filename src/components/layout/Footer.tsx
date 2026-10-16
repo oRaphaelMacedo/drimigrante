@@ -31,8 +31,9 @@ const LEGAL_LINKS = [
   { to: '/cookies', label: 'Cookies', shortLabel: 'Cookies' },
 ] as const
 
+// min-h-11/min-w-11: alvo de 44px mesmo em rótulos curtos ("Preços").
 const linkClass = cn(
-  'inline-flex min-h-11 items-center rounded-md text-sm text-muted-foreground',
+  'inline-flex min-h-11 min-w-11 items-center rounded-md text-sm text-muted-foreground',
   'underline-offset-4 transition-colors hover:text-foreground hover:underline',
   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
 )
@@ -68,7 +69,7 @@ export function Footer({ variant = 'full' }: FooterProps) {
           <div className="col-span-2">
             <Link
               to="/"
-              className="inline-flex rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              className="inline-flex min-h-11 items-center rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
             >
               <BrandLogo />
             </Link>
