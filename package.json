@@ -16,6 +16,7 @@
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives",
     "lint:strict": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "check-env": "node scripts/check-env.mjs",
+    "check:contrast": "tsx scripts/check-contrast.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",

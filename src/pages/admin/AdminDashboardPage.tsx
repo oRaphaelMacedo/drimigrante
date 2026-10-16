@@ -20,6 +20,7 @@ import {
   Target,
   Users,
 } from 'lucide-react'
+import { Badge } from '@/components/ui'
 import { supabase } from '@/lib/supabase'
 import { cn } from '@/lib/utils'
 
@@ -143,17 +144,17 @@ function StatCard({
   icon: React.ElementType
   trend?: 'up' | 'down' | 'neutral'
   trendLabel?: string
-  tone?: 'brand' | 'emerald' | 'amber' | 'violet'
+  tone?: 'brand' | 'success' | 'warning' | 'neutral'
 }) {
   const toneMap = {
-    brand: 'bg-brand-50 text-brand-700',
-    emerald: 'bg-emerald-50 text-emerald-700',
-    amber: 'bg-amber-50 text-amber-800',
-    violet: 'bg-violet-50 text-violet-700',
+    brand: 'bg-primary/[.08] text-primary',
+    success: 'bg-success/[.08] text-success',
+    warning: 'bg-warning/[.08] text-warning',
+    neutral: 'bg-muted text-foreground/80',
   }
 
   return (
-    <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
+    <div className="rounded-lg border bg-card p-5 shadow-sm">
       <div className="mb-4 flex items-center justify-between gap-3">
         <span className="text-sm font-medium text-muted-foreground">{label}</span>
         <div className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-xl', toneMap[tone])}>
@@ -166,8 +167,8 @@ function StatCard({
         <div
           className={cn(
             'mt-3 flex items-center gap-1 text-sm font-medium',
-            trend === 'up' && 'text-emerald-700',
-            trend === 'down' && 'text-red-700',
+            trend === 'up' && 'text-success',
+            trend === 'down' && 'text-destructive',
             (trend === 'neutral' || !trend) && 'text-muted-foreground',
           )}
         >
@@ -262,10 +263,10 @@ function EmailHealthCard() {
   return (
     <section
       aria-labelledby="email-health-title"
-      className="rounded-2xl border border-border bg-card p-6 shadow-sm"
+      className="rounded-lg border bg-card p-5 shadow-sm sm:p-6"
     >
       <div className="mb-5 flex items-center gap-2">
-        <Mail className="h-4 w-4 text-brand-700" aria-hidden="true" />
+        <Mail className="h-4 w-4 text-primary" aria-hidden="true" />
         <h2 id="email-health-title" className="font-bold text-foreground">
           Saúde dos e-mails
         </h2>
@@ -287,8 +288,8 @@ function EmailHealthCard() {
           <p
             className={cn(
               'flex items-center gap-2 text-sm font-semibold',
-              status.tone === 'warn' && 'text-red-700',
-              status.tone === 'ok' && 'text-emerald-700',
+              status.tone === 'warn' && 'text-destructive',
+              status.tone === 'ok' && 'text-success',
               status.tone === 'idle' && 'text-muted-foreground',
             )}
           >
@@ -307,7 +308,7 @@ function EmailHealthCard() {
             </div>
             <div className="rounded-xl bg-muted p-4">
               <dt className="text-sm text-muted-foreground">Falhas (7 dias)</dt>
-              <dd className={cn('mt-1 text-2xl font-extrabold', health.failed > 0 ? 'text-red-700' : 'text-foreground')}>
+              <dd className={cn('mt-1 text-2xl font-extrabold', health.failed > 0 ? 'text-destructive' : 'text-foreground')}>
                 {health.failed}
               </dd>
             </div>
@@ -449,7 +450,7 @@ export function AdminDashboardPage() {
   if (loading || !stats) {
     return (
       <div className="flex min-h-[60dvh] items-center justify-center" role="status" aria-label="Carregando">
-        <Loader2 className="h-7 w-7 animate-spin text-brand-700" aria-hidden="true" />
+        <Loader2 className="h-7 w-7 animate-spin text-primary" aria-hidden="true" />
       </div>
     )
   }
@@ -472,14 +473,14 @@ export function AdminDashboardPage() {
     <div className="space-y-8">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-extrabold text-foreground">Painel do admin</h1>
+        <h1 className="text-2xl font-bold text-foreground">Painel do admin</h1>
         <p className="mt-1 text-sm text-muted-foreground">Visão geral em tempo real do Doutor Imigrante</p>
       </div>
 
       {somethingMissing && (
         <p
           role="status"
-          className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"
+          className="flex items-start gap-2 rounded-xl border border-warning/20 bg-warning/[.08] p-4 text-sm text-warning"
         >
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
           Alguns números não puderam ser carregados e aparecem como “—”. Os demais estão atualizados.
@@ -508,14 +509,14 @@ export function AdminDashboardPage() {
           icon={CreditCard}
           trend="neutral"
           trendLabel={s.paidUsers !== null ? 'Total acumulado' : undefined}
-          tone="emerald"
+          tone="success"
         />
         <StatCard
           label="MRR"
           value={s.mrrCents !== null ? formatEuros(s.mrrCents) : <Unavailable />}
           sub={s.recurringCount !== null ? plural(s.recurringCount, 'assinatura ativa', 'assinaturas ativas') : undefined}
           icon={Euro}
-          tone="violet"
+          tone="neutral"
         />
         <StatCard
           label="Taxa de conversão"
@@ -526,25 +527,25 @@ export function AdminDashboardPage() {
           trendLabel={
             s.conversionRate === null ? undefined : s.conversionRate > 5 ? 'Acima de 5%' : 'Em acompanhamento'
           }
-          tone="amber"
+          tone="warning"
         />
       </div>
 
       {/* Funnel, payments and e-mail health */}
       <div className="grid gap-6 lg:grid-cols-2">
         {/* Funnel */}
-        <section aria-labelledby="funnel-title" className="rounded-2xl border border-border bg-card p-6 shadow-sm">
+        <section aria-labelledby="funnel-title" className="rounded-lg border bg-card p-5 shadow-sm sm:p-6">
           <div className="mb-5 flex items-center gap-2">
-            <BarChart3 className="h-4 w-4 text-brand-700" aria-hidden="true" />
+            <BarChart3 className="h-4 w-4 text-primary" aria-hidden="true" />
             <h2 id="funnel-title" className="font-bold text-foreground">
               Funil de conversão
             </h2>
           </div>
           <div className="space-y-4">
             {[
-              { label: 'Leads capturados', value: s.totalLeads, max: s.totalLeads, color: 'bg-brand-500' },
-              { label: 'Quiz completo', value: s.completedQuizzes, max: s.totalLeads, color: 'bg-brand-700' },
-              { label: 'Usuários pagantes', value: s.paidUsers, max: s.totalLeads, color: 'bg-emerald-600' },
+              { label: 'Leads capturados', value: s.totalLeads, max: s.totalLeads, color: 'bg-primary/60' },
+              { label: 'Quiz completo', value: s.completedQuizzes, max: s.totalLeads, color: 'bg-primary' },
+              { label: 'Usuários pagantes', value: s.paidUsers, max: s.totalLeads, color: 'bg-success' },
             ].map(({ label, value, max, color }) => {
               const known = value !== null && max !== null
               const pct = known && max > 0 ? Math.round((value / max) * 100) : 0
@@ -563,7 +564,7 @@ export function AdminDashboardPage() {
                     </span>
                   </div>
                   <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
-                    <div className={cn('h-full rounded-full transition-all', color)} style={{ width: `${pct}%` }} />
+                    <div className={cn('h-full rounded-full transition-[width] duration-base', color)} style={{ width: `${pct}%` }} />
                   </div>
                 </div>
               )
@@ -572,9 +573,9 @@ export function AdminDashboardPage() {
         </section>
 
         {/* Recent payments */}
-        <section aria-labelledby="payments-title" className="rounded-2xl border border-border bg-card p-6 shadow-sm">
+        <section aria-labelledby="payments-title" className="rounded-lg border bg-card p-5 shadow-sm sm:p-6">
           <div className="mb-5 flex items-center gap-2">
-            <Activity className="h-4 w-4 text-emerald-700" aria-hidden="true" />
+            <Activity className="h-4 w-4 text-success" aria-hidden="true" />
             <h2 id="payments-title" className="font-bold text-foreground">
               Pagamentos recentes
             </h2>
@@ -599,7 +600,7 @@ export function AdminDashboardPage() {
                     <div
                       className={cn(
                         'flex h-8 w-8 shrink-0 items-center justify-center rounded-full',
-                        isRecurring ? 'bg-violet-100 text-violet-700' : 'bg-emerald-100 text-emerald-700',
+                        isRecurring ? 'bg-primary/[.08] text-primary' : 'bg-success/[.08] text-success',
                       )}
                     >
                       {isRecurring ? (
@@ -617,17 +618,12 @@ export function AdminDashboardPage() {
                         {formatDateTime(p.paid_at)}
                       </p>
                     </div>
-                    <div className="text-right">
+                    <div className="shrink-0 text-right">
                       <p className="text-sm font-bold text-foreground">{formatEuros(p.amount_cents)}</p>
-                      <span
-                        className={cn(
-                          'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-bold',
-                          succeeded ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-900',
-                        )}
-                      >
-                        {succeeded && <CheckCircle2 className="h-3 w-3" aria-hidden="true" />}
+                      <Badge size="sm" variant={succeeded ? 'success' : 'warning'}>
+                        {succeeded && <CheckCircle2 aria-hidden="true" />}
                         {PAYMENT_STATUS_LABEL[p.status] ?? p.status}
-                      </span>
+                      </Badge>
                     </div>
                   </li>
                 )
@@ -640,7 +636,7 @@ export function AdminDashboardPage() {
       </div>
 
       {/* Quick links */}
-      <section aria-labelledby="quick-links-title" className="rounded-2xl border border-border bg-card p-6 shadow-sm">
+      <section aria-labelledby="quick-links-title" className="rounded-lg border bg-card p-5 shadow-sm sm:p-6">
         <h2 id="quick-links-title" className="mb-4 font-bold text-foreground">
           Ações rápidas
         </h2>
@@ -653,7 +649,7 @@ export function AdminDashboardPage() {
             <Link
               key={to}
               to={to}
-              className="flex min-h-11 items-center gap-1.5 rounded-xl border border-border bg-muted px-4 py-2 text-sm font-medium text-foreground transition hover:border-brand-300 hover:bg-brand-50 hover:text-brand-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              className="flex min-h-11 items-center gap-1.5 rounded-xl border border-border bg-muted px-4 py-2 text-sm font-medium text-foreground transition-colors hover:border-primary/30 hover:bg-primary/[.08] hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
             >
               {label}
               <ArrowUpRight className="h-4 w-4" aria-hidden="true" />

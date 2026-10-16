@@ -1,421 +1,431 @@
-// AdminLeadsPage.tsx — Tabela de leads com dropdown de ações
-import { useState, useRef, useEffect } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+// AdminLeadsPage.tsx — leads com busca, filtro por fase do CRM, exportação CSV
+// e menu de ações. No celular a lista vira cartões; no desktop, tabela (DI-073).
+import { useMemo, useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import {
-  Search,
-  Filter,
-  Download,
-  MoreHorizontal,
-  Mail,
-  Phone,
-  ThermometerSun,
-  Loader2,
   Copy,
-  UserCheck,
+  Download,
   ExternalLink,
-  CheckCircle2,
-  X,
+  Filter,
+  Loader2,
+  Mail,
+  MoreHorizontal,
+  Phone,
+  RefreshCw,
+  Search,
+  ThermometerSun,
 } from 'lucide-react'
-import { supabase } from '@/lib/supabase'
-import { Assessment } from '@/lib/database.types'
-import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
+import { CrmStageMenuItems } from '@/components/admin/CrmStageMenu'
+import { adminMenuContentClass, adminMenuItemClass } from '@/components/admin/menu-styles'
+import { Badge, Button, Input } from '@/components/ui'
+import { supabase } from '@/lib/supabase'
+import {
+  CRM_STAGES,
+  CRM_STAGE_META,
+  LEAD_TEMPERATURE_META,
+  countByCrmStage,
+  csvField,
+  leadTemperature,
+  parseCrmStage,
+  type CrmStage,
+} from '@/lib/crm-stage'
+import { cn } from '@/lib/utils'
 
-type CrmStage = 'novo' | 'contactado' | 'proposta' | 'convertido'
+/** Colunas lidas pelo admin (nada de `select('*')`: só o que a tela usa). */
+const LEAD_COLUMNS = 'id, full_name, email, phone, status, completion_percentage, crm_stage, created_at'
 
-// ─── Hook ─────────────────────────────────────────────────────────────────────
+type StageFilter = CrmStage | 'all'
+
+/** Marca de ordem de bytes: o Excel abre o UTF-8 com os acentos certos. */
+const CSV_BOM = '\uFEFF'
+
+const dateFormat = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short' })
+
+function formatLeadDate(iso: string | null): string {
+  return iso ? dateFormat.format(new Date(iso)) : '—'
+}
+
+// ─── Dados ────────────────────────────────────────────────────────────────────
 
 function useLeads() {
   return useQuery({
     queryKey: ['admin-leads'],
     queryFn: async () => {
-      const { data, error } = await (supabase as any)
+      const { data, error } = await supabase
         .from('assessments')
-        .select('*')
+        .select(LEAD_COLUMNS)
         .order('created_at', { ascending: false })
         .limit(200)
       if (error) throw error
-      return (data ?? []) as (Assessment & { crm_stage: CrmStage })[]
+      return data ?? []
     },
     staleTime: 30_000,
   })
 }
 
+type Lead = NonNullable<ReturnType<typeof useLeads>['data']>[number]
+
 function useUpdateCrmStage() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: async ({ id, stage }: { id: string; stage: CrmStage }) => {
-      const { error } = await (supabase as any)
-        .from('assessments')
-        .update({ crm_stage: stage })
-        .eq('id', id)
+      const { error } = await supabase.from('assessments').update({ crm_stage: stage }).eq('id', id)
       if (error) throw error
     },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['admin-leads'] })
-      qc.invalidateQueries({ queryKey: ['admin-pipeline-leads'] })
+    onSuccess: (_data, { stage }) => {
+      toast.success(`Lead movido para "${CRM_STAGE_META[stage].label}"`)
+      void qc.invalidateQueries({ queryKey: ['admin-leads'] })
+      void qc.invalidateQueries({ queryKey: ['admin-pipeline-leads'] })
+    },
+    onError: (err) => {
+      console.error('[AdminLeads] update stage:', err)
+      toast.error('Não foi possível mudar a fase do lead. Tente de novo.')
     },
   })
 }
 
-// ─── Component ────────────────────────────────────────────────────────────────
+function exportCsv(leads: readonly Lead[]) {
+  const headers = ['Nome', 'E-mail', 'Telefone', 'Status', 'Fase CRM', 'Temperatura', 'Data']
+  const rows = leads.map((lead) =>
+    [
+      lead.full_name,
+      lead.email,
+      lead.phone,
+      lead.status,
+      CRM_STAGE_META[parseCrmStage(lead.crm_stage)].label,
+      LEAD_TEMPERATURE_META[leadTemperature(lead.completion_percentage)].label,
+      formatLeadDate(lead.created_at),
+    ]
+      .map(csvField)
+      .join(','),
+  )
+  const csv = `${CSV_BOM}${[headers.map(csvField).join(','), ...rows].join('\r\n')}`
+
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `leads_${new Date().toISOString().split('T')[0]}.csv`
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  URL.revokeObjectURL(url)
+}
+
+// ─── Página ───────────────────────────────────────────────────────────────────
 
 export function AdminLeadsPage() {
   const [search, setSearch] = useState('')
-  const [stageFilter, setStageFilter] = useState<CrmStage | 'all'>('all')
-  const { data: leads = [], isLoading: loading } = useLeads()
+  const [stageFilter, setStageFilter] = useState<StageFilter>('all')
+  const { data: leads = [], isLoading, isError, isFetching, refetch } = useLeads()
   const updateStage = useUpdateCrmStage()
 
-  const getTemperature = (pct: number | null) => {
-    if (!pct) return { label: 'Frio', color: 'bg-blue-100 text-blue-700' }
-    if (pct >= 100) return { label: 'Quente', color: 'bg-red-100 text-red-700' }
-    if (pct >= 50) return { label: 'Morno', color: 'bg-amber-100 text-amber-700' }
-    return { label: 'Frio', color: 'bg-blue-100 text-blue-700' }
-  }
+  const stageCounts = useMemo(() => countByCrmStage(leads), [leads])
 
-  const exportCSV = () => {
-    const headers = ['Nome', 'Email', 'Telefone', 'Status', 'Fase CRM', 'Temperatura', 'Data']
-    const csvContent = [
-      headers.join(','),
-      ...leads.map((l) => {
-        const temp = getTemperature(l.completion_percentage).label
-        const date = new Date(l.created_at ?? '').toLocaleDateString('pt-PT')
-        return `"${l.full_name || ''}","${l.email || ''}","${l.phone || ''}","${l.status}","${(l as any).crm_stage ?? 'novo'}","${temp}","${date}"`
-      }),
-    ].join('\n')
+  const filteredLeads = useMemo(() => {
+    const term = search.trim().toLowerCase()
+    return leads.filter((lead) => {
+      const matchSearch =
+        !term ||
+        (lead.full_name?.toLowerCase() ?? '').includes(term) ||
+        (lead.email?.toLowerCase() ?? '').includes(term)
+      const matchStage = stageFilter === 'all' || parseCrmStage(lead.crm_stage) === stageFilter
+      return matchSearch && matchStage
+    })
+  }, [leads, search, stageFilter])
 
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.setAttribute('download', `leads_${new Date().toISOString().split('T')[0]}.csv`)
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-  }
+  const changeStage = (id: string, stage: CrmStage) => updateStage.mutate({ id, stage })
 
-  const filteredLeads = leads.filter((l) => {
-    const matchSearch =
-      (l.full_name?.toLowerCase() || '').includes(search.toLowerCase()) ||
-      (l.email?.toLowerCase() || '').includes(search.toLowerCase())
-    const matchStage = stageFilter === 'all' || ((l as any).crm_stage ?? 'novo') === stageFilter
-    return matchSearch && matchStage
-  })
-
-  const STAGE_LABELS: Record<CrmStage | 'all', string> = {
-    all: 'Todos',
-    novo: 'Novos',
-    contactado: 'Contactados',
-    proposta: 'Proposta',
-    convertido: 'Convertidos',
-  }
+  const filters: Array<{ value: StageFilter; label: string; count?: number }> = [
+    { value: 'all', label: 'Todos' },
+    ...CRM_STAGES.map((stage) => ({ value: stage, label: CRM_STAGE_META[stage].pluralLabel, count: stageCounts[stage] })),
+  ]
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-extrabold text-gray-900">Leads</h1>
-          <p className="mt-1 text-sm text-gray-500">
-            Gerir, filtrar e exportar potenciais clientes.
-          </p>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="text-2xl font-bold text-foreground">Leads</h1>
+          <p className="mt-1 text-sm text-muted-foreground">Gerencie, filtre e exporte os potenciais clientes.</p>
         </div>
-        <button
-          onClick={exportCSV}
-          className="flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() => exportCsv(leads)}
+          disabled={leads.length === 0}
+          className="self-start sm:self-auto"
         >
-          <Download className="h-4 w-4" />
+          <Download aria-hidden="true" />
           Exportar CSV
-        </button>
+        </Button>
       </div>
 
-      {/* Filters */}
-      <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm space-y-3">
-        <div className="flex items-center gap-3">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-            <input
-              type="text"
-              placeholder="Procurar por nome ou email..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="w-full rounded-xl border-none bg-gray-50 pl-10 pr-4 py-2.5 text-sm focus:ring-2 focus:ring-brand-500 outline-none"
-            />
+      <div className="space-y-3 rounded-lg border bg-card p-4 shadow-sm">
+        <div className="relative">
+          <Search
+            aria-hidden="true"
+            className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+          />
+          <Input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Buscar por nome ou e-mail…"
+            aria-label="Buscar leads por nome ou e-mail"
+            className="pl-10"
+          />
+        </div>
+
+        <div role="group" aria-label="Filtrar por fase do CRM" className="flex flex-wrap gap-2">
+          {filters.map(({ value, label, count }) => {
+            const selected = stageFilter === value
+            return (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setStageFilter(value)}
+                aria-pressed={selected}
+                className={cn(
+                  'inline-flex min-h-11 items-center gap-1 rounded-xl border px-3 text-sm font-medium transition-colors',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                  selected
+                    ? 'border-primary bg-primary text-primary-foreground'
+                    : 'border-input bg-card text-foreground/80 hover:bg-muted',
+                )}
+              >
+                {label}
+                {count !== undefined && (
+                  <>
+                    {' '}
+                    <span className={selected ? 'text-primary-foreground/80' : 'text-muted-foreground'}>({count})</span>
+                  </>
+                )}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      <div className="overflow-hidden rounded-lg border bg-card shadow-sm">
+        {isLoading ? (
+          <div className="flex min-h-[300px] items-center justify-center" role="status" aria-label="Carregando leads">
+            <Loader2 aria-hidden="true" className="h-8 w-8 animate-spin text-primary" />
           </div>
-        </div>
-
-        {/* Stage filter tabs */}
-        <div className="flex flex-wrap gap-2">
-          {(Object.keys(STAGE_LABELS) as (CrmStage | 'all')[]).map((stage) => (
-            <button
-              key={stage}
-              onClick={() => setStageFilter(stage)}
-              className={cn(
-                'rounded-full px-3 py-1 text-xs font-medium transition',
-                stageFilter === stage
-                  ? 'bg-brand-700 text-white'
-                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200',
-              )}
-            >
-              {STAGE_LABELS[stage]}
-              {stage !== 'all' && (
-                <span className="ml-1 opacity-70">
-                  ({leads.filter((l) => ((l as any).crm_stage ?? 'novo') === stage).length})
-                </span>
-              )}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Table */}
-      <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
-        {loading ? (
-          <div className="flex min-h-[300px] items-center justify-center">
-            <Loader2 className="h-8 w-8 animate-spin text-brand-600" />
+        ) : isError ? (
+          <div className="flex flex-col items-center gap-3 p-6 text-center">
+            <p role="alert" className="text-sm text-destructive">
+              Não foi possível carregar os leads.
+            </p>
+            <Button variant="secondary" size="sm" loading={isFetching} onClick={() => void refetch()}>
+              {!isFetching && <RefreshCw aria-hidden="true" />}
+              Tentar de novo
+            </Button>
           </div>
         ) : filteredLeads.length === 0 ? (
-          <div className="flex min-h-[200px] flex-col items-center justify-center gap-2 text-gray-400">
-            <Filter className="h-8 w-8" />
+          <div className="flex min-h-[200px] flex-col items-center justify-center gap-2 p-6 text-center text-muted-foreground">
+            <Filter aria-hidden="true" className="h-8 w-8" />
             <p className="text-sm">Nenhum lead corresponde aos filtros.</p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead className="bg-gray-50 text-gray-500">
-                <tr>
-                  <th className="px-6 py-4 font-medium">Nome</th>
-                  <th className="px-6 py-4 font-medium">Contacto</th>
-                  <th className="px-6 py-4 font-medium">Quiz</th>
-                  <th className="px-6 py-4 font-medium">Fase CRM</th>
-                  <th className="px-6 py-4 font-medium">Temperatura</th>
-                  <th className="px-6 py-4 font-medium">Data</th>
-                  <th className="px-6 py-4 font-medium text-right">Acções</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {filteredLeads.map((lead) => {
-                  const temp = getTemperature(lead.completion_percentage)
-                  const stage: CrmStage = (lead as any).crm_stage ?? 'novo'
-                  return (
-                    <LeadRow
-                      key={lead.id}
-                      lead={lead as any}
-                      stage={stage}
-                      temp={temp}
-                      onStageChange={(s) => updateStage.mutate({ id: lead.id, stage: s })}
-                    />
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
+          <>
+            {/* Celular: cartões */}
+            <ul className="divide-y md:hidden">
+              {filteredLeads.map((lead) => (
+                <LeadCardItem key={lead.id} lead={lead} onStageChange={(stage) => changeStage(lead.id, stage)} />
+              ))}
+            </ul>
+
+            {/* Desktop: tabela (rola dentro do cartão se faltar largura) */}
+            <div className="hidden overflow-x-auto md:block">
+              <table className="w-full text-left text-sm">
+                <thead className="bg-muted text-muted-foreground">
+                  <tr>
+                    <th scope="col" className="px-4 py-3 font-medium">Nome</th>
+                    <th scope="col" className="px-4 py-3 font-medium">Contato</th>
+                    <th scope="col" className="px-4 py-3 font-medium">Quiz</th>
+                    <th scope="col" className="px-4 py-3 font-medium">Fase CRM</th>
+                    <th scope="col" className="px-4 py-3 font-medium">Temperatura</th>
+                    <th scope="col" className="px-4 py-3 font-medium">Data</th>
+                    <th scope="col" className="px-4 py-3 text-right font-medium">Ações</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {filteredLeads.map((lead) => (
+                    <LeadRow key={lead.id} lead={lead} onStageChange={(stage) => changeStage(lead.id, stage)} />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </div>
 
-      <p className="text-center text-xs text-gray-400">
-        {filteredLeads.length} de {leads.length} leads
-      </p>
+      {!isLoading && !isError && (
+        <p className="text-center text-sm text-muted-foreground">
+          {filteredLeads.length} de {leads.length} leads
+        </p>
+      )}
     </div>
   )
 }
 
-// ─── LeadRow ──────────────────────────────────────────────────────────────────
+// ─── Peças ────────────────────────────────────────────────────────────────────
 
-function LeadRow({
-  lead,
-  stage,
-  temp,
-  onStageChange,
-}: {
-  lead: Assessment & { crm_stage: CrmStage }
-  stage: CrmStage
-  temp: { label: string; color: string }
-  onStageChange: (stage: CrmStage) => void
-}) {
-  const STAGE_CONFIG: Record<CrmStage, { label: string; cls: string }> = {
-    novo:       { label: 'Novo',        cls: 'bg-blue-100 text-blue-700' },
-    contactado: { label: 'Contactado',  cls: 'bg-amber-100 text-amber-700' },
-    proposta:   { label: 'Proposta',    cls: 'bg-purple-100 text-purple-700' },
-    convertido: { label: 'Convertido',  cls: 'bg-emerald-100 text-emerald-700' },
-  }
-
+function StageBadge({ stage }: { stage: CrmStage }) {
   return (
-    <tr className="transition hover:bg-gray-50">
-      {/* Nome */}
-      <td className="px-6 py-4">
-        <div className="font-semibold text-gray-900">{lead.full_name || 'Sem Nome'}</div>
-        <div className="text-xs text-gray-400">ID: {lead.id.split('-')[0]}</div>
-      </td>
+    <Badge size="sm" variant={CRM_STAGE_META[stage].tone}>
+      {CRM_STAGE_META[stage].label}
+    </Badge>
+  )
+}
 
-      {/* Contacto */}
-      <td className="px-6 py-4">
-        <div className="flex flex-col gap-0.5">
-          {lead.email && (
-            <div className="flex items-center gap-1.5 text-xs text-gray-600">
-              <Mail className="h-3 w-3" />
-              <span>{lead.email}</span>
-            </div>
-          )}
-          {lead.phone && (
-            <div className="flex items-center gap-1.5 text-xs text-gray-600">
-              <Phone className="h-3 w-3" />
-              <span>{lead.phone}</span>
-            </div>
-          )}
-          {!lead.email && !lead.phone && (
-            <span className="text-xs text-gray-400">Sem contacto</span>
-          )}
+function TemperatureBadge({ completion }: { completion: number | null }) {
+  const meta = LEAD_TEMPERATURE_META[leadTemperature(completion)]
+  return (
+    <Badge size="sm" variant={meta.tone}>
+      <ThermometerSun aria-hidden="true" />
+      {meta.label}
+    </Badge>
+  )
+}
+
+function QuizBadge({ lead }: { lead: Lead }) {
+  return lead.status === 'completed' ? (
+    <Badge size="sm" variant="success">
+      Concluído
+    </Badge>
+  ) : (
+    <Badge size="sm" variant="neutral">
+      {lead.completion_percentage ?? 0}%
+    </Badge>
+  )
+}
+
+function LeadContact({ lead }: { lead: Lead }) {
+  if (!lead.email && !lead.phone) return <span className="text-sm text-muted-foreground">Sem contato</span>
+  return (
+    <div className="flex min-w-0 flex-col gap-0.5">
+      {lead.email && (
+        <span className="flex min-w-0 items-center gap-1.5 text-sm text-foreground/80">
+          <Mail aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          <span className="truncate">{lead.email}</span>
+        </span>
+      )}
+      {lead.phone && (
+        <span className="flex items-center gap-1.5 text-sm text-foreground/80">
+          <Phone aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          <span>{lead.phone}</span>
+        </span>
+      )}
+    </div>
+  )
+}
+
+function LeadCardItem({ lead, onStageChange }: { lead: Lead; onStageChange: (stage: CrmStage) => void }) {
+  const stage = parseCrmStage(lead.crm_stage)
+  return (
+    <li className="flex gap-3 p-4">
+      <div className="min-w-0 flex-1 space-y-2">
+        <div>
+          <p className="truncate font-semibold text-foreground">{lead.full_name || 'Sem nome'}</p>
+          <p className="text-sm text-muted-foreground">{formatLeadDate(lead.created_at)}</p>
         </div>
-      </td>
+        <LeadContact lead={lead} />
+        <div className="flex flex-wrap gap-1.5">
+          <StageBadge stage={stage} />
+          <TemperatureBadge completion={lead.completion_percentage} />
+          <QuizBadge lead={lead} />
+        </div>
+      </div>
+      <LeadActionMenu lead={lead} stage={stage} onStageChange={onStageChange} />
+    </li>
+  )
+}
 
-      {/* Quiz status */}
-      <td className="px-6 py-4">
-        <span className={cn(
-          'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium',
-          lead.status === 'completed' ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-600',
-        )}>
-          {lead.status === 'completed' ? 'Concluído' : `${lead.completion_percentage ?? 0}%`}
-        </span>
+function LeadRow({ lead, onStageChange }: { lead: Lead; onStageChange: (stage: CrmStage) => void }) {
+  const stage = parseCrmStage(lead.crm_stage)
+  return (
+    <tr className="transition-colors hover:bg-muted/60">
+      <td className="min-w-[11rem] px-4 py-3">
+        <div className="font-semibold text-foreground">{lead.full_name || 'Sem nome'}</div>
+        <div className="whitespace-nowrap text-xs text-muted-foreground">ID: {lead.id.split('-')[0]}</div>
       </td>
-
-      {/* Fase CRM */}
-      <td className="px-6 py-4">
-        <span className={cn(
-          'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium',
-          STAGE_CONFIG[stage].cls,
-        )}>
-          {STAGE_CONFIG[stage].label}
-        </span>
+      <td className="max-w-[15rem] px-4 py-3">
+        <LeadContact lead={lead} />
       </td>
-
-      {/* Temperatura */}
-      <td className="px-6 py-4">
-        <span className={cn(
-          'inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium',
-          temp.color,
-        )}>
-          <ThermometerSun className="h-3 w-3" />
-          {temp.label}
-        </span>
+      <td className="px-4 py-3">
+        <QuizBadge lead={lead} />
       </td>
-
-      {/* Data */}
-      <td className="px-6 py-4 text-xs text-gray-500">
-        {new Date(lead.created_at ?? '').toLocaleDateString('pt-PT')}
+      <td className="px-4 py-3">
+        <StageBadge stage={stage} />
       </td>
-
-      {/* Ações */}
-      <td className="px-6 py-4 text-right">
+      <td className="px-4 py-3">
+        <TemperatureBadge completion={lead.completion_percentage} />
+      </td>
+      <td className="whitespace-nowrap px-4 py-3 text-sm text-muted-foreground">{formatLeadDate(lead.created_at)}</td>
+      <td className="px-4 py-3 text-right">
         <LeadActionMenu lead={lead} stage={stage} onStageChange={onStageChange} />
       </td>
     </tr>
   )
 }
 
-// ─── LeadActionMenu ───────────────────────────────────────────────────────────
-
 function LeadActionMenu({
   lead,
   stage,
   onStageChange,
 }: {
-  lead: Assessment & { crm_stage: CrmStage }
+  lead: Lead
   stage: CrmStage
   onStageChange: (stage: CrmStage) => void
 }) {
-  const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
-
-  // Close on outside click
-  useEffect(() => {
-    if (!open) return
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+  const copyEmail = async () => {
+    if (!lead.email) return
+    try {
+      await navigator.clipboard.writeText(lead.email)
+      toast.success('E-mail copiado')
+    } catch {
+      toast.error('Não foi possível copiar o e-mail')
     }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [open])
-
-  const copyEmail = () => {
-    if (!lead.email) return toast.error('Sem email para copiar')
-    navigator.clipboard.writeText(lead.email)
-    toast.success('Email copiado!')
-    setOpen(false)
   }
-
-  const setStage = (s: CrmStage) => {
-    onStageChange(s)
-    toast.success(`Lead movido para "${s}"`)
-    setOpen(false)
-  }
-
-  const STAGE_NEXT: Array<{ stage: CrmStage; label: string; icon: typeof UserCheck }> = [
-    { stage: 'contactado', label: 'Marcar como Contactado', icon: UserCheck },
-    { stage: 'proposta',   label: 'Marcar Proposta Enviada', icon: CheckCircle2 },
-    { stage: 'convertido', label: 'Marcar como Convertido', icon: CheckCircle2 },
-  ]
 
   return (
-    <div ref={ref} className="relative inline-block text-left">
-      <button
-        onClick={() => setOpen((o) => !o)}
-        className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
-      >
-        <MoreHorizontal className="h-5 w-5" />
-      </button>
-
-      {open && (
-        <div className="absolute right-0 z-50 mt-1 w-52 rounded-xl border border-gray-100 bg-white py-1 shadow-lg">
-          {/* Copy email */}
-          <button
-            onClick={copyEmail}
-            className="flex w-full items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
-          >
-            <Copy className="h-4 w-4 text-gray-400" />
-            Copiar email
-          </button>
-
-          {/* Open mailto */}
+    <DropdownMenu.Root>
+      <DropdownMenu.Trigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label={`Ações do lead ${lead.full_name || lead.email || lead.id.split('-')[0]}`}
+          className="shrink-0 text-muted-foreground"
+        >
+          <MoreHorizontal aria-hidden="true" />
+        </Button>
+      </DropdownMenu.Trigger>
+      <DropdownMenu.Portal>
+        <DropdownMenu.Content
+          align="end"
+          sideOffset={4}
+          collisionPadding={16}
+          className={adminMenuContentClass}
+        >
+          <DropdownMenu.Item className={adminMenuItemClass} disabled={!lead.email} onSelect={() => void copyEmail()}>
+            <Copy aria-hidden="true" className="h-4 w-4 text-muted-foreground" />
+            Copiar e-mail
+          </DropdownMenu.Item>
           {lead.email && (
-            <a
-              href={`mailto:${lead.email}`}
-              onClick={() => setOpen(false)}
-              className="flex w-full items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
-            >
-              <ExternalLink className="h-4 w-4 text-gray-400" />
-              Enviar email
-            </a>
+            <DropdownMenu.Item asChild className={adminMenuItemClass}>
+              <a href={`mailto:${lead.email}`}>
+                <ExternalLink aria-hidden="true" className="h-4 w-4 text-muted-foreground" />
+                Enviar e-mail
+              </a>
+            </DropdownMenu.Item>
           )}
-
-          <div className="my-1 border-t border-gray-100" />
-
-          {/* Stage changes (only show stages different from current) */}
-          {STAGE_NEXT.filter((s) => s.stage !== stage).map(({ stage: s, label, icon: Icon }) => (
-            <button
-              key={s}
-              onClick={() => setStage(s)}
-              className="flex w-full items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
-            >
-              <Icon className="h-4 w-4 text-gray-400" />
-              {label}
-            </button>
-          ))}
-
-          <div className="my-1 border-t border-gray-100" />
-
-          {/* Reset to novo */}
-          {stage !== 'novo' && (
-            <button
-              onClick={() => setStage('novo')}
-              className="flex w-full items-center gap-2 px-4 py-2 text-sm text-gray-500 hover:bg-gray-50"
-            >
-              <X className="h-4 w-4 text-gray-400" />
-              Mover para Novos
-            </button>
-          )}
-        </div>
-      )}
-    </div>
+          <DropdownMenu.Separator className="my-1 h-px bg-border" />
+          <CrmStageMenuItems current={stage} onSelect={onStageChange} />
+        </DropdownMenu.Content>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Root>
   )
 }

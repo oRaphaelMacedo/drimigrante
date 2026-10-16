@@ -1,10 +1,9 @@
-// useAssessment.ts — Day 3: Supabase Backend Integration
+// useAssessment.ts — persistência do quiz e leitura da análise.
 // Persists quiz assessments via SECURITY DEFINER RPC (B02-A21/A22 fix).
 // Anonymous clients no longer have direct REST access to `assessments`;
-// all anon reads/writes go through the upsert_anon_assessment /
-// get_anon_assessment / link_anon_assessment_to_user functions.
+// anon writes go through upsert_anon_assessment and the post-login link
+// through link_anon_assessment_to_user.
 
-import { useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
 import type { Assessment, AssessmentResultClientRow, FullAnalysisRow } from '@/lib/database.types'
 
@@ -152,27 +151,6 @@ export async function joinWaitlist(params: JoinWaitlistParams): Promise<{ ok: bo
 }
 
 /**
- * Fetches an anonymous assessment by id + session_id (proof of ownership).
- * Used before signup when the user has only the localStorage session_id.
- */
-export async function getAnonAssessment(
-  id: string,
-  sessionId: string,
-): Promise<Assessment | null> {
-  const { data, error } = await supabase.rpc('get_anon_assessment', {
-    p_id: id,
-    p_session_id: sessionId,
-  })
-
-  if (error) {
-    console.error('[useAssessment] getAnonAssessment error:', error)
-    return null
-  }
-  const rows = data as Assessment[] | null
-  return rows && rows.length > 0 ? rows[0] : null
-}
-
-/**
  * Links an anonymous assessment to the currently authenticated user.
  * Called after signup/login when localStorage still holds the anon session_id.
  * Idempotent: returns success if already linked to the same user.
@@ -191,21 +169,6 @@ export async function linkAnonAssessmentToUser(
     return { assessment: null, error: error.message }
   }
   return { assessment: (data as Assessment) ?? null, error: null }
-}
-
-/**
- * Fetches the assessment result for a given assessment_id (sem a análise completa).
- * Called after compute-eligibility edge function returns.
- */
-export async function fetchAssessmentResult(assessmentId: string): Promise<AssessmentResultClient | null> {
-  const { data, error } = await supabase
-    .from('assessment_results')
-    .select(ASSESSMENT_RESULT_CLIENT_COLUMNS)
-    .eq('assessment_id', assessmentId)
-    .maybeSingle()
-
-  if (error) return null
-  return data
 }
 
 /**
@@ -230,25 +193,4 @@ export function getFullAnalysisErrorKind(error: unknown): FullAnalysisErrorKind 
   if (code === 'PT404' || /^not found$/i.test(text)) return 'not_found'
   if (code === 'PT401' || /authentication required/i.test(text)) return 'auth_required'
   return 'other'
-}
-
-/**
- * Fetches the latest assessment for the currently logged-in user.
- * Authenticated path — uses standard RLS (user_id = auth.uid()).
- */
-export function useAssessment() {
-  const getUserLatestAssessment = useCallback(async (email: string) => {
-    const { data } = await supabase
-      .from('assessments')
-      .select(`id, full_name, email, status, completed_at, answers, assessment_results(${ASSESSMENT_RESULT_CLIENT_COLUMNS})`)
-      .eq('email', email)
-      .eq('status', 'completed')
-      .order('completed_at', { ascending: false })
-      .limit(1)
-      .maybeSingle()
-
-    return data ?? null
-  }, [])
-
-  return { getUserLatestAssessment }
 }

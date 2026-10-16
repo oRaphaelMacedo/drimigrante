@@ -2,7 +2,7 @@
  * Layout da área logada (DI-045).
  *
  * - Desktop (≥768px): barra lateral como antes.
- * - Celular: cabeçalho com o logo (leva ao Início) e barra de navegação
+ * - Celular: cabeçalho com o monograma e o nome (leva ao Início) e barra de navegação
  *   inferior com todas as seções a um toque. Sair fica em Conta, com confirmação.
  * - O conteúdo reserva espaço para a barra inferior, a safe-area e o banner de
  *   cookies (`--cookie-banner-h`), para o último bloco nunca ficar escondido.
@@ -17,6 +17,7 @@ import { BottomNav } from '@/components/dashboard/BottomNav'
 import { SignOutButton } from '@/components/dashboard/SignOutButton'
 import { markAnalysisOpened } from '@/components/dashboard/dashboard-storage'
 import { resolveNavItems } from '@/components/dashboard/nav-items'
+import { BrandMark } from '@/components/layout/BrandLogo'
 import { useAuth } from '@/hooks/useAuth'
 import { cn, getInitials } from '@/lib/utils'
 
@@ -47,8 +48,9 @@ export function DashboardLayout() {
         <div className="flex h-16 items-center border-b px-6">
           <Link
             to="/dashboard"
-            className="inline-flex min-h-11 items-center rounded-md text-base font-bold text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="inline-flex min-h-11 items-center gap-2 rounded-md text-base font-bold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
+            <BrandMark className="h-7 w-7" />
             Doutor Imigrante
           </Link>
         </div>
@@ -115,8 +117,9 @@ export function DashboardLayout() {
           <div className="flex h-16 items-center justify-between gap-3 px-4">
             <Link
               to="/dashboard"
-              className="-ml-1 inline-flex min-h-11 items-center rounded-md px-1 text-base font-bold text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="-ml-1 inline-flex min-h-11 items-center gap-2 rounded-md px-1 text-base font-bold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
+              <BrandMark className="h-7 w-7" />
               Doutor Imigrante
             </Link>
             {isHubUser && (
