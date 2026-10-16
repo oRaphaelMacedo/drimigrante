@@ -17,9 +17,13 @@
 // DI-033: results_viewed e paywall_viewed uma vez por diagnóstico. O
 //   quiz_completed é enviado só pelo useQuiz (aqui contaria em dobro, inclusive
 //   em outro aparelho).
+// DI-053: quem já pagou (ou enquanto a conta é confirmada) não vê o checkout:
+//   vê "Ir para o painel" (results-access.ts + ResultsAccessCard). Partilha com
+//   a família (link do quiz grátis, sem PII) e "Já comprou? Entrar" para quem
+//   volta sem login.
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { forwardRef, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { ArrowRight, ChevronDown, Info, Link2Off, Loader2, RotateCcw, WifiOff, X } from 'lucide-react'
+import { ArrowRight, ChevronDown, Info, Link2Off, Loader2, LogIn, RotateCcw, WifiOff, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { QuizResult } from '@/hooks/useQuiz'
 import { pruneAnswers, suggestVisas, type VisaSuggestion } from '@/data/quiz-questions'
@@ -27,6 +31,7 @@ import { track, trackOnce } from '@/lib/analytics'
 import { useAuth } from '@/hooks/useAuth'
 import { readStoredCheckoutData, useStartCheckout, type CheckoutError } from '@/hooks/useStartCheckout'
 import { QUIZ_RESULT_STORAGE_KEY } from '@/lib/stored-quiz-result'
+import { hasStoredAuthSession } from '@/lib/stored-session'
 import { categoryForPercentage, getCategoryPresentation, isScoreCategory, CATEGORY_THRESHOLDS } from '@/lib/category'
 import { updateAccessEmail } from '@/lib/access-email'
 import {
@@ -43,9 +48,12 @@ import { Button, Card, Container } from '@/components/ui'
 import { CategoryIcon } from '@/components/results/CategoryIcon'
 import { PathTeaser } from '@/components/results/PathTeaser'
 import { PAYWALL_ID, PAYWALL_TITLE_ID, PaywallCard } from '@/components/results/PaywallCard'
+import { ResultsAccessCard } from '@/components/results/ResultsAccessCard'
+import { getResultsAccessView, showsCheckout } from '@/components/results/results-access'
 import { SaveResultLink } from '@/components/results/SaveResultLink'
 import { StickyBuyBar } from '@/components/results/StickyBuyBar'
 import { firstNameOf, sortPathways } from '@/components/results/results-copy'
+import { ShareWithFamily } from '@/components/ShareButton'
 
 /** Resultado pronto para a tela, com a identidade do envio do quiz. */
 interface LoadedResult {
@@ -221,8 +229,18 @@ export function ResultsPage() {
 
 function ResultsContent({ loaded, notice }: { loaded: LoadedResult; notice: ReactNode }) {
   const navigate = useNavigate()
-  const { hasAccess } = useAuth()
-  const paid = hasAccess('dashboard')
+  const { session, loading, userDataError, access, hasAccess, refreshUser } = useAuth()
+  const [mayHaveSession] = useState(() => hasStoredAuthSession())
+  const accessView = getResultsAccessView({
+    loading,
+    hasSession: !!session,
+    mayHaveSession,
+    userDataError,
+    access,
+    canOpenDashboard: hasAccess('dashboard'),
+  })
+  // Já pagou ou ainda não sabemos: nada de oferta, barra fixa ou "Ver o que inclui".
+  const paid = !showsCheckout(accessView)
   const checkout = useStartCheckout()
   const { score, visas, leadInfo } = loaded.result
   const category = score.category
@@ -240,9 +258,13 @@ function ResultsContent({ loaded, notice }: { loaded: LoadedResult; notice: Reac
   const firstName = firstNameOf(leadInfo?.fullName)
 
   // Um evento por diagnóstico (recarregar /results não conta de novo).
+  // Espera a conta ser confirmada para registrar has_access com o valor certo.
+  const accessKnown = accessView !== 'checking'
+  const hasPaidAccess = accessView === 'active'
   useEffect(() => {
-    trackOnce('results_viewed', onceKey, { category, has_access: paid })
-  }, [onceKey, category, paid])
+    if (!accessKnown) return
+    trackOnce('results_viewed', onceKey, { category, has_access: hasPaidAccess })
+  }, [onceKey, category, accessKnown, hasPaidAccess])
 
   // Token do "Guardar meu resultado" no aparelho do quiz (posse pelo session_id).
   const { assessmentId, sessionId } = loaded
@@ -310,26 +332,49 @@ function ResultsContent({ loaded, notice }: { loaded: LoadedResult; notice: Reac
 
         <ScoreCard ref={scoreRef} score={score} firstName={firstName} onSeeOffer={paid ? undefined : goToOffer} />
 
+        {/* Já pagou (ou a conta não carregou): o atalho para o painel vem logo depois do resultado. */}
+        {accessView !== 'none' && accessView !== 'checking' && (
+          <ResultsAccessCard view={accessView} expiresAt={access?.expiresAt ?? null} onRetry={refreshUser} />
+        )}
+
         <PathTeaser pathways={pathways} />
 
-        <PaywallCard
-          ctaRef={ctaRef}
-          firstName={firstName}
-          category={category}
-          strongestPath={pathways[0] ?? null}
-          paid={paid}
-          onceKey={onceKey}
-          email={email}
-          emailEditable={anonymous}
-          onEmailSave={handleEmailSave}
-          phase={storageBlocked ? 'error' : checkout.phase}
-          isPending={checkout.isPending}
-          error={storageBlocked ? STORAGE_BLOCKED_ERROR : checkout.error}
-          onBuy={() => buy('paywall')}
-        />
+        {/* Confirmando a conta: espera no lugar da oferta (sem checkout até saber). */}
+        {accessView === 'checking' && (
+          <ResultsAccessCard view="checking" expiresAt={null} onRetry={refreshUser} />
+        )}
+
+        {accessView === 'none' && (
+          <PaywallCard
+            ctaRef={ctaRef}
+            firstName={firstName}
+            category={category}
+            strongestPath={pathways[0] ?? null}
+            paid={false}
+            onceKey={onceKey}
+            email={email}
+            emailEditable={anonymous}
+            onEmailSave={handleEmailSave}
+            phase={storageBlocked ? 'error' : checkout.phase}
+            isPending={checkout.isPending}
+            error={storageBlocked ? STORAGE_BLOCKED_ERROR : checkout.error}
+            onBuy={() => buy('paywall')}
+          />
+        )}
+
+        <ShareWithFamily placement="results" />
 
         <div className="flex flex-col items-center gap-4 pt-1">
           {resumeToken && !paid && <SaveResultLink token={resumeToken} />}
+          {/* Quem já comprou e voltou sem login (outro aparelho, sessão expirada). */}
+          {accessView === 'none' && !session && (
+            <Button asChild variant="link" size="sm" data-testid="results-login-link">
+              <Link to="/login" state={{ returnTo: '/dashboard' }}>
+                <LogIn aria-hidden="true" />
+                Já comprou a análise? Entrar
+              </Link>
+            </Button>
+          )}
           <Button
             id="results-restart-btn"
             variant="ghost"

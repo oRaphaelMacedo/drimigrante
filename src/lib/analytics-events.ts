@@ -35,6 +35,12 @@ export interface AnalyticsEventMap {
   /** Contato informado no fim do quiz (vira lead). GA4: generate_lead · Meta: Lead */
   lead_submitted: { category?: string }
   waitlist_joined: { processo_tipo?: string }
+  /**
+   * Tela "em breve" do quiz: clique em "Verificar se tenho direito à
+   * nacionalidade" (troca o objetivo para nacionalidade). `processo_tipo`: o
+   * objetivo que estava escolhido.
+   */
+  waitlist_nationality_clicked: { processo_tipo?: string } & Placement
 
   // ── Resultado e paywall ───────────────────────────────────────────────────
   results_viewed: { category?: string; has_access?: boolean }
@@ -78,10 +84,20 @@ export interface AnalyticsEventMap {
   checklist_item_checked: { item_key?: string; state?: string; pathway?: string }
 
   // ── Partilha, retorno e PWA ───────────────────────────────────────────────
+  /**
+   * Partilha do quiz grátis (link /quiz?utm_source=share, sem PII).
+   * `method`: 'native' (navigator.share), 'whatsapp' ou 'copy_link'.
+   * `placement`: onde estava o botão ('results', 'analysis').
+   */
   share_clicked: { method?: string } & Placement
+  /** Banner "seu pré-diagnóstico está guardado" exibido (uma vez por dia e resultado). */
   returning_banner_viewed: NoProps
+  /** Clique em "Ver meu resultado" no banner. */
   returning_banner_clicked: NoProps
+  /** Banner dispensado (volta em 7 dias ou com um resultado novo). */
   returning_banner_dismissed: NoProps
+  /** App instalado aberto pelo ícone (/?source=pwa). `signed_in`: foi direto para o painel. */
+  pwa_launched: { signed_in: boolean }
   pwa_install_card_viewed: { platform?: string }
   pwa_install_clicked: { platform?: string }
   pwa_install_accepted: { platform?: string }
@@ -113,6 +129,7 @@ export const ANALYTICS_EVENT_NAMES = [
   'quiz_completed',
   'lead_submitted',
   'waitlist_joined',
+  'waitlist_nationality_clicked',
   'results_viewed',
   'paywall_viewed',
   'paywall_cta_clicked',
@@ -141,6 +158,7 @@ export const ANALYTICS_EVENT_NAMES = [
   'returning_banner_viewed',
   'returning_banner_clicked',
   'returning_banner_dismissed',
+  'pwa_launched',
   'pwa_install_card_viewed',
   'pwa_install_clicked',
   'pwa_install_accepted',

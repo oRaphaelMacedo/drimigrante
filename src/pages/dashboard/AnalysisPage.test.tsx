@@ -390,3 +390,32 @@ describe('AnalysisPage — sem acesso', () => {
     expect(h.invoke).not.toHaveBeenCalled()
   })
 })
+
+describe('AnalysisPage — partilha com a família (DI-053)', () => {
+  it('convite para o quiz grátis, fora da impressão e sem dados da conta no link', async () => {
+    const original = Object.getOwnPropertyDescriptor(navigator, 'share')
+    Object.defineProperty(navigator, 'share', { configurable: true, writable: true, value: undefined })
+    try {
+      renderPage()
+      await screen.findByRole('heading', { name: 'Caminhos para a nacionalidade' })
+
+      const share = screen.getByTestId('share-with-family')
+      expect(share.closest('[data-print-hide]')).not.toBeNull()
+      await userEvent.click(within(share).getByRole('button', { name: 'Compartilhar com a família' }))
+
+      const href = within(share).getByRole('link', { name: 'Enviar pelo WhatsApp' }).getAttribute('href') ?? ''
+      const text = new URL(href).searchParams.get('text') ?? ''
+      const shared = new URL(text.slice(text.indexOf('http')))
+      expect(shared.pathname).toBe('/quiz')
+      expect(Object.fromEntries(shared.searchParams)).toEqual({
+        utm_source: 'share',
+        utm_medium: 'whatsapp',
+        utm_campaign: 'analysis',
+      })
+      expect(text).not.toMatch(/Ana|ana@example\.com|0000-|%/)
+    } finally {
+      if (original) Object.defineProperty(navigator, 'share', original)
+      else delete (navigator as { share?: unknown }).share
+    }
+  })
+})
