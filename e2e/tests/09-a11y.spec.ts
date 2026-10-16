@@ -254,12 +254,13 @@ test.describe('quiz — papéis e teclado', () => {
 
     const radios = page.getByRole('radiogroup').getByRole('radio')
     await expect(radios).toHaveCount(4)
-    await expect(page.getByRole('radio', { name: /Nacionalidade Portuguesa/ })).toHaveAttribute('aria-checked', 'false')
+    await expect(page.getByRole('radio', { name: /nacionalidade portuguesa/i })).toHaveAttribute('aria-checked', 'false')
 
     await answer(page, ['nacionalidade'])
     await expectQuestion(page, 'caso_tipo')
     const checkboxes = page.getByRole('group').getByRole('checkbox')
-    await expect(checkboxes).toHaveCount(6)
+    // A–F + "Nenhuma destas situações" (DI-075).
+    await expect(checkboxes).toHaveCount(7)
     await page.getByTestId('quiz-option-B').click()
     await expect(page.getByTestId('quiz-option-B')).toHaveAttribute('aria-checked', 'true')
 

@@ -21,6 +21,43 @@ export interface QuizOption {
   score: number
   isEliminatory?: boolean
   aiNote?: string // instrução para a IA ao gerar o relatório
+  /**
+   * Opção exclusiva de múltipla escolha (ex.: "Nenhuma destas situações"):
+   * marcá-la desmarca as outras, e marcar outra a desmarca (DI-075). As linhas
+   * do banco não têm esse campo: vale também pela chave (ver isExclusiveOption).
+   */
+  isExclusive?: boolean
+}
+
+/**
+ * Chave da opção "Nenhuma destas situações" de caso_tipo (DI-075). Leva à
+ * análise personalizada em suggestVisas e não soma pontos.
+ */
+export const NONE_OPTION_KEY = 'nenhum'
+
+/** true para a opção exclusiva da múltipla escolha (campo ou chave 'nenhum'). */
+export function isExclusiveOption(option: Pick<QuizOption, 'key' | 'isExclusive'>): boolean {
+  return option.isExclusive === true || option.key === NONE_OPTION_KEY
+}
+
+/**
+ * Próxima seleção de uma múltipla escolha ao tocar em `key` (DI-075):
+ * - opção exclusiva: fica sozinha (ou desmarca, se já estava marcada);
+ * - outra opção: alterna a marcação e tira a exclusiva, se houver.
+ * Mantém a ordem em que as opções foram marcadas.
+ */
+export function toggleMultiAnswer(
+  options: ReadonlyArray<Pick<QuizOption, 'key' | 'isExclusive'>>,
+  selected: readonly string[],
+  key: string,
+): string[] {
+  const option = options.find((o) => o.key === key)
+  if (option && isExclusiveOption(option)) {
+    return selected.includes(key) ? [] : [key]
+  }
+  const exclusive = new Set(options.filter(isExclusiveOption).map((o) => o.key))
+  const kept = selected.filter((k) => !exclusive.has(k))
+  return kept.includes(key) ? kept.filter((k) => k !== key) : [...kept, key]
 }
 
 // Condição de exibição condicional
@@ -59,13 +96,13 @@ export interface QuizQuestion {
 }
 
 export const QUIZ_THEMES = [
-  { code: 'processo',     name: 'Tipo de Processo',  color: '#3b62f6' },
-  { code: 'selecao',      name: 'Seleção de Caso',   color: '#6366f1' },
+  { code: 'processo',     name: 'Tipo de processo',  color: '#3b62f6' },
+  { code: 'selecao',      name: 'Seleção de caso',   color: '#6366f1' },
   { code: 'descendencia', name: 'Descendência',       color: '#8b5cf6' },
   { code: 'matrimonio',   name: 'Matrimônio',         color: '#f59e0b' },
   { code: 'nascimento',   name: 'Nascimento',         color: '#10b981' },
   { code: 'residencia',   name: 'Residência',         color: '#ef4444' },
-  { code: 'ex_colonias',  name: 'Ex-Colónias',        color: '#06b6d4' },
+  { code: 'ex_colonias',  name: 'Ex-colônias',        color: '#06b6d4' },
 ] as const
 
 export const QUIZ_QUESTIONS: QuizQuestion[] = [
@@ -74,15 +111,15 @@ export const QUIZ_QUESTIONS: QuizQuestion[] = [
   {
     key: 'processo_tipo',
     themeCode: 'processo',
-    themeName: 'Tipo de Processo',
+    themeName: 'Tipo de processo',
     themeColor: '#3b62f6',
     fieldType: 'radio',
     text: 'Qual é o seu objetivo principal?',
     isRequired: true,
     options: [
-      { key: 'nacionalidade',  label: 'Quero obter a Nacionalidade Portuguesa',                        score: 0 },
-      { key: 'visto',          label: 'Quero obter um Visto para morar/trabalhar em Portugal',          score: 0 },
-      { key: 'regularizacao',  label: 'Já estou em Portugal e quero regularizar a minha situação',      score: 0 },
+      { key: 'nacionalidade',  label: 'Quero obter a nacionalidade portuguesa',                         score: 0 },
+      { key: 'visto',          label: 'Quero obter um visto para morar ou trabalhar em Portugal',       score: 0 },
+      { key: 'regularizacao',  label: 'Já estou em Portugal e quero regularizar minha situação',        score: 0 },
       { key: 'nao_sei',        label: 'Não sei por onde começar',                                       score: 0 },
     ],
   },
@@ -91,20 +128,23 @@ export const QUIZ_QUESTIONS: QuizQuestion[] = [
   {
     key: 'caso_tipo',
     themeCode: 'selecao',
-    themeName: 'Seleção de Caso',
+    themeName: 'Seleção de caso',
     themeColor: '#6366f1',
     fieldType: 'multiselect',
-    text: 'Eu sou (marque todas as respostas que se aplicam a você):',
-    helpText: 'Pode selecionar mais de uma opção.',
+    text: 'Quais destas situações se aplicam a você?',
+    helpText: 'Marque todas as que se aplicam. Se nenhuma se aplicar, marque “Nenhuma destas situações”.',
     isRequired: true,
     showIf: { questionKey: 'processo_tipo', answerKey: 'nacionalidade' },
     options: [
-      { key: 'A', label: 'Filho(a), Neto(a), Bisneto(a) ou Trineto(a) de um(a) português(a) nato(a)',           score: 0 },
-      { key: 'B', label: 'Casado(a) ou em união estável documentada com cidadão(ã) português(a)',               score: 0 },
+      { key: 'A', label: 'Sou filho(a), neto(a), bisneto(a) ou trineto(a) de português(a) nato(a)',             score: 0 },
+      { key: 'B', label: 'Sou casado(a) ou vivo em união estável documentada com cidadão(ã) português(a)',      score: 0 },
       { key: 'C', label: 'Nasci em Portugal, mas não tenho nacionalidade portuguesa',                           score: 0 },
       { key: 'D', label: 'Moro em Portugal',                                                                   score: 0 },
-      { key: 'E', label: 'Já fui português(a) e perdi a minha nacionalidade',                                  score: 0 },
-      { key: 'F', label: 'A minha família é originária das ex-colónias portuguesas',                           score: 0 },
+      { key: 'E', label: 'Já fui português(a) e perdi minha nacionalidade',                                    score: 0 },
+      { key: 'F', label: 'Minha família é originária das ex-colônias portuguesas',                             score: 0 },
+      // Exclusiva (DI-075): sem ela, quem não se encaixa em A–F ficava preso com "Próximo" desabilitado.
+      { key: NONE_OPTION_KEY, label: 'Nenhuma destas situações', score: 0, isExclusive: true,
+        aiNote: 'não se encaixa em nenhuma das situações listadas — análise personalizada' },
     ],
   },
 
@@ -119,10 +159,10 @@ export const QUIZ_QUESTIONS: QuizQuestion[] = [
     isRequired: true,
     showIf: { questionKey: 'caso_tipo', answerContains: 'A' },
     options: [
-      { key: 'pai_mae', label: 'O meu pai ou a minha mãe',                            score: 40, aiNote: 'descendência de 1.º grau — elegibilidade alta' },
-      { key: 'avo',     label: 'O meu avô ou a minha avó',                             score: 30, aiNote: 'descendência de 2.º grau — elegibilidade média-alta; laços com Portugal são importantes' },
-      { key: 'bisavo',  label: 'O meu bisavô ou a minha bisavó',                       score: 20, aiNote: 'descendência de 3.º grau — elegibilidade média; laços com Portugal são determinantes' },
-      { key: 'trisavo', label: 'Trisavô/Trisavó ou parentes ainda mais distantes',    score: 5,  aiNote: 'descendência muito distante — não elegível para nacionalidade; sugerir pesquisa genealógica para resgate histórico' },
+      { key: 'pai_mae', label: 'Meu pai ou minha mãe',                                score: 40, aiNote: 'descendência de 1.º grau — elegibilidade alta' },
+      { key: 'avo',     label: 'Meu avô ou minha avó',                                 score: 30, aiNote: 'descendência de 2.º grau — elegibilidade média-alta; laços com Portugal são importantes' },
+      { key: 'bisavo',  label: 'Meu bisavô ou minha bisavó',                           score: 20, aiNote: 'descendência de 3.º grau — elegibilidade média; laços com Portugal são determinantes' },
+      { key: 'trisavo', label: 'Trisavô, trisavó ou parentes mais distantes',         score: 5,  aiNote: 'descendência muito distante — não elegível para nacionalidade; sugerir pesquisa genealógica para resgate histórico' },
       { key: 'nao_sei', label: 'Não sei ao certo',                                     score: 0,  aiNote: 'incerteza sobre antepassados — explicar como começar uma pesquisa genealógica (registros de família, certidões, arquivos) e quando vale procurar um profissional' },
     ],
   },
@@ -330,8 +370,8 @@ export const QUIZ_QUESTIONS: QuizQuestion[] = [
     showIf: { questionKey: 'd4_consultou_advogado', answerKey: 'sim' },
     options: [
       { key: 'era_caro',    label: 'Era muito caro',                                               score: 0, aiNote: 'custo como barreira — perguntar se agora está mais preparado financeiramente' },
-      { key: 'sem_firmeza', label: 'Não senti firmeza / O advogado não pareceu competente',        score: 0, aiNote: 'insatisfeito com advogado anterior — explicar como avaliar um profissional antes de contratar' },
-      { key: 'sozinho',     label: 'Quero resolver a minha situação sozinho(a)',                  score: 0, aiNote: 'perfil DIY — alertar sobre riscos e prazos longos da AIMA; sugerir pelo menos uma primeira consulta' },
+      { key: 'sem_firmeza', label: 'Não senti firmeza ou o advogado não pareceu competente',       score: 0, aiNote: 'insatisfeito com advogado anterior — explicar como avaliar um profissional antes de contratar' },
+      { key: 'sozinho',     label: 'Quero resolver minha situação sozinho(a)',                    score: 0, aiNote: 'perfil DIY — alertar sobre riscos e prazos longos da AIMA; sugerir pelo menos uma primeira consulta' },
       { key: 'outros',      label: 'Outros motivos',                                              score: 0, aiNote: 'outros motivos — indicar em que situações vale procurar um profissional' },
     ],
   },
@@ -384,11 +424,11 @@ export const QUIZ_QUESTIONS: QuizQuestion[] = [
     ],
   },
 
-  // ─── CASO F — EX-COLÓNIAS ────────────────────────────────────────────────
+  // ─── CASO F — EX-COLÔNIAS ────────────────────────────────────────────────
   {
     key: 'f1_mora_portugal',
     themeCode: 'ex_colonias',
-    themeName: 'Ex-Colónias',
+    themeName: 'Ex-colônias',
     themeColor: '#06b6d4',
     fieldType: 'radio',
     text: 'Você mora atualmente em Portugal?',
@@ -402,15 +442,15 @@ export const QUIZ_QUESTIONS: QuizQuestion[] = [
   {
     key: 'f2_quando_mudou',
     themeCode: 'ex_colonias',
-    themeName: 'Ex-Colónias',
+    themeName: 'Ex-colônias',
     themeColor: '#06b6d4',
     fieldType: 'radio',
     text: 'Quando você se mudou para Portugal?',
     isRequired: true,
     showIf: { questionKey: 'f1_mora_portugal', answerKey: 'sim' },
     options: [
-      { key: 'antes_1974',  label: 'Antes de 25 de Abril de 1974',  score: 65, aiNote: 'mudou-se antes do 25 de Abril — situação especial com boas chances de obter a nacionalidade; análise jurídica necessária' },
-      { key: 'depois_1974', label: 'Depois de 25 de Abril de 1974', score: 20, aiNote: 'depois do 25 de Abril — elegibilidade depende da nova legislação sobre ex-colónias; aguarda análise jurídica atualizada' },
+      { key: 'antes_1974',  label: 'Antes de 25 de abril de 1974',  score: 65, aiNote: 'mudou-se antes do 25 de abril — situação especial com boas chances de obter a nacionalidade; análise jurídica necessária' },
+      { key: 'depois_1974', label: 'Depois de 25 de abril de 1974', score: 20, aiNote: 'depois do 25 de abril — elegibilidade depende da nova legislação sobre ex-colônias; aguarda análise jurídica atualizada' },
     ],
   },
 ]
@@ -663,16 +703,16 @@ export function suggestVisas(answers: Record<string, string>): VisaSuggestion[] 
     })
   }
 
-  // Caso F — Ex-Colónias
+  // Caso F — ex-colônias
   if (casos.includes('F')) {
     const quando = answers.f2_quando_mudou
     suggestions.push({
       code: 'nacionalidade_ex_colonias',
-      name: 'Nacionalidade — Ex-Colónias',
+      name: 'Nacionalidade — Ex-colônias',
       match: quando === 'antes_1974' ? 'strong' : 'possible',
       reason:
         quando === 'antes_1974'
-          ? 'Ter se mudado para Portugal antes de 25 de Abril de 1974 pode dar direitos especiais à nacionalidade portuguesa.'
+          ? 'Ter se mudado para Portugal antes de 25 de abril de 1974 pode dar direitos especiais à nacionalidade portuguesa.'
           : 'A legislação sobre as ex-colônias pode abrir caminhos para você, mas o caso pede uma análise atualizada.',
     })
   }

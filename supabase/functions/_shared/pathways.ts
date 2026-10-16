@@ -63,6 +63,7 @@ export const QUESTION_CATALOG: CatalogQuestion[] = [
       D: 'Mora em Portugal',
       E: 'Já teve a nacionalidade portuguesa e a perdeu',
       F: 'Família originária das ex-colônias portuguesas',
+      nenhum: 'Nenhuma das situações listadas',
     },
   },
   // ─── Caso A — descendência ───────────────────────────────────────────────
@@ -378,7 +379,7 @@ export function suggestPathways(answers: Answers): Pathway[] {
     const quando = answers.f2_quando_mudou
     suggestions.push({
       code: 'nacionalidade_ex_colonias',
-      name: 'Nacionalidade — Ex-Colónias',
+      name: 'Nacionalidade — Ex-colônias',
       match: quando === 'antes_1974' ? 'strong' : 'possible',
       reason:
         quando === 'antes_1974'

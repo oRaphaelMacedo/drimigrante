@@ -69,7 +69,7 @@ export const NEVER_SHOW: ShowIfRule = { any: [] }
  */
 export const OPTION_SCORES: Record<string, Record<string, number>> = {
   processo_tipo: { nacionalidade: 0, visto: 0, regularizacao: 0, nao_sei: 0 },
-  caso_tipo: { A: 0, B: 0, C: 0, D: 0, E: 0, F: 0 },
+  caso_tipo: { A: 0, B: 0, C: 0, D: 0, E: 0, F: 0, nenhum: 0 },
   a1_antepassado: { pai_mae: 40, avo: 30, bisavo: 20, trisavo: 5, nao_sei: 0 },
   a2_documento: { sim: 20, nao: 0 },
   a3_interesse_docs: { sim: 8, nao: 0 },

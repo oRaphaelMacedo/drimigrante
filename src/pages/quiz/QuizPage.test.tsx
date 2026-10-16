@@ -5,7 +5,8 @@
  *  - múltipla escolha não avança sozinha;
  *  - ao avançar: topo da página e foco no título da pergunta;
  *  - toque "fantasma" logo depois do auto-avanço não pula a pergunta seguinte;
- *  - primeira pergunta sem "de N" e sem "Ver meu resultado".
+ *  - primeira pergunta sem "de N" e sem "Ver meu resultado";
+ *  - "Nenhuma destas situações" (DI-075) é exclusiva e libera o "Próximo".
  */
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
@@ -79,7 +80,7 @@ describe('QuizPage — auto-avanço e foco (DI-039)', () => {
     await advance(200)
     expect(title()).toHaveTextContent('Qual é o seu objetivo principal?')
     await advance(200)
-    expect(title()).toHaveTextContent('Eu sou')
+    expect(title()).toHaveTextContent('Quais destas situações')
     expect(router.state.location.search).toBe('?passo=2')
     expect(window.scrollTo).toHaveBeenCalledWith(0, 0)
     expect(document.activeElement).toBe(title())
@@ -103,7 +104,7 @@ describe('QuizPage — auto-avanço e foco (DI-039)', () => {
     await advance(1000) // auto-avanço + tempo de ler a pergunta nova
     fireEvent.click(screen.getByTestId('quiz-option-A'))
     await advance(800)
-    expect(title()).toHaveTextContent('Eu sou')
+    expect(title()).toHaveTextContent('Quais destas situações')
     expect(screen.getByTestId('quiz-progress-label')).toHaveTextContent('Pergunta 2 de 4')
   })
 
@@ -111,10 +112,10 @@ describe('QuizPage — auto-avanço e foco (DI-039)', () => {
     await start()
     fireEvent.click(screen.getByTestId('quiz-option-nacionalidade'))
     await advance(300)
-    expect(title()).toHaveTextContent('Eu sou')
+    expect(title()).toHaveTextContent('Quais destas situações')
     fireEvent.click(screen.getByTestId('quiz-next'))
     await advance(50)
-    expect(title()).toHaveTextContent('Eu sou')
+    expect(title()).toHaveTextContent('Quais destas situações')
     expect(screen.queryByRole('alert')).toBeNull()
     // Só o primeiro toque é ignorado: responder e tocar em "Próximo" segue normal.
     fireEvent.click(screen.getByTestId('quiz-option-B'))
@@ -176,5 +177,48 @@ describe('QuizPage — auto-avanço e foco (DI-039)', () => {
     fireEvent.click(screen.getByTestId('quiz-next'))
     await advance(0)
     expect(screen.getByTestId('quiz-progress-label')).toHaveTextContent('100%')
+  })
+})
+
+describe('QuizPage — "Nenhuma destas situações" (DI-075)', () => {
+  async function reachCaseQuestion() {
+    await start()
+    fireEvent.click(screen.getByTestId('quiz-option-nacionalidade'))
+    await advance(1000)
+    expect(title()).toHaveTextContent('Quais destas situações')
+  }
+
+  it('marcar "Nenhuma" desmarca as outras, e marcar outra desmarca "Nenhuma"', async () => {
+    await reachCaseQuestion()
+    fireEvent.click(screen.getByTestId('quiz-option-A'))
+    fireEvent.click(screen.getByTestId('quiz-option-D'))
+    await advance(0)
+    expect(screen.getByTestId('quiz-option-A')).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByTestId('quiz-option-D')).toHaveAttribute('aria-checked', 'true')
+
+    fireEvent.click(screen.getByTestId('quiz-option-nenhum'))
+    await advance(0)
+    expect(screen.getByTestId('quiz-option-nenhum')).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByTestId('quiz-option-A')).toHaveAttribute('aria-checked', 'false')
+    expect(screen.getByTestId('quiz-option-D')).toHaveAttribute('aria-checked', 'false')
+
+    fireEvent.click(screen.getByTestId('quiz-option-B'))
+    await advance(0)
+    expect(screen.getByTestId('quiz-option-B')).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByTestId('quiz-option-nenhum')).toHaveAttribute('aria-checked', 'false')
+  })
+
+  it('só "Nenhuma" já libera o "Próximo" e leva ao resultado, sem perguntas de caso', async () => {
+    await reachCaseQuestion()
+    fireEvent.click(screen.getByTestId('quiz-option-nenhum'))
+    await advance(800)
+    // Múltipla escolha não avança sozinha; o botão já pede o resultado.
+    expect(title()).toHaveTextContent('Quais destas situações')
+    expect(screen.getByTestId('quiz-next')).toHaveTextContent('Ver meu resultado')
+    fireEvent.click(screen.getByTestId('quiz-next'))
+    await advance(0)
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.queryByTestId('quiz-question')).toBeNull()
+    expect(screen.getByTestId('quiz-progress-label')).toHaveTextContent('Perguntas concluídas')
   })
 })

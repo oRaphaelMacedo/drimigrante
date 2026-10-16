@@ -20,7 +20,7 @@ export interface SeoMeta {
   /** Título da página, sem a marca (o sufixo " — Doutor Imigrante" é automático). */
   title?: string
   description?: string
-  /** Caminho (ex.: `/og-image.jpg`) ou URL absoluta da imagem de partilha. */
+  /** Caminho (ex.: `/og-image.jpg`) ou URL absoluta da imagem de compartilhamento. */
   ogImage?: string
   /** `true` = `noindex,nofollow` (rotas privadas, do funil e 404). */
   noindex?: boolean
@@ -38,10 +38,11 @@ export const DEFAULT_TITLE = 'Doutor Imigrante — Diagnóstico gratuito de naci
 export const DEFAULT_DESCRIPTION =
   'Responda a um diagnóstico gratuito e veja quais caminhos para a nacionalidade portuguesa combinam com o seu perfil: descendência, casamento, residência e outros.'
 
-/** Imagem de partilha 1200×630 (public/og-image.jpg). */
+/** Imagem de compartilhamento 1200×630 (public/og-image.jpg). */
 export const DEFAULT_OG_IMAGE = `${SITE_URL}/og-image.jpg`
 
-const OG_LOCALE = 'pt_PT'
+/** Idioma do site: pt-BR (público majoritariamente brasileiro, DI-074). Igual ao index.html. */
+export const OG_LOCALE = 'pt_BR'
 
 /** Converte um caminho em URL absoluta no domínio canônico. */
 export function toAbsoluteUrl(pathOrUrl: string): string {

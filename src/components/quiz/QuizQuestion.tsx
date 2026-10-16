@@ -5,13 +5,14 @@
 //   toque/clique, Enter ou Espaço confirmam (`commit: true`) e permitem o
 //   auto-avanço feito pela página (DI-039).
 // - Múltipla escolha com semântica de group/checkbox (DI-069); select e número
-//   nomeados pelo título da pergunta.
+//   nomeados pelo título da pergunta. Opção exclusiva ("Nenhuma destas
+//   situações", DI-075) separada por um "ou": marcá-la desmarca as outras.
 // - Com "reduzir movimento" do sistema, sem animação de entrada (DI-069).
 // - O tema aparece uma vez só, no progresso (DI-040).
 import * as React from 'react'
 import { Check, ChevronDown } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import type { QuizQuestion, QuizOption } from '@/data/quiz-questions'
+import { isExclusiveOption, toggleMultiAnswer, type QuizQuestion, type QuizOption } from '@/data/quiz-questions'
 import { useKeyboardActivation } from './keyboard-activation'
 
 export interface QuizAnswerMeta {
@@ -254,40 +255,51 @@ function MultiCheckbox({
   const activation = useKeyboardActivation()
 
   const toggle = (key: string, keyboard: boolean) => {
-    const next = selected.includes(key) ? selected.filter((k) => k !== key) : [...selected, key]
+    // Opção exclusiva fica sozinha; qualquer outra tira a exclusiva (DI-075).
+    const next = toggleMultiAnswer(options, selected, key)
     // Múltipla escolha nunca avança sozinha (a página só avança escolha única):
     // a pessoa confirma no "Próximo".
     onChange(next.join(','), { commit: true, keyboard })
   }
 
+  const firstExclusiveIndex = options.findIndex(isExclusiveOption)
+
   return (
     <div role="group" aria-labelledby={QUIZ_QUESTION_TITLE_ID} aria-describedby={describedBy} className="space-y-2.5">
-      {options.map((opt) => {
+      {options.map((opt, index) => {
         const isSelected = selected.includes(opt.key)
         return (
-          <button
-            key={opt.key}
-            id={`option-${opt.key}`}
-            data-testid={`quiz-option-${opt.key}`}
-            type="button"
-            role="checkbox"
-            aria-checked={isSelected}
-            onPointerDown={activation.onPointerDown}
-            onKeyDown={activation.onKeyDown}
-            onClick={() => toggle(opt.key, activation.consumeKeyboard())}
-            className={optionClass(isSelected)}
-          >
-            <span
-              aria-hidden="true"
-              className={cn(
-                'flex h-5 w-5 shrink-0 items-center justify-center rounded-md border-2 transition-colors motion-reduce:transition-none',
-                isSelected ? 'border-primary bg-primary text-primary-foreground' : 'border-muted-foreground/70 bg-card',
-              )}
+          <React.Fragment key={opt.key}>
+            {index === firstExclusiveIndex && index > 0 && (
+              <div aria-hidden="true" className="flex items-center gap-3 py-0.5 text-sm text-muted-foreground">
+                <span className="h-px flex-1 bg-border" />
+                ou
+                <span className="h-px flex-1 bg-border" />
+              </div>
+            )}
+            <button
+              id={`option-${opt.key}`}
+              data-testid={`quiz-option-${opt.key}`}
+              type="button"
+              role="checkbox"
+              aria-checked={isSelected}
+              onPointerDown={activation.onPointerDown}
+              onKeyDown={activation.onKeyDown}
+              onClick={() => toggle(opt.key, activation.consumeKeyboard())}
+              className={optionClass(isSelected)}
             >
-              {isSelected && <Check className="h-3.5 w-3.5" strokeWidth={3} />}
-            </span>
-            <span className="min-w-0 flex-1">{opt.label}</span>
-          </button>
+              <span
+                aria-hidden="true"
+                className={cn(
+                  'flex h-5 w-5 shrink-0 items-center justify-center rounded-md border-2 transition-colors motion-reduce:transition-none',
+                  isSelected ? 'border-primary bg-primary text-primary-foreground' : 'border-muted-foreground/70 bg-card',
+                )}
+              >
+                {isSelected && <Check className="h-3.5 w-3.5" strokeWidth={3} />}
+              </span>
+              <span className="min-w-0 flex-1">{opt.label}</span>
+            </button>
+          </React.Fragment>
         )
       })}
     </div>

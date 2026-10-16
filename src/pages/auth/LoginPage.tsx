@@ -14,16 +14,18 @@
  *  - Código numérico (verifyOtp) atrás de VITE_AUTH_EMAIL_CODE=true, porque o
  *    template de e-mail do Supabase precisa incluir {{ .Token }} (ação do dono).
  *  - Login rápido de desenvolvimento só em `npm run dev` + localhost.
+ *  - Campos e botões do sistema (Input/Button de src/components/ui, DI-079):
+ *    16px, 48px de altura, rótulo ligado, erro anunciado e `aria-busy`.
  */
-import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, Navigate, useLocation, useSearchParams } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { AlertCircle, KeyRound, Loader2, Mail, MailCheck } from 'lucide-react'
+import { AlertCircle, KeyRound, Mail, MailCheck } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAuth } from '@/hooks/useAuth'
-import { cn } from '@/lib/utils'
+import { Button, Input } from '@/components/ui'
 import { safeInternalPath, safePathFromLocation } from '@/lib/safe-path'
 import { isLocalDevHostname } from '@/lib/auth-redirect'
 import { isInAppBrowser } from '@/lib/in-app-browser'
@@ -56,30 +58,8 @@ const CALLBACK_ERRORS: Record<string, string> = {
   auth_error: 'Não conseguimos concluir o acesso. Peça um novo link abaixo.',
 }
 
-const inputClass = (invalid: boolean) =>
-  cn(
-    'h-12 w-full rounded-xl border bg-card px-3 text-base text-foreground shadow-sm outline-none transition-colors',
-    'placeholder:text-muted-foreground',
-    'focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-ring/40',
-    invalid ? 'border-destructive' : 'border-input',
-  )
-
-const primaryButtonClass = cn(
-  'flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-primary px-4',
-  'text-base font-semibold text-primary-foreground shadow-sm transition-colors hover:bg-primary/90',
-  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
-  'disabled:cursor-not-allowed disabled:opacity-70',
-)
-
-const secondaryButtonClass = cn(
-  'flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-input bg-card px-4',
-  'text-base font-medium text-foreground transition-colors hover:bg-muted',
-  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
-  'disabled:cursor-not-allowed disabled:opacity-70',
-)
-
 const textLinkClass =
-  'font-medium text-primary underline underline-offset-4 hover:text-primary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-sm'
+  'rounded-sm font-medium text-primary underline decoration-primary/40 underline-offset-4 hover:decoration-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
 
 /** Chave da espera de reenvio: o mesmo endereço, com ou sem maiúsculas. */
 function cooldownKey(email: string): string {
@@ -131,10 +111,6 @@ export function LoginPage() {
   const location = useLocation()
   const [searchParams] = useSearchParams()
   const state = (location.state ?? null) as LoginLocationState | null
-
-  const emailId = useId()
-  const emailHintId = useId()
-  const emailErrorId = useId()
 
   const returnTo = useMemo(() => {
     if (state?.from) return safePathFromLocation(state.from)
@@ -260,15 +236,11 @@ export function LoginPage() {
     return (
       <div className="flex min-h-[calc(100dvh-4rem)] justify-center bg-background px-4 py-8 sm:items-center sm:py-12">
         <div className="w-full max-w-md">
-          <div className="rounded-lg border border-border bg-card p-5 shadow-sm sm:p-6">
+          <div className="rounded-lg border border-border bg-card p-5 shadow-[var(--shadow-sm)] sm:p-6">
             <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10">
               <MailCheck aria-hidden="true" className="h-6 w-6 text-primary" />
             </div>
-            <h1
-              ref={sentHeadingRef}
-              tabIndex={-1}
-              className="text-2xl font-bold text-foreground outline-none [text-wrap:balance]"
-            >
+            <h1 ref={sentHeadingRef} tabIndex={-1} className="text-h1 text-foreground outline-none">
               Confira seu e-mail
             </h1>
             <p className="mt-2 text-base text-muted-foreground [text-wrap:pretty]">
@@ -284,25 +256,24 @@ export function LoginPage() {
             {EMAIL_CODE_ENABLED && <EmailCodeForm email={sentEmail} verify={verifyEmailCode} />}
 
             <div className="mt-6 space-y-2">
-              <button
-                type="button"
+              <Button
+                variant="secondary"
+                size="md"
+                className="w-full"
                 onClick={handleResend}
-                disabled={cooldown > 0 || resending}
-                aria-busy={resending}
-                className={secondaryButtonClass}
+                disabled={cooldown > 0}
+                loading={resending}
               >
-                {resending ? (
-                  <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Mail aria-hidden="true" className="h-4 w-4" />
-                )}
+                {!resending && <Mail aria-hidden="true" />}
                 {cooldown > 0 ? `Reenviar link em ${cooldown} s` : 'Reenviar link'}
-              </button>
+              </Button>
               <p aria-live="polite" className="text-center text-sm text-muted-foreground">
                 {resendStatus}
               </p>
-              <button
-                type="button"
+              <Button
+                variant="ghost"
+                size="md"
+                className="w-full text-primary"
                 onClick={() => {
                   // A espera continua valendo para este e-mail (cooldownUntilRef);
                   // o formulário fica livre para digitar outro endereço.
@@ -310,10 +281,9 @@ export function LoginPage() {
                   setResendStatus(null)
                   setCooldown(0)
                 }}
-                className="flex h-11 w-full items-center justify-center rounded-xl px-4 text-base font-medium text-primary transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
               >
                 Usar outro e-mail
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -323,14 +293,11 @@ export function LoginPage() {
 
   // A faixa pós-compra já pede o e-mail do pagamento; a dica fica para `state.email`.
   const showEmailHint = Boolean(emailFromState) && !postPurchase
-  const emailDescribedBy = [errors.email ? emailErrorId : null, showEmailHint ? emailHintId : null]
-    .filter(Boolean)
-    .join(' ')
 
   return (
     <div className="flex min-h-[calc(100dvh-4rem)] justify-center bg-background px-4 py-8 sm:items-center sm:py-12">
       <div className="w-full max-w-md">
-        <div className="rounded-lg border border-border bg-card p-5 shadow-sm sm:p-6">
+        <div className="rounded-lg border border-border bg-card p-5 shadow-[var(--shadow-sm)] sm:p-6">
           {postPurchase && (
             <div className="mb-5 rounded-xl border border-primary/20 bg-primary/5 p-4">
               <p className="text-base font-semibold text-foreground">Falta só entrar</p>
@@ -350,61 +317,36 @@ export function LoginPage() {
             </div>
           )}
 
-          <h1 className="text-2xl font-bold text-foreground [text-wrap:balance]">
-            Entrar na sua conta
-          </h1>
+          <h1 className="text-h1 text-foreground">Entrar na sua conta</h1>
           <p className="mt-2 text-base text-muted-foreground [text-wrap:pretty]">
             Vamos enviar um link de acesso para o seu e-mail. Não precisa de senha.
           </p>
 
           <form onSubmit={handleSubmit(onSubmit)} noValidate className="mt-6 space-y-4">
-            <div>
-              <label htmlFor={emailId} className="mb-1.5 block text-sm font-medium text-foreground">
-                E-mail
-              </label>
-              <input
-                {...register('email')}
-                id={emailId}
-                type="email"
-                inputMode="email"
-                autoComplete="email"
-                autoCapitalize="none"
-                autoCorrect="off"
-                spellCheck={false}
-                placeholder="voce@email.com"
-                aria-invalid={errors.email ? true : undefined}
-                aria-describedby={emailDescribedBy || undefined}
-                className={inputClass(Boolean(errors.email))}
-              />
-              {showEmailHint && (
-                <p id={emailHintId} className="mt-1.5 text-sm text-muted-foreground">
-                  Use o mesmo e-mail do pagamento.
-                </p>
-              )}
-              {errors.email && (
-                <p id={emailErrorId} role="alert" className="mt-1.5 text-sm text-destructive">
-                  {errors.email.message}
-                </p>
-              )}
-            </div>
+            <Input
+              {...register('email')}
+              id="login-email"
+              label="E-mail"
+              type="email"
+              inputMode="email"
+              autoComplete="email"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              enterKeyHint="send"
+              placeholder="voce@email.com"
+              hint={showEmailHint ? 'Use o mesmo e-mail do pagamento.' : undefined}
+              error={errors.email?.message}
+            />
 
-            <button
-              type="submit"
-              disabled={isSubmitting || cooldown > 0}
-              aria-busy={isSubmitting}
-              className={primaryButtonClass}
-            >
-              {isSubmitting ? (
-                <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />
-              ) : (
-                <Mail aria-hidden="true" className="h-4 w-4" />
-              )}
+            <Button type="submit" size="md" className="w-full" disabled={cooldown > 0} loading={isSubmitting}>
+              {!isSubmitting && <Mail aria-hidden="true" />}
               {isSubmitting
                 ? 'Enviando…'
                 : cooldown > 0
                   ? `Aguarde ${cooldown} s`
                   : 'Enviar link de acesso'}
-            </button>
+            </Button>
           </form>
 
           {showGoogle && (
@@ -413,10 +355,10 @@ export function LoginPage() {
                 Use o Google só se for o mesmo e-mail da compra. Com outro e-mail, você entra
                 numa conta nova, sem os seus dados.
               </p>
-              <button type="button" onClick={handleGoogleLogin} className={secondaryButtonClass}>
+              <Button variant="secondary" size="md" className="w-full" onClick={handleGoogleLogin}>
                 <GoogleIcon />
                 Entrar com Google
-              </button>
+              </Button>
             </div>
           )}
 
@@ -433,7 +375,7 @@ export function LoginPage() {
         <p className="mt-4 text-center text-sm text-muted-foreground [text-wrap:pretty]">
           Ao continuar, você aceita os{' '}
           <Link to="/termos" className={textLinkClass}>
-            Termos de Serviço
+            Termos e condições
           </Link>{' '}
           e a{' '}
           <Link to="/privacidade" className={textLinkClass}>
@@ -455,8 +397,6 @@ function EmailCodeForm({
   email: string
   verify: (email: string, code: string) => Promise<{ error: Error | null }>
 }) {
-  const codeId = useId()
-  const codeErrorId = useId()
   const [code, setCode] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [verifying, setVerifying] = useState(false)
@@ -477,31 +417,23 @@ function EmailCodeForm({
   }
 
   return (
-    <form onSubmit={handleSubmit} noValidate className="mt-6 border-t border-border pt-5">
-      <label htmlFor={codeId} className="mb-1.5 block text-sm font-medium text-foreground">
-        Ou digite o código do e-mail
-      </label>
-      <input
-        id={codeId}
+    <form onSubmit={handleSubmit} noValidate className="mt-6 space-y-3 border-t border-border pt-5">
+      <Input
+        id="login-email-code"
+        label="Ou digite o código do e-mail"
         value={code}
         onChange={(e) => setCode(e.target.value)}
         inputMode="numeric"
         autoComplete="one-time-code"
+        enterKeyHint="go"
         pattern="[0-9]*"
         maxLength={10}
-        aria-invalid={error ? true : undefined}
-        aria-describedby={error ? codeErrorId : undefined}
-        className={cn(inputClass(Boolean(error)), 'tracking-[0.3em]')}
+        error={error}
+        className="tracking-[0.3em]"
       />
-      {error && (
-        <p id={codeErrorId} role="alert" className="mt-1.5 text-sm text-destructive">
-          {error}
-        </p>
-      )}
-      <button type="submit" disabled={verifying} aria-busy={verifying} className={cn(primaryButtonClass, 'mt-3')}>
-        {verifying && <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />}
+      <Button type="submit" size="md" className="w-full" loading={verifying}>
         Entrar com o código
-      </button>
+      </Button>
     </form>
   )
 }

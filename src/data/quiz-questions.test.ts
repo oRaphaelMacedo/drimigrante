@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import {
+  NONE_OPTION_KEY,
+  QUIZ_QUESTIONS,
   computeScore,
   getVisibleQuestions,
+  isExclusiveOption,
   suggestVisas,
+  toggleMultiAnswer,
   type QuizQuestion,
   type ShowIfRule,
   type VisaSuggestion,
@@ -358,5 +362,45 @@ describe('suggestVisas — por caso', () => {
       expect(s.name.trim()).not.toBe('')
       expect(s.reason.trim()).not.toBe('')
     }
+  })
+})
+
+// ─── DI-075: "Nenhuma destas situações" ─────────────────────────────────────
+
+describe('caso_tipo — opção exclusiva "Nenhuma destas situações" (DI-075)', () => {
+  const casoTipo = QUIZ_QUESTIONS.find((q) => q.key === 'caso_tipo')!
+  const options = casoTipo.options!
+
+  it('existe, é a última opção, não pontua e é exclusiva', () => {
+    const last = options[options.length - 1]
+    expect(last).toMatchObject({ key: NONE_OPTION_KEY, label: 'Nenhuma destas situações', score: 0 })
+    expect(isExclusiveOption(last)).toBe(true)
+    expect(options.filter(isExclusiveOption)).toHaveLength(1)
+  })
+
+  it('vale pela chave mesmo sem o campo isExclusive (linhas do banco)', () => {
+    expect(isExclusiveOption({ key: 'nenhum' })).toBe(true)
+    expect(isExclusiveOption({ key: 'A' })).toBe(false)
+    expect(isExclusiveOption({ key: 'outra', isExclusive: true })).toBe(true)
+  })
+
+  it('marcar a exclusiva desmarca as outras; marcar outra desmarca a exclusiva', () => {
+    expect(toggleMultiAnswer(options, ['A', 'D'], 'nenhum')).toEqual(['nenhum'])
+    expect(toggleMultiAnswer(options, ['nenhum'], 'B')).toEqual(['B'])
+    expect(toggleMultiAnswer(options, ['nenhum'], 'nenhum')).toEqual([])
+    expect(toggleMultiAnswer(options, ['A'], 'D')).toEqual(['A', 'D'])
+    expect(toggleMultiAnswer(options, ['A', 'D'], 'A')).toEqual(['D'])
+  })
+
+  it('funciona com opções vindas do banco (sem isExclusive)', () => {
+    const fromDb = options.map(({ key, label, score }) => ({ key, label, score }))
+    expect(toggleMultiAnswer(fromDb, ['A'], 'nenhum')).toEqual(['nenhum'])
+  })
+
+  it('só "nenhum": nenhuma pergunta de caso, análise personalizada e sem bônus', () => {
+    const answers = { ...NAC, caso_tipo: NONE_OPTION_KEY }
+    expect(getVisibleQuestions(answers).map((q) => q.key)).toEqual(['processo_tipo', 'caso_tipo'])
+    expect(summary(suggestVisas(answers))).toEqual([['analise_personalizada', 'weak']])
+    expect(computeScore(answers)).toMatchObject({ total: 0, max: 0, percentage: 0, category: 'baixa' })
   })
 })

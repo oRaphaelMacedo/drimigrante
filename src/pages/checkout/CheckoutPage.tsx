@@ -117,9 +117,7 @@ export function CheckoutPage() {
         ) : (
           <>
             <header className="mb-5 mt-4">
-              <h1 className="text-2xl font-bold leading-tight text-foreground [text-wrap:balance] sm:text-3xl">
-                Desbloqueie sua análise completa
-              </h1>
+              <h1 className="text-h1 text-foreground">Desbloqueie sua análise completa</h1>
               <p className="mt-2 text-base text-muted-foreground [text-wrap:pretty]">
                 Gerada a partir das suas respostas e da Lei da Nacionalidade.
               </p>
@@ -211,9 +209,7 @@ export function CheckoutPage() {
 function EmptyCheckout() {
   return (
     <div data-testid="checkout-empty" className="mt-6 text-center">
-      <h1 className="text-2xl font-bold leading-tight text-foreground [text-wrap:balance]">
-        Faça o quiz para desbloquear sua análise
-      </h1>
+      <h1 className="text-h1 text-foreground">Faça o quiz para desbloquear sua análise</h1>
       <p className="mx-auto mt-2 max-w-md text-base text-muted-foreground [text-wrap:pretty]">
         Não encontramos seu diagnóstico neste aparelho. O quiz é grátis e mostra seu resultado na hora.
       </p>
@@ -264,20 +260,23 @@ function FaqSection() {
       <div className="divide-y divide-border rounded-lg border border-border bg-card">
         {faqs.map(({ q, a }) => (
           <details key={q} className="group">
-            <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-base font-medium text-foreground [&::-webkit-details-marker]:hidden">
-              {q}
+            <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between gap-3 rounded-lg px-4 py-3 text-base font-medium text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+              <span className="[text-wrap:pretty]">{q}</span>
               <ChevronDown
                 aria-hidden="true"
-                className="h-5 w-5 shrink-0 text-muted-foreground transition-transform duration-150 group-open:rotate-180"
+                className="h-5 w-5 shrink-0 text-muted-foreground transition-transform duration-fast group-open:rotate-180 motion-reduce:transition-none"
               />
             </summary>
-            <p className="px-4 pb-4 text-sm leading-relaxed text-muted-foreground">{a}</p>
+            <p className="px-4 pb-4 text-base leading-relaxed text-muted-foreground">{a}</p>
           </details>
         ))}
       </div>
       <p className="mt-3 text-sm text-muted-foreground">
         Detalhes de pagamento e reembolso nos{' '}
-        <Link to="/termos" className="font-medium text-primary underline underline-offset-4">
+        <Link
+          to="/termos"
+          className="rounded-sm font-medium text-primary underline decoration-primary/40 underline-offset-4 hover:decoration-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+        >
           Termos e condições
         </Link>
         .
