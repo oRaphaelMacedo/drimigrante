@@ -25,13 +25,15 @@ const h = vi.hoisted(() => {
   }
   builder.maybeSingle = async () => (state.rowError ? { data: null, error: state.rowError } : { data: state.row, error: null })
   const rpc = vi.fn(async () => state.rpc)
+  // generate-explanation (DI-018) — nunca chega à rede nem à OpenAI.
+  const invoke = vi.fn(async (_name: string, _options?: unknown) => ({ data: { status: 'ready' } as unknown, error: null as unknown }))
   const track = vi.fn()
   const refreshUser = vi.fn(async () => null)
-  return { state, builder, rpc, track, refreshUser }
+  return { state, builder, rpc, invoke, track, refreshUser }
 })
 
 vi.mock('@/lib/supabase', () => ({
-  supabase: { from: () => h.builder, rpc: h.rpc },
+  supabase: { from: () => h.builder, rpc: h.rpc, functions: { invoke: h.invoke } },
 }))
 
 vi.mock('@/hooks/useAuth', () => ({
@@ -47,6 +49,9 @@ vi.mock('@/lib/analytics', () => ({ track: h.track }))
 
 import { AnalysisPage } from './AnalysisPage'
 import { SUPPORT_EMAIL } from '@/config/contact'
+
+// jsdom + markdown ficam lentos com a máquina carregada: folga no tempo de cada teste.
+vi.setConfig({ testTimeout: 20_000 })
 
 // ── Dados ────────────────────────────────────────────────────────────────────
 
@@ -110,6 +115,8 @@ beforeEach(() => {
   h.state.access = { state: 'active', expiresAt: null, daysLeft: 20, hasPaidOnce: true, isStaff: false }
   h.state.selects = []
   h.rpc.mockClear()
+  h.invoke.mockReset()
+  h.invoke.mockImplementation(async () => ({ data: { status: 'ready' }, error: null }))
   h.track.mockClear()
   h.refreshUser.mockClear()
 })
@@ -175,11 +182,77 @@ describe('AnalysisPage — pagante', () => {
     expect(screen.getByRole('button', { name: 'Próximos passos' })).toHaveAttribute('aria-expanded', 'true')
   })
 
-  it('análise completa ainda não gerada → estado de preparação, sem chamar functions', async () => {
-    h.state.rpc = { data: [{ assessment_id: ASSESSMENT_ID, ia_explanation_full: null, computed_at: null }], error: null }
+  it('análise já gerada → nenhuma chamada ao generate-explanation', async () => {
     renderPage()
-    expect(await screen.findByText('Sua análise detalhada está sendo preparada')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Atualizar' })).toBeInTheDocument()
+    await screen.findByRole('button', { name: 'Avaliação geral' })
+    expect(h.invoke).not.toHaveBeenCalled()
+  })
+
+  it('DI-018: pagante sem a análise → "Preparando", pede o modo full uma vez e mostra o texto quando fica pronto', async () => {
+    const EMPTY = { data: [{ assessment_id: ASSESSMENT_ID, ia_explanation_full: null, computed_at: null }], error: null }
+    const READY = { data: [{ assessment_id: ASSESSMENT_ID, ia_explanation_full: FULL_MARKDOWN, computed_at: null }], error: null }
+    h.state.rpc = EMPTY
+    let finish: (value: { data: unknown; error: unknown }) => void = () => undefined
+    h.invoke.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve
+        }),
+    )
+    renderPage()
+    expect(await screen.findByText('Preparando sua análise detalhada…')).toBeInTheDocument()
+    expect(screen.getByTestId('analysis-preparing')).toHaveAttribute('role', 'status')
+    await waitFor(() => expect(h.invoke).toHaveBeenCalledTimes(1))
+    expect(h.invoke).toHaveBeenCalledWith('generate-explanation', expect.objectContaining({
+      body: { assessment_id: ASSESSMENT_ID, mode: 'full' },
+    }))
+    // O corpo nunca leva session_id: a posse é provada pelo JWT da sessão.
+    expect(JSON.stringify(h.invoke.mock.calls[0][1])).not.toContain('session_id')
+
+    h.state.rpc = READY
+    finish({ data: { status: 'ready' }, error: null })
+    expect(await screen.findByRole('button', { name: 'Avaliação geral' })).toBeInTheDocument()
+    expect(screen.queryByText('Preparando sua análise detalhada…')).not.toBeInTheDocument()
+    expect(h.invoke).toHaveBeenCalledTimes(1)
+  })
+
+  it('DI-018: generate-explanation responde 403 → acesso não ativo, assinatura recarregada e sem nova tentativa', async () => {
+    h.state.rpc = { data: [{ assessment_id: ASSESSMENT_ID, ia_explanation_full: null, computed_at: null }], error: null }
+    h.invoke.mockImplementation(async () => ({ data: null, error: { name: 'FunctionsHttpError', context: { status: 403 } } }))
+    renderPage()
+    expect(await screen.findByText('Seu acesso à análise completa não está ativo')).toBeInTheDocument()
+    await waitFor(() => expect(h.refreshUser).toHaveBeenCalledTimes(1))
+    expect(h.invoke).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole('link', { name: /chat IA/ })).not.toBeInTheDocument()
+  })
+
+  it('DI-018: muita procura (202 deferred) → aviso com "Tentar de novo", sem repetir sozinho', async () => {
+    h.state.rpc = { data: [{ assessment_id: ASSESSMENT_ID, ia_explanation_full: null, computed_at: null }], error: null }
+    h.invoke.mockImplementation(async () => ({ data: { status: 'deferred', reason: 'capacity' }, error: null }))
+    renderPage()
+    expect(await screen.findByText('Muitas análises sendo preparadas agora')).toBeInTheDocument()
+    expect(h.invoke).toHaveBeenCalledTimes(1)
+    await userEvent.click(screen.getByRole('button', { name: 'Tentar de novo' }))
+    await waitFor(() => expect(h.invoke).toHaveBeenCalledTimes(2))
+  })
+
+  it('DI-018: erro 500 da função → mensagem amigável e "Tentar de novo" (sem detalhes técnicos)', async () => {
+    h.state.rpc = { data: [{ assessment_id: ASSESSMENT_ID, ia_explanation_full: null, computed_at: null }], error: null }
+    h.invoke.mockImplementation(async () => ({
+      data: null,
+      error: { name: 'FunctionsHttpError', message: 'Edge Function returned a non-2xx status code', context: { status: 502 } },
+    }))
+    renderPage()
+    expect(await screen.findByText('Não foi possível preparar sua análise agora')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Tentar de novo' })).toBeInTheDocument()
+    expect(document.body.textContent).not.toContain('non-2xx')
+  })
+
+  it('DI-018: sessão expirada na geração (401) → pede para entrar de novo', async () => {
+    h.state.rpc = { data: [{ assessment_id: ASSESSMENT_ID, ia_explanation_full: null, computed_at: null }], error: null }
+    h.invoke.mockImplementation(async () => ({ data: null, error: { name: 'FunctionsHttpError', context: { status: 401 } } }))
+    renderPage()
+    expect(await screen.findByText('Sua sessão expirou')).toBeInTheDocument()
   })
 
   it('servidor responde Payment required → acesso não ativo e a assinatura é recarregada uma vez', async () => {
@@ -190,8 +263,9 @@ describe('AnalysisPage — pagante', () => {
     // Uma ação só: os atalhos para chat e documentos somem.
     expect(screen.queryByRole('link', { name: /chat IA/ })).not.toBeInTheDocument()
     await waitFor(() => expect(h.refreshUser).toHaveBeenCalledTimes(1))
-    // Payment required não é tentado de novo.
+    // Payment required não é tentado de novo e não dispara a geração.
     expect(h.rpc).toHaveBeenCalledTimes(1)
+    expect(h.invoke).not.toHaveBeenCalled()
   })
 
   it('sessão expirada (PT401) → pede para entrar de novo e voltar para a análise', async () => {
@@ -303,6 +377,8 @@ describe('AnalysisPage — sem acesso', () => {
     expect(await screen.findByRole('link', { name: 'Desbloquear por €30' })).toBeInTheDocument()
     expect(document.body.textContent).not.toContain('4,90')
     await waitFor(() => expect(h.rpc).not.toHaveBeenCalled())
+    // DI-018: sem pagamento, a análise completa nunca é gerada.
+    expect(h.invoke).not.toHaveBeenCalled()
   })
 
   it('acesso expirado leva ao painel', async () => {
@@ -311,5 +387,6 @@ describe('AnalysisPage — sem acesso', () => {
     renderPage()
     expect(await screen.findByRole('link', { name: 'Ver opções no painel' })).toHaveAttribute('href', '/dashboard?acesso=expirado')
     expect(h.rpc).not.toHaveBeenCalled()
+    expect(h.invoke).not.toHaveBeenCalled()
   })
 })
