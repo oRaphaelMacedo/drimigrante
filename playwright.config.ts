@@ -18,10 +18,14 @@ import {
 // - `local` (padrão): o app fala com o Supabase local. Roda tudo, menos os
 //   testes de MOCKED_SUPABASE_TESTS.
 // - `mock`: o app aponta para um host fictício (MOCK_SUPABASE_URL) e roda SÓ
-//   MOCKED_SUPABASE_TESTS. Esses testes do spec 06 interceptam as chamadas por
-//   `*.supabase.co` e abortam o resto, então nenhuma requisição sai da máquina.
-//   Sem service role nem segredos: o .env.test.local não é lido.
-//   `npm run test:e2e:mock`.
+//   MOCKED_SUPABASE_TESTS: os testes do spec 06 que interceptam `*.supabase.co`
+//   e os specs com a tag @mock-backend (07, 08: e2e/fixtures/mock-backend.ts),
+//   que respondem REST, Auth e Edge Functions no próprio navegador e abortam
+//   qualquer escrita sem mock. Nenhuma requisição sai da máquina. Sem service
+//   role nem segredos: o .env.test.local não é lido. `npm run test:e2e:mock`.
+//
+// Projetos: `chromium` (desktop), `mobile` (iPhone 14, WebKit) e `android`
+// (Pixel 7, Chromium) — a maioria dos usuários está no celular.
 
 const MODE = process.env.E2E_SUPABASE === 'mock' ? 'mock' : 'local'
 
@@ -29,11 +33,12 @@ const MODE = process.env.E2E_SUPABASE === 'mock' ? 'mock' : 'local'
 const MOCK_SUPABASE_URL = 'https://e2e-mock.supabase.co'
 
 /**
- * Testes do navegador que mockam o Supabase pelo host `*.supabase.co`
- * (e2e/tests/06-quiz-branching.spec.ts). Contra o Supabase local eles não
- * interceptam nada; por isso rodam só no modo `mock`.
+ * Testes do navegador com o Supabase inteiro simulado: os do spec 06 (mockam
+ * pelo host `*.supabase.co`, que contra o Supabase local não intercepta nada) e
+ * todos os que levam a tag @mock-backend (specs 07 e 08). Rodam só no modo
+ * `mock`; o `grep` do Playwright inclui as tags no título.
  */
-const MOCKED_SUPABASE_TESTS = /quiz no navegador — ramificação|admin do quiz — editor/
+const MOCKED_SUPABASE_TESTS = /@mock-backend|quiz no navegador — ramificação|admin do quiz — editor/
 
 if (MODE === 'local') {
   loadEnv({ path: '.env.test.local', quiet: true })
@@ -96,10 +101,15 @@ export default defineConfig({
     video: 'retain-on-failure',
     locale: 'pt-PT',
     timezoneId: 'Europe/Lisbon',
+    // Um service worker responderia antes do page.route e furaria os mocks.
+    serviceWorkers: 'block',
   },
   projects: [
     { name: 'chromium', use: devices['Desktop Chrome'], ...modeFilter },
+    // `mobile` mantém o nome antigo (docs e CI): iPhone 14 no WebKit.
     { name: 'mobile', use: devices['iPhone 14'], ...modeFilter },
+    // Android (DI-086): Pixel 7 no Chromium, com toque e viewport de 412×839.
+    { name: 'android', use: devices['Pixel 7'], ...modeFilter },
   ],
   webServer: externalBaseUrl
     ? undefined
