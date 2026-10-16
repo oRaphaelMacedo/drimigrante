@@ -2,20 +2,23 @@ import { createBrowserRouter } from 'react-router-dom'
 import { Layout } from '@/components/layout/Layout'
 import { DashboardLayout } from '@/components/layout/DashboardLayout'
 import { AdminLayout } from '@/components/layout/AdminLayout'
+import { RouteErrorPage } from '@/components/RouteErrorPage'
+// Landing eager: a primeira tela (a mais acessada, no celular) não depende de
+// um segundo chunk + spinner.
+import { LandingPage } from '@/pages/LandingPage'
 import { ProtectedRoute } from './ProtectedRoute'
 
 // Pages — lazy loaded for performance
 import { lazy, Suspense } from 'react'
 import { Loader2 } from 'lucide-react'
 
-const LazyPage = (Component: React.LazyExoticComponent<() => JSX.Element>) => (
+const withSuspense = (Component: React.LazyExoticComponent<() => JSX.Element>) => (
   <Suspense fallback={<div className="flex min-h-[60vh] items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-brand-600" /></div>}>
     <Component />
   </Suspense>
 )
 
 // Public
-const LandingPage = lazy(() => import('@/pages/LandingPage').then((m) => ({ default: m.LandingPage })))
 const NotFoundPage = lazy(() => import('@/pages/NotFoundPage').then((m) => ({ default: m.NotFoundPage })))
 
 // Auth
@@ -56,18 +59,19 @@ export const router = createBrowserRouter([
   // Public routes
   {
     element: <Layout />,
+    errorElement: <RouteErrorPage />,
     children: [
-      { path: '/', element: LazyPage(LandingPage) },
-      { path: '/quiz', element: LazyPage(QuizPage) },
-      { path: '/results', element: LazyPage(ResultsPage) },
-      { path: '/checkout', element: LazyPage(CheckoutPage) },
-      { path: '/checkout/success', element: LazyPage(SuccessPage) },
-      { path: '/login', element: LazyPage(LoginPage) },
-      { path: '/auth/callback', element: LazyPage(AuthCallbackPage) },
-      { path: '/termos', element: LazyPage(TermsPage) },
-      { path: '/privacidade', element: LazyPage(PrivacyPage) },
-      { path: '/cookies', element: LazyPage(CookiesPage) },
-      { path: '*', element: LazyPage(NotFoundPage) },
+      { path: '/', element: <LandingPage /> },
+      { path: '/quiz', element: withSuspense(QuizPage) },
+      { path: '/results', element: withSuspense(ResultsPage) },
+      { path: '/checkout', element: withSuspense(CheckoutPage) },
+      { path: '/checkout/success', element: withSuspense(SuccessPage) },
+      { path: '/login', element: withSuspense(LoginPage) },
+      { path: '/auth/callback', element: withSuspense(AuthCallbackPage) },
+      { path: '/termos', element: withSuspense(TermsPage) },
+      { path: '/privacidade', element: withSuspense(PrivacyPage) },
+      { path: '/cookies', element: withSuspense(CookiesPage) },
+      { path: '*', element: withSuspense(NotFoundPage) },
     ],
   },
   // Dashboard routes (authenticated)
@@ -77,14 +81,15 @@ export const router = createBrowserRouter([
         <DashboardLayout />
       </ProtectedRoute>
     ),
+    errorElement: <RouteErrorPage />,
     children: [
-      { path: '/dashboard', element: LazyPage(DashboardHomePage) },
+      { path: '/dashboard', element: withSuspense(DashboardHomePage) },
       {
         path: '/dashboard/analysis',
         // B06-A01: full_analysis is included in both one-time and subscription plans
         element: (
           <ProtectedRoute requireFeature="full_analysis">
-            {LazyPage(AnalysisPage)}
+            {withSuspense(AnalysisPage)}
           </ProtectedRoute>
         ),
       },
@@ -93,7 +98,7 @@ export const router = createBrowserRouter([
         // B06-A01: chat is subscription-only — must gate on 'chat', not generic 'dashboard'
         element: (
           <ProtectedRoute requireFeature="chat">
-            {LazyPage(ChatPage)}
+            {withSuspense(ChatPage)}
           </ProtectedRoute>
         ),
       },
@@ -101,11 +106,11 @@ export const router = createBrowserRouter([
         path: '/dashboard/documents',
         element: (
           <ProtectedRoute requireFeature="dashboard">
-            {LazyPage(DocumentsPage)}
+            {withSuspense(DocumentsPage)}
           </ProtectedRoute>
         ),
       },
-      { path: '/dashboard/settings', element: LazyPage(SettingsPage) },
+      { path: '/dashboard/settings', element: withSuspense(SettingsPage) },
     ],
   },
   // Admin routes (hub users only)
@@ -115,15 +120,26 @@ export const router = createBrowserRouter([
         <AdminLayout />
       </ProtectedRoute>
     ),
+    errorElement: <RouteErrorPage />,
     children: [
-      { path: '/admin', element: LazyPage(AdminDashboardPage) },
-      { path: '/admin/leads', element: LazyPage(AdminLeadsPage) },
-      { path: '/admin/pipeline', element: LazyPage(AdminPipelinePage) },
-      { path: '/admin/quiz', element: LazyPage(AdminQuizPage) },
-      { path: '/admin/quiz/history', element: LazyPage(AdminQuizHistoryPage) },
-      { path: '/admin/tenants', element: LazyPage(AdminTenantsPage) },
-      { path: '/admin/ai-config', element: LazyPage(AdminAiConfigPage) },
-      { path: '/admin/settings', element: LazyPage(AdminSettingsPage) },
+      { path: '/admin', element: withSuspense(AdminDashboardPage) },
+      { path: '/admin/leads', element: withSuspense(AdminLeadsPage) },
+      { path: '/admin/pipeline', element: withSuspense(AdminPipelinePage) },
+      { path: '/admin/quiz', element: withSuspense(AdminQuizPage) },
+      { path: '/admin/quiz/history', element: withSuspense(AdminQuizHistoryPage) },
+      { path: '/admin/tenants', element: withSuspense(AdminTenantsPage) },
+      { path: '/admin/ai-config', element: withSuspense(AdminAiConfigPage) },
+      { path: '/admin/settings', element: withSuspense(AdminSettingsPage) },
     ],
   },
-])
+], {
+  // Comportamentos do React Router v7 já ativados (somem os avisos do console
+  // e a migração futura fica sem surpresas). v7_startTransition fica no App.
+  future: {
+    v7_relativeSplatPath: true,
+    v7_fetcherPersist: true,
+    v7_normalizeFormMethod: true,
+    v7_partialHydration: true,
+    v7_skipActionErrorRevalidation: true,
+  },
+})
