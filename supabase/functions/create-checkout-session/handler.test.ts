@@ -4,6 +4,7 @@
 import { assert, assertEquals } from 'https://deno.land/std@0.168.0/testing/asserts.ts'
 import { FakeStripe, FakeSupabase, type Row } from '../_shared/testing/fakes.ts'
 import { resolveAppUrl } from '../_shared/origin.ts'
+import { type CheckoutPresentation, checkoutSubmitMessage } from './checkout-options.ts'
 import { createCheckoutHandler, type StripeCheckoutClient } from './handler.ts'
 
 const NOW = new Date('2026-10-16T12:00:00Z')
@@ -11,7 +12,7 @@ const DAY_MS = 24 * 60 * 60 * 1000
 const ASSESSMENT_ID = '22222222-2222-4222-8222-222222222222'
 const APP_URL = 'https://www.drimigrante.com'
 
-function setup() {
+function setup(presentation?: CheckoutPresentation) {
   const db = new FakeSupabase({ now: () => NOW })
   db.tables.assessments = [{ id: ASSESSMENT_ID, session_id: 'anon-session-xyz', user_id: null }]
   const stripe = new FakeStripe()
@@ -22,6 +23,7 @@ function setup() {
     getUser: (authHeader) => Promise.resolve(tokens.get(authHeader) ?? null),
     resolveAppUrl: (req) => resolveAppUrl(req, (key) => (key === 'APP_URL' ? APP_URL : undefined)),
     prices: { oneTime: 'price_onetime', recurring: 'price_recurring' },
+    presentation,
     now: () => NOW,
   })
   const call = async (body: unknown, headers: Record<string, string> = {}) => {
@@ -191,4 +193,42 @@ Deno.test('autenticado one_time sem customer: customer_email + customer_creation
   assertEquals(params.customer_email, 'cliente@example.com')
   assertEquals(params.customer_creation, 'always')
   assertEquals(params.cancel_url, `${APP_URL}/results?checkout=cancelled`)
+})
+
+// ── Apresentação do Checkout (DI-087) ────────────────────────────────────────
+
+Deno.test('padrão: pt-BR, sem código promocional e texto de reforço do €30', async () => {
+  const { call, stripe } = setup()
+  assertEquals((await call(anonBody)).status, 200)
+  const params = stripe.createdSessions[0]
+  assertEquals(params.locale, 'pt-BR')
+  assertEquals(params.allow_promotion_codes, false)
+  assertEquals(params.custom_text, { submit: { message: checkoutSubmitMessage('one_time') } })
+})
+
+Deno.test('locale e flag de promoção vindos da configuração valem no anônimo e no autenticado', async () => {
+  const { call, login, stripe } = setup({ locale: 'pt', allowPromotionCodes: true })
+  assertEquals((await call(anonBody)).status, 200)
+  const { header } = login('cliente@example.com')
+  assertEquals((await call({ plan: 'one_time', assessmentId: ASSESSMENT_ID }, { Authorization: header })).status, 200)
+
+  assertEquals(stripe.createdSessions.length, 2)
+  for (const params of stripe.createdSessions) {
+    assertEquals(params.locale, 'pt')
+    assertEquals(params.allow_promotion_codes, true)
+    assertEquals(params.custom_text, { submit: { message: checkoutSubmitMessage('one_time') } })
+  }
+})
+
+Deno.test('assinatura mensal: texto de reforço do plano recorrente', async () => {
+  const { call, login, stripe } = setup()
+  const { header } = login('cliente@example.com', {
+    one_time_paid: true,
+    one_time_access_expires_at: new Date(NOW.getTime() - DAY_MS).toISOString(),
+  })
+  assertEquals((await call({ plan: 'recurring' }, { Authorization: header })).status, 200)
+  const params = stripe.createdSessions[0]
+  assertEquals(params.locale, 'pt-BR')
+  assertEquals(params.allow_promotion_codes, false)
+  assertEquals(params.custom_text, { submit: { message: checkoutSubmitMessage('recurring') } })
 })
