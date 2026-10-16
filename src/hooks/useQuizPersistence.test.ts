@@ -53,6 +53,10 @@ describe('parseQuizSession', () => {
     expect(parseQuizSession('null', NOW)).toBeNull()
     expect(parseQuizSession(JSON.stringify({ sessionId: 'curto', answers: {} }), NOW)).toBeNull()
     expect(parseQuizSession(JSON.stringify({ sessionId: 'x'.repeat(65), answers: {} }), NOW)).toBeNull()
+    // DI-081: só os formatos que a RPC aceita (UUID, legado s_<ts>_<rand>, e2e-…, sufixo -wl).
+    expect(parseQuizSession(JSON.stringify({ sessionId: 'tem espaço no meio', answers: {} }), NOW)).toBeNull()
+    expect(parseQuizSession(JSON.stringify({ sessionId: 'smoke-anon-test-1760000000', answers: {} }), NOW)).toBeNull()
+    expect(parseQuizSession(JSON.stringify({ sessionId: 12345678, answers: {} }), NOW)).toBeNull()
   })
 
   it('ignora respostas que não são texto', () => {
@@ -73,6 +77,24 @@ describe('useQuizPersistence', () => {
     unmount()
     const again = renderHook(() => useQuizPersistence())
     expect(again.result.current.session.sessionId).toBe(first)
+  })
+
+  it('sessão nova usa UUID v4 (DI-081)', () => {
+    const { result } = renderHook(() => useQuizPersistence())
+    expect(result.current.session.sessionId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    )
+  })
+
+  it('troca a sessão guardada com session_id fora do formato por uma nova', () => {
+    localStorage.setItem(
+      QUIZ_SESSION_KEY,
+      JSON.stringify({ sessionId: 'id com espaço', answers: { processo_tipo: 'nacionalidade' }, startedAt: new Date().toISOString() }),
+    )
+    const { result } = renderHook(() => useQuizPersistence())
+    expect(result.current.session.sessionId).not.toBe('id com espaço')
+    expect(result.current.session.answers).toEqual({})
+    expect(readStoredQuizSession()?.sessionId).toBe(result.current.session.sessionId)
   })
 
   it('grava respostas e a etapa atual para a retomada', () => {

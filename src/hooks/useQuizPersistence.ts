@@ -4,8 +4,14 @@
 // data da última atividade (DI-041). Assim, recarregar ou sair e voltar oferece
 // "Continue de onde parou". Sessões sem atividade há mais de 30 dias ou já
 // concluídas são descartadas na leitura.
+//
+// DI-081: o session_id prova a posse do assessment anônimo, então sessões novas
+// usam um UUID v4 de Web Crypto (createSecureSessionId), e a leitura só aceita
+// os formatos que as RPCs aceitam (isValidSessionId: UUID, legado s_<ts>_<rand>
+// das sessões antigas, e2e-… e o sufixo -wl). Fora disso, a sessão guardada é
+// descartada e o quiz começa com um session_id novo, em vez de falhar ao salvar.
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { createSessionId } from '@/lib/quiz-submission'
+import { createSecureSessionId, isValidSessionId } from '@/lib/session-id'
 
 export const QUIZ_SESSION_KEY = 'dr_imigrante_quiz_session'
 export const QUIZ_SESSION_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000
@@ -36,7 +42,7 @@ function browserStorage(): StorageLike | null {
 export function createQuizSession(now: Date = new Date()): QuizSession {
   const iso = now.toISOString()
   return {
-    sessionId: createSessionId(),
+    sessionId: createSecureSessionId(),
     answers: {},
     startedAt: iso,
     updatedAt: iso,
@@ -74,9 +80,9 @@ export function parseQuizSession(raw: string | null | undefined, now: number = D
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
   const record = parsed as Record<string, unknown>
 
-  const sessionId = typeof record.sessionId === 'string' ? record.sessionId : ''
-  // Mesmo limite do RPC upsert_anon_assessment (8–64 caracteres).
-  if (sessionId.length < 8 || sessionId.length > 64) return null
+  const sessionId = record.sessionId
+  // Mesmos formatos da RPC upsert_anon_assessment (DI-081).
+  if (!isValidSessionId(sessionId)) return null
   if (record.status === 'completed') return null
 
   const startedAt = asIsoDate(record.startedAt) ?? new Date(now).toISOString()
