@@ -39,5 +39,11 @@ playwright-report/
 blob-report/
 playwright/.cache/
 
+# Deno: lockfile gerado localmente por `deno test`/`deno check` (o CI roda com --no-config)
+deno.lock
+
+# Telemetria local do Spec Kit (custo e tokens por comando; não é código)
+.spec/.usage.jsonl
+
 # Claude Code worktrees (local-only, never commit)
 .claude/worktrees/

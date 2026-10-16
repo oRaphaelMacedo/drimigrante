@@ -8,6 +8,13 @@
 // Observabilidade: _shared/observability.ts — 5xx e exceções vão para o Sentry com
 // SENTRY_DSN_BACKEND. Runbook: docs/operacao/runbook-pagamentos.md.
 //
+// Apresentação do Checkout (DI-087, ./checkout-options.ts), secrets opcionais:
+//   STRIPE_LOCALE                 idioma do Checkout (padrão pt-BR; valor inválido
+//                                 volta para pt-BR e gera o aviso config_invalid)
+//   STRIPE_ALLOW_PROMOTION_CODES  true só durante campanha com códigos criados no
+//                                 painel do Stripe (padrão: campo de código oculto)
+// O texto ao lado do botão de pagar vem da oferta (espelho de src/lib/offer.ts).
+//
 // DEPLOY (ação do dono): depois da migration 20261016000100 (usa o RPC
 // get_auth_user_id_by_email), com
 //   `supabase functions deploy create-checkout-session --no-verify-jwt`
@@ -18,6 +25,7 @@ import Stripe from 'npm:stripe@14.14.0'
 import { withCors } from '../_shared/cors.ts'
 import { createObservability } from '../_shared/observability.ts'
 import { resolveAppUrl } from '../_shared/origin.ts'
+import { resolveCheckoutPresentation } from './checkout-options.ts'
 import { createCheckoutHandler, type StripeCheckoutClient } from './handler.ts'
 
 const obs = createObservability('create-checkout-session')
@@ -25,6 +33,10 @@ const stripeKey = Deno.env.get('STRIPE_SECRET_KEY')
 const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
 const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
 const anonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? ''
+
+const { presentation, warnings } = resolveCheckoutPresentation((key) => Deno.env.get(key))
+// Só a chave e o padrão aplicado: o valor lido não vai para o log.
+for (const warning of warnings) obs.log('warn', 'config_invalid', { ...warning })
 
 const handler =
   stripeKey && supabaseUrl && serviceRoleKey
@@ -50,6 +62,7 @@ const handler =
         oneTime: Deno.env.get('STRIPE_PRICE_ONE_TIME'),
         recurring: Deno.env.get('STRIPE_PRICE_RECURRING'),
       },
+      presentation,
     })
     : null
 

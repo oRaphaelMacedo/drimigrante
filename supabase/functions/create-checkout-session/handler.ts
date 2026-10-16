@@ -20,6 +20,10 @@
 //      - o limite de 12 ciclos NÃO vai no Checkout (subscription_data.cancel_at
 //        não existe nessa API): o stripe-webhook aplica via subscriptions.update.
 //
+// Apresentação (DI-087, ./checkout-options.ts): locale (padrão pt-BR), código
+// promocional só com a flag e texto de reforço ao lado do botão de pagar, montado
+// a partir da oferta — iguais nos dois fluxos.
+//
 // Respostas:
 //  200 { url, sessionId }           → redirecionar para o Stripe
 //  200 { status: 'email_sent', url } → (anônimo) mostrar "enviamos um link para o seu e-mail"
@@ -32,6 +36,11 @@
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2.105.4'
 import { findAuthUserIdByEmail } from '../_shared/buyer.ts'
 import { hasActivePaidAccess, normalizeEmail } from '../_shared/payments.ts'
+import {
+  type CheckoutPresentation,
+  checkoutPresentationParams,
+  DEFAULT_CHECKOUT_PRESENTATION,
+} from './checkout-options.ts'
 
 export interface CheckoutSessionCreateResult {
   id: string
@@ -55,6 +64,8 @@ export interface CheckoutDeps {
   /** Base URL do frontend para esta chamada (ver _shared/origin.ts). */
   resolveAppUrl: (req: Request) => string
   prices: { oneTime?: string | null; recurring?: string | null }
+  /** Idioma e código promocional (ver resolveCheckoutPresentation). Padrão: pt-BR, sem código. */
+  presentation?: CheckoutPresentation
   now?: () => Date
 }
 
@@ -113,6 +124,7 @@ async function loadSubscription(
 
 export function createCheckoutHandler(deps: CheckoutDeps): (req: Request) => Promise<Response> {
   const clock = deps.now ?? (() => new Date())
+  const presentation = deps.presentation ?? DEFAULT_CHECKOUT_PRESENTATION
 
   return async (req: Request): Promise<Response> => {
     if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
@@ -214,8 +226,7 @@ export function createCheckoutHandler(deps: CheckoutDeps): (req: Request) => Pro
             session_id: anonSessionId,
             email,
           },
-          locale: 'pt',
-          allow_promotion_codes: true,
+          ...checkoutPresentationParams('one_time', presentation),
         })
         return json({ url: session.url, sessionId: session.id })
       }
@@ -258,8 +269,7 @@ export function createCheckoutHandler(deps: CheckoutDeps): (req: Request) => Pro
           product_type: plan,
           assessment_id: assessmentId ?? '',
         },
-        locale: 'pt',
-        allow_promotion_codes: true,
+        ...checkoutPresentationParams(plan, presentation),
       }
 
       // Reaproveita o customer existente; senão o Stripe cria no pagamento.
