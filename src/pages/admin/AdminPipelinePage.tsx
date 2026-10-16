@@ -26,7 +26,7 @@ import {
   type UniqueIdentifier,
 } from '@dnd-kit/core'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
-import { CheckCircle2, Clock, Loader2, Mail, MoreVertical, Phone, User } from 'lucide-react'
+import { CheckCircle2, Clock, Loader2, Mail, MoreVertical, Phone, RefreshCw, User } from 'lucide-react'
 import { toast } from 'sonner'
 import { CrmStageMenuItems } from '@/components/admin/CrmStageMenu'
 import { adminMenuContentClass } from '@/components/admin/menu-styles'
@@ -113,7 +113,7 @@ function columnName(id: UniqueIdentifier | undefined): string {
 // ─── Página ───────────────────────────────────────────────────────────────────
 
 export function AdminPipelinePage() {
-  const { data: leads = [], isLoading, isError } = useLeads()
+  const { data: leads = [], isLoading, isError, isFetching, refetch } = useLeads()
   const updateStage = useUpdateStage()
   const [activeId, setActiveId] = useState<string | null>(null)
 
@@ -198,9 +198,21 @@ export function AdminPipelinePage() {
       </div>
 
       {isError && (
-        <p role="alert" className="rounded-xl border border-destructive/20 bg-destructive/[.08] p-4 text-sm text-destructive">
-          Não foi possível carregar os leads. Atualize a página para tentar de novo.
-        </p>
+        <div className="flex flex-col gap-3 rounded-xl border border-destructive/20 bg-destructive/[.08] p-4 sm:flex-row sm:items-center sm:justify-between">
+          <p role="alert" className="text-sm text-destructive">
+            Não foi possível carregar os leads.
+          </p>
+          <Button
+            variant="secondary"
+            size="sm"
+            className="self-start sm:self-auto"
+            loading={isFetching}
+            onClick={() => void refetch()}
+          >
+            {!isFetching && <RefreshCw aria-hidden="true" />}
+            Tentar de novo
+          </Button>
+        </div>
       )}
 
       <DndContext

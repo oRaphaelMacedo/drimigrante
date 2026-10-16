@@ -78,6 +78,29 @@ describe('AdminQuizPage', () => {
     expect(within(item).getAllByRole('button', { name: /Editar/ })).toHaveLength(1)
   })
 
+  it('o aviso de condição incompleta quebra o nome da migration (sem alargar a página a 360px)', () => {
+    // Como em produção hoje: 9 perguntas com condição incompleta (migration 000200 não aplicada).
+    mocks.questions = Array.from({ length: 9 }, (_, i) => question(`q${i}`, { showIfRepaired: true }))
+    renderPage()
+    const status = screen.getByRole('status')
+    expect(status).toHaveTextContent('9 perguntas têm condição de exibição incompleta')
+    const text = status.querySelector('p') as HTMLElement
+    // Item flex que pode encolher e quebrar em qualquer ponto.
+    expect(text).toHaveClass('min-w-0', '[overflow-wrap:anywhere]')
+    const file = within(status).getByText('20261016000200_fix_quiz_display_conditions.sql')
+    expect(file.tagName).toBe('CODE')
+    expect(file).toHaveClass('break-all')
+  })
+
+  it('o número da pergunta usa texto escuro sobre cor de tema clara', () => {
+    mocks.questions = [question('claro', { themeColor: '#fdba2f' }), question('escuro', { themeColor: '#1f41c7' })]
+    renderPage()
+    const badge = (key: string) =>
+      (screen.getByText(key).closest('li') as HTMLElement).querySelector('span[aria-hidden="true"]') as HTMLElement
+    expect(badge('claro')).toHaveClass('text-foreground')
+    expect(badge('escuro')).toHaveClass('text-primary-foreground')
+  })
+
   it('o editor de tema abre com os dados do tema e reinicia vazio ao criar outro (sem efeito de sincronização)', async () => {
     const user = userEvent.setup({ delay: null })
     renderPage()

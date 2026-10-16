@@ -86,7 +86,10 @@ describe('csvField', () => {
     expect(csvField('@SUM(A1)')).toBe('"\'@SUM(A1)"')
     expect(csvField('+cmd')).toBe('"\'+cmd"')
     expect(csvField('-2+3')).toBe('"\'-2+3"')
+    expect(csvField('-1-2')).toBe('"\'-1-2"')
+    expect(csvField('-(1)')).toBe('"\'-(1)"')
     expect(csvField('-5')).toBe('"-5"')
+    expect(csvField('-2,5')).toBe('"-2,5"')
   })
 
   it('mantém telefones com sinal de +', () => {

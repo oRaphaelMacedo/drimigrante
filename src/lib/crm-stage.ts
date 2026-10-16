@@ -79,16 +79,21 @@ export function readAnswerText(answers: Json | null | undefined, key: string): s
 
 const FORMULA_START = /^[=@\t\r]/
 const SIGNED_START = /^[+-]/
-const PHONE_LIKE = /^[+-]?[\d\s().-]+$/
+/** Telefone internacional: `+` seguido só de dígitos, espaços, parênteses, pontos e hífens. */
+const PHONE_LIKE = /^\+[\d\s().-]+$/
+/** Número negativo simples (`-5`, `-2,5`): o Excel lê como número, não como fórmula. */
+const NEGATIVE_NUMBER = /^-\d+(?:[.,]\d+)?$/
 
 /**
  * Campo de CSV com aspas duplas escapadas (RFC 4180) e protegido contra
  * injeção de fórmula: nome e e-mail vêm do visitante, e uma célula que começa
- * com `=`, `@`, `+` ou `-` vira fórmula no Excel/Sheets. Telefones (`+351 912…`)
- * ficam como estão.
+ * com `=`, `@`, `+` ou `-` vira fórmula no Excel/Sheets. Ficam como estão só os
+ * telefones com `+` (`+351 912…`) e os números negativos simples; o resto que
+ * começa com sinal (ex.: `-1-2`, que o Excel calcularia) ganha o apóstrofo.
  */
 export function csvField(value: string | number | null | undefined): string {
   let text = value === null || value === undefined ? '' : String(value)
-  if (FORMULA_START.test(text) || (SIGNED_START.test(text) && !PHONE_LIKE.test(text))) text = `'${text}`
+  const signedButSafe = PHONE_LIKE.test(text) || NEGATIVE_NUMBER.test(text)
+  if (FORMULA_START.test(text) || (SIGNED_START.test(text) && !signedButSafe)) text = `'${text}`
   return `"${text.replace(/"/g, '""')}"`
 }

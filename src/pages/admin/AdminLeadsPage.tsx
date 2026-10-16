@@ -12,6 +12,7 @@ import {
   Mail,
   MoreHorizontal,
   Phone,
+  RefreshCw,
   Search,
   ThermometerSun,
 } from 'lucide-react'
@@ -118,7 +119,7 @@ function exportCsv(leads: readonly Lead[]) {
 export function AdminLeadsPage() {
   const [search, setSearch] = useState('')
   const [stageFilter, setStageFilter] = useState<StageFilter>('all')
-  const { data: leads = [], isLoading, isError } = useLeads()
+  const { data: leads = [], isLoading, isError, isFetching, refetch } = useLeads()
   const updateStage = useUpdateCrmStage()
 
   const stageCounts = useMemo(() => countByCrmStage(leads), [leads])
@@ -213,9 +214,15 @@ export function AdminLeadsPage() {
             <Loader2 aria-hidden="true" className="h-8 w-8 animate-spin text-primary" />
           </div>
         ) : isError ? (
-          <p role="alert" className="p-6 text-center text-sm text-destructive">
-            Não foi possível carregar os leads. Atualize a página para tentar de novo.
-          </p>
+          <div className="flex flex-col items-center gap-3 p-6 text-center">
+            <p role="alert" className="text-sm text-destructive">
+              Não foi possível carregar os leads.
+            </p>
+            <Button variant="secondary" size="sm" loading={isFetching} onClick={() => void refetch()}>
+              {!isFetching && <RefreshCw aria-hidden="true" />}
+              Tentar de novo
+            </Button>
+          </div>
         ) : filteredLeads.length === 0 ? (
           <div className="flex min-h-[200px] flex-col items-center justify-center gap-2 p-6 text-center text-muted-foreground">
             <Filter aria-hidden="true" className="h-8 w-8" />

@@ -3,6 +3,87 @@ import * as Dialog from '@radix-ui/react-dialog'
 import { X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
+const HISTORY_KEY = '__adminDrawer'
+
+const markerOf = (state: unknown) =>
+  state && typeof state === 'object' ? (state as Record<string, unknown>)[HISTORY_KEY] : undefined
+
+/**
+ * `history.back()` disparado ao fechar um painel e ainda não concluído. O
+ * próximo painel só empilha a sua entrada depois dele: senão o `popstate`
+ * atrasado fecharia o painel recém-aberto (ex.: fechar e abrir outro tema em
+ * seguida, ou a montagem dupla do StrictMode, já que os editores montam abertos).
+ */
+let pendingBack: Promise<void> | null = null
+
+function goBack(): Promise<void> {
+  return new Promise((resolve) => {
+    const done = () => {
+      window.removeEventListener('popstate', done)
+      window.clearTimeout(fallback)
+      pendingBack = null
+      resolve()
+    }
+    // Rede de segurança: se o navegador não emitir o popstate, não trava o próximo painel.
+    const fallback = window.setTimeout(done, 1000)
+    window.addEventListener('popstate', done)
+    window.history.back()
+  })
+}
+
+/**
+ * "Voltar" do navegador/Android fecha o painel em vez de sair da página: ao abrir
+ * empilha uma entrada (mesma URL, preservando o estado do react-router) e o
+ * `popstate` fecha. Ao fechar pela interface, desfaz a entrada se ela ainda for a
+ * atual. Mesma ideia do BottomSheet (src/components/ui/BottomSheet.tsx), mais a
+ * fila de `pendingBack`, porque os editores montam já abertos.
+ */
+function useCloseOnHistoryBack(open: boolean, onClose: () => void, enabled: boolean) {
+  const onCloseRef = React.useRef(onClose)
+  React.useEffect(() => {
+    onCloseRef.current = onClose
+  }, [onClose])
+
+  React.useEffect(() => {
+    if (!open || !enabled || typeof window === 'undefined') return
+
+    const marker = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+    const isOurEntry = () => markerOf(window.history.state) === marker
+    let active = true
+    let pushed = false
+    let closedByHistory = false
+
+    const handlePopState = () => {
+      if (isOurEntry()) return
+      closedByHistory = true
+      onCloseRef.current()
+    }
+
+    const start = () => {
+      if (!active) return
+      const currentState: unknown = window.history.state
+      const baseState = currentState && typeof currentState === 'object' ? currentState : {}
+      const nextState = { ...baseState, [HISTORY_KEY]: marker }
+      // Entrada órfã de um painel anterior (ex.: depois de "avançar"): reaproveita.
+      if (markerOf(currentState)) window.history.replaceState(nextState, '')
+      else window.history.pushState(nextState, '')
+      pushed = true
+      window.addEventListener('popstate', handlePopState)
+    }
+
+    if (pendingBack) void pendingBack.then(start)
+    else start()
+
+    return () => {
+      active = false
+      if (!pushed) return
+      window.removeEventListener('popstate', handlePopState)
+      // Fechou pela interface (X, overlay, Esc, Cancelar, Salvar): desfaz a entrada.
+      if (!closedByHistory && isOurEntry()) pendingBack = goBack()
+    }
+  }, [open, enabled])
+}
+
 export interface AdminDrawerProps {
   /** Estado controlado de abertura. */
   open: boolean
@@ -24,6 +105,12 @@ export interface AdminDrawerProps {
   className?: string
   /** id do painel (para `aria-controls` do botão que o abre). */
   id?: string
+  /**
+   * O "voltar" do navegador/Android fecha o painel (padrão: false). Ligue nos
+   * editores, para o "voltar" não sair da página e perder o que foi digitado.
+   * O menu do admin deixa desligado: ele navega entre rotas.
+   */
+  closeOnBack?: boolean
 }
 
 /**
@@ -33,8 +120,9 @@ export interface AdminDrawerProps {
  *
  * - z-index 60 (camada de sheets), acima do header e do banner de cookies.
  * - Altura 100dvh com rolagem interna e respiro das safe-areas.
- * - Diferente do BottomSheet, não empilha entrada no histórico: o menu navega
- *   entre rotas, e uma entrada extra faria o "voltar" repetir a página.
+ * - Por padrão não empilha entrada no histórico: o menu navega entre rotas, e
+ *   uma entrada extra faria o "voltar" repetir a página. Os editores ligam
+ *   `closeOnBack` (padrão do BottomSheet).
  */
 export function AdminDrawer({
   open,
@@ -47,7 +135,11 @@ export function AdminDrawer({
   children,
   className,
   id,
+  closeOnBack = false,
 }: AdminDrawerProps) {
+  const close = React.useCallback(() => onOpenChange(false), [onOpenChange])
+  useCloseOnHistoryBack(open, close, closeOnBack)
+
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>

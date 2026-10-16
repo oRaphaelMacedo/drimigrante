@@ -8,6 +8,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   leads: [] as Array<Record<string, unknown>>,
+  loadError: null as { message: string } | null,
   selected: [] as string[],
   update: vi.fn(),
   toastSuccess: vi.fn(),
@@ -18,7 +19,12 @@ vi.mock('@/lib/supabase', () => ({
     from: () => ({
       select: (columns: string) => {
         mocks.selected.push(columns)
-        return { order: () => ({ limit: async () => ({ data: mocks.leads, error: null }) }) }
+        return {
+          order: () => ({
+            limit: async () =>
+              mocks.loadError ? { data: null, error: mocks.loadError } : { data: mocks.leads, error: null },
+          }),
+        }
       },
       update: (patch: unknown) => ({
         eq: async (column: string, value: unknown) => {
@@ -72,6 +78,7 @@ const mobileList = () => screen.getAllByRole('list')[0]
 
 beforeEach(() => {
   mocks.selected = []
+  mocks.loadError = null
   mocks.update.mockReset()
   mocks.toastSuccess.mockReset()
   mocks.leads = [
@@ -143,5 +150,18 @@ describe('AdminLeadsPage (DI-073 / DI-088 / DI-080)', () => {
       expect(mocks.update).toHaveBeenCalledWith({ crm_stage: 'contactado' }, 'id', 'bbbbbbbb-0000-4000-8000-000000000002'),
     )
     await waitFor(() => expect(mocks.toastSuccess).toHaveBeenCalledWith('Lead movido para "Contatado"'))
+  })
+
+  it('erro de carga oferece "Tentar de novo", que refaz a consulta', async () => {
+    const user = userEvent.setup({ delay: null })
+    mocks.loadError = { message: 'falha de rede' }
+    renderPage()
+    expect(await screen.findByRole('alert')).toHaveTextContent('Não foi possível carregar os leads.')
+
+    mocks.loadError = null
+    await user.click(screen.getByRole('button', { name: 'Tentar de novo' }))
+    expect(await screen.findAllByText('Ana Souza')).not.toHaveLength(0)
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(mocks.selected).toHaveLength(2)
   })
 })

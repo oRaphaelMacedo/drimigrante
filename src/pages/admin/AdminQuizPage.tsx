@@ -33,6 +33,7 @@ import {
 import { AdminDrawer } from '@/components/admin/AdminDrawer'
 import { QuizQuestionEditor } from '@/components/quiz/QuizQuestionEditor'
 import { Badge, Button, Input, Select } from '@/components/ui'
+import { textClassOn } from '@/lib/text-on-color'
 import { cn } from '@/lib/utils'
 
 const FIELD_TYPE_LABEL: Record<string, string> = {
@@ -143,7 +144,7 @@ export function AdminQuizPage() {
         className="flex items-center gap-3 rounded-lg border border-destructive/20 bg-destructive/[.08] p-4 text-sm text-destructive"
       >
         <AlertCircle aria-hidden="true" className="h-5 w-5 shrink-0" />
-        Erro ao carregar perguntas: {(error as Error).message}
+        <span className="min-w-0 [overflow-wrap:anywhere]">Erro ao carregar perguntas: {(error as Error).message}</span>
       </div>
     )
   }
@@ -187,11 +188,14 @@ export function AdminQuizPage() {
           className="flex items-start gap-3 rounded-lg border border-warning/20 bg-warning/[.08] p-4 text-sm text-warning"
         >
           <AlertCircle aria-hidden="true" className="mt-0.5 h-5 w-5 shrink-0" />
-          <p>
+          {/* min-w-0 + overflow-wrap: o nome do arquivo não tem ponto de quebra e, sem
+              isso, alarga a página no celular (360px) e corta os painéis abertos. */}
+          <p className="min-w-0 [overflow-wrap:anywhere]">
             {repairedCount === 1 ? '1 pergunta tem' : `${repairedCount} perguntas têm`} condição de
             exibição incompleta no banco. O quiz está usando a regra padrão do código para{' '}
             {repairedCount === 1 ? 'ela' : 'elas'}. Para corrigir no banco, abra a pergunta e salve,
-            ou aplique a migration 20261016000200_fix_quiz_display_conditions.sql.
+            ou aplique a migration{' '}
+            <code className="break-all font-mono text-xs">20261016000200_fix_quiz_display_conditions.sql</code>.
           </p>
         </div>
       )}
@@ -306,7 +310,10 @@ export function AdminQuizPage() {
                     >
                       <span
                         aria-hidden="true"
-                        className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold text-primary-foreground"
+                        className={cn(
+                          'mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold',
+                          textClassOn(q.themeColor),
+                        )}
                         style={{ backgroundColor: q.themeColor }}
                       >
                         {idx + 1}
@@ -547,11 +554,12 @@ function ThemeEditor({ theme, onClose }: { theme: FormTheme | null; onClose: () 
   return (
     <AdminDrawer
       open
+      closeOnBack
       onOpenChange={(open) => {
         if (!open && !isPending) onClose()
       }}
       title={isCreating ? 'Novo tema' : 'Editar tema'}
-      description={isCreating ? undefined : <span className="font-mono">{theme.code}</span>}
+      description={isCreating ? undefined : <span className="break-all font-mono">{theme.code}</span>}
       footer={
         <div className="flex items-center justify-between gap-3">
           <Button variant="ghost" size="sm" onClick={onClose} disabled={isPending}>
@@ -608,7 +616,7 @@ function ThemeEditor({ theme, onClose }: { theme: FormTheme | null; onClose: () 
               className="h-11 w-14 cursor-pointer rounded-md border border-input bg-card p-0.5"
             />
             <span
-              className="rounded-full px-3 py-1 text-xs font-semibold text-primary-foreground"
+              className={cn('max-w-full break-words rounded-full px-3 py-1 text-xs font-semibold', textClassOn(color))}
               style={{ backgroundColor: color }}
             >
               {namePt || 'Prévia'}
