@@ -145,14 +145,17 @@ describe('ResultsPage', () => {
     expect(mocks.track.mock.calls.filter(([name]) => name === 'checkout_cancelled')).toHaveLength(1)
   })
 
-  it('results_viewed e quiz_completed usam trackOnce por diagnóstico', async () => {
+  it('results_viewed usa trackOnce por diagnóstico; quiz_completed fica só com o useQuiz', async () => {
     seedQuiz()
     renderAt('/results')
     await screen.findByTestId('results-score')
 
     const onceEvents = mocks.trackOnce.mock.calls.map((call) => (call as unknown[])[0])
-    expect(onceEvents).toEqual(expect.arrayContaining(['results_viewed', 'quiz_completed', 'paywall_viewed']))
+    expect(onceEvents).toEqual(expect.arrayContaining(['results_viewed', 'paywall_viewed']))
+    // W3-01: o /results não envia quiz_completed (contaria em dobro, inclusive em outro aparelho).
+    expect(onceEvents).not.toContain('quiz_completed')
     expect(mocks.track).not.toHaveBeenCalledWith('results_viewed', expect.anything())
+    expect(mocks.track).not.toHaveBeenCalledWith('quiz_completed', expect.anything())
   })
 
   it('erro do pagamento aparece em português, logo abaixo do botão, com "Tentar novamente"', async () => {

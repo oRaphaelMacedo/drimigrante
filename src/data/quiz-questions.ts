@@ -1,5 +1,16 @@
 // quiz-questions.ts — Diagnóstico da Imigração
 // Fluxo mapeado a partir do export MindMeister — Doutor Imigração / Diagnóstico da Imigração
+//
+// Importado também pelo Deno (testes de paridade em supabase/functions/_shared):
+// só imports relativos com extensão `.ts` e sem dependências npm.
+
+import {
+  categoryForPercentage,
+  getCategoryPresentation,
+  type ScoreCategory,
+} from '../lib/category.ts'
+
+export type { ScoreCategory } from '../lib/category.ts'
 
 export type FieldType = 'radio' | 'multiselect' | 'select' | 'number' | 'text'
 
@@ -406,18 +417,24 @@ export const QUIZ_QUESTIONS: QuizQuestion[] = [
 
 // ─── SCORING ─────────────────────────────────────────────────────────────────
 
-export type ScoreCategory = 'alta' | 'media' | 'baixa'
-
 export interface ScoreResult {
   total: number
   max: number
   percentage: number
   category: ScoreCategory
+  /** Título da categoria (CATEGORY_PRESENTATION em src/lib/category.ts). */
   label: string
+  /** Texto de apoio da categoria (CATEGORY_PRESENTATION em src/lib/category.ts). */
   sublabel: string
-  color: string
-  bgColor: string
-  emoji: string
+  /**
+   * @deprecated Não usados: cor e ícone vêm de CATEGORY_PRESENTATION (DI-029).
+   * Mantidos opcionais só para não quebrar objetos montados à mão.
+   */
+  color?: string
+  /** @deprecated ver `color`. */
+  bgColor?: string
+  /** @deprecated ver `color`. Nunca mais um símbolo ('+', '~', '?') como ícone. */
+  emoji?: string
 }
 
 /**
@@ -532,38 +549,10 @@ export function computeScore(
   }
 
   const percentage = max > 0 ? Math.round((total / max) * 100) : 0
+  const category = categoryForPercentage(percentage)
+  const { label, sublabel } = getCategoryPresentation(category)
 
-  let category: ScoreCategory
-  let label: string
-  let sublabel: string
-  let color: string
-  let bgColor: string
-  let emoji: string
-
-  if (percentage >= 60) {
-    category = 'alta'
-    label = 'Alta Elegibilidade para Nacionalidade'
-    sublabel = 'O seu perfil indica fortes probabilidades de elegibilidade. A análise completa revelará os caminhos mais diretos e os documentos necessários.'
-    color = 'text-emerald-700'
-    bgColor = 'bg-emerald-50'
-    emoji = '+'
-  } else if (percentage >= 35) {
-    category = 'media'
-    label = 'Elegibilidade Média — Requer Análise'
-    sublabel = 'Existem caminhos viáveis, mas há condições a cumprir ou documentos a levantar. A análise completa identificará o percurso mais adequado.'
-    color = 'text-amber-700'
-    bgColor = 'bg-amber-50'
-    emoji = '~'
-  } else {
-    category = 'baixa'
-    label = 'Elegibilidade Baixa — Precisa de Acompanhamento'
-    sublabel = 'O seu perfil atual apresenta desafios, mas existem estratégias possíveis. A análise completa identificará as opções disponíveis e os passos a seguir.'
-    color = 'text-blue-700'
-    bgColor = 'bg-blue-50'
-    emoji = '?'
-  }
-
-  return { total, max, percentage, category, label, sublabel, color, bgColor, emoji }
+  return { total, max, percentage, category, label, sublabel }
 }
 
 // ─── RECOMENDAÇÕES POR CASO ───────────────────────────────────────────────────
@@ -575,9 +564,10 @@ export interface VisaSuggestion {
   reason: string
 }
 
-// Textos sem prometer serviço próprio nem indicar advogados (DI-065):
+// Textos sem prometer serviço próprio, aprovação nem indicar advogados (DI-065):
 // quando fizer sentido, indicar que a análise completa aponta quando vale
-// procurar um profissional.
+// procurar um profissional. Justificativas em pt-BR (aparecem no teaser do
+// /results); `code`, `name` e `match` têm paridade com _shared/pathways.ts.
 // Recebe as respostas como estão; quem envia deve aplicar pruneAnswers antes
 // (DI-042), para que respostas de ramos ocultos não influenciem o resultado.
 export function suggestVisas(answers: Record<string, string>): VisaSuggestion[] {
@@ -598,8 +588,8 @@ export function suggestVisas(answers: Record<string, string>): VisaSuggestion[] 
         name: 'Nacionalidade por Descendência (1.º grau)',
         match: hasDoc ? 'strong' : 'possible',
         reason: hasDoc
-          ? 'Com documentação do antepassado português e descendência direta, o seu pedido tem alta probabilidade de aprovação.'
-          : 'Descendência de 1.º grau qualifica, mas será necessário levantar a documentação do antepassado português.',
+          ? 'Com documentação do antepassado português e descendência direta, você reúne as condições principais para o pedido.'
+          : 'A descendência de 1.º grau qualifica, mas será preciso reunir os documentos do antepassado português.',
       })
     } else if (antepassado === 'avo' || antepassado === 'bisavo') {
       suggestions.push({
@@ -607,7 +597,7 @@ export function suggestVisas(answers: Record<string, string>): VisaSuggestion[] 
         name: `Nacionalidade por Descendência (${antepassado === 'avo' ? '2.º' : '3.º'} grau)`,
         match: hasDoc && hasLacos ? 'strong' : hasDoc || hasLacos ? 'possible' : 'weak',
         reason: hasDoc
-          ? 'Com documentação e laços com Portugal, a elegibilidade é real, mas requer análise jurídica aprofundada.'
+          ? 'Com os documentos do antepassado existe um caminho possível, mas os laços com Portugal também contam e pedem uma análise cuidadosa.'
           : 'Será preciso conseguir os documentos do seu antepassado em Portugal. A análise completa indica quais documentos reunir e quando vale procurar um profissional.',
       })
     } else if (antepassado === 'nao_sei') {
@@ -628,8 +618,8 @@ export function suggestVisas(answers: Record<string, string>): VisaSuggestion[] 
       name: 'Naturalização pelo Casamento',
       match: tempo === 'mais_3_anos' ? 'strong' : 'weak',
       reason: tempo === 'mais_3_anos'
-        ? 'Com mais de 3 anos de casamento documentado com cidadão(ã) português(a), é elegível para pedir a naturalização.'
-        : 'Ainda não atingiu os 3 anos necessários. Reavalie a elegibilidade quando completar esse prazo.',
+        ? 'Com mais de 3 anos de casamento ou união estável documentada com cidadão(ã) português(a), você cumpre o prazo exigido para o pedido.'
+        : 'Você ainda não completou os 3 anos de casamento ou união estável. Vale reavaliar quando completar esse prazo.',
     })
   }
 
@@ -641,8 +631,8 @@ export function suggestVisas(answers: Record<string, string>): VisaSuggestion[] 
       name: 'Naturalização por Nascimento em Portugal',
       match: tempo === '5_ou_mais' ? 'strong' : tempo === '2_a_4' ? 'possible' : 'weak',
       reason: tempo === '5_ou_mais'
-        ? 'Nascido(a) em Portugal com 5 ou mais anos de residência — condições reunidas para o pedido.'
-        : 'A construir o tempo de residência necessário (5 anos). Continue a residir legalmente em Portugal.',
+        ? 'Você nasceu em Portugal e mora no país há 5 anos ou mais: essas são as condições principais para o pedido.'
+        : 'Ainda falta completar o tempo de residência exigido (5 anos). Continue morando legalmente em Portugal.',
     })
   }
 
@@ -656,10 +646,10 @@ export function suggestVisas(answers: Record<string, string>): VisaSuggestion[] 
       match: legal === 'sim' && tempo === 'mais_5' ? 'strong' : legal === 'sim' ? 'possible' : 'weak',
       reason:
         legal === 'sim' && tempo === 'mais_5'
-          ? 'Com Autorização de Residência há 5 ou mais anos, reúne as condições para pedir a naturalização.'
+          ? 'Com Autorização de Residência há 5 anos ou mais, você cumpre o tempo exigido para pedir a naturalização.'
           : legal === 'sim'
-          ? 'Em curso para a naturalização — complete 5 anos de residência legal.'
-          : 'Primeiro passo: regularizar a sua situação junto da AIMA. A análise completa indica quando vale procurar um profissional.',
+          ? 'Você está a caminho da naturalização: falta completar 5 anos de residência legal.'
+          : 'Primeiro passo: regularizar sua situação na AIMA. A análise completa indica quando vale procurar um profissional.',
     })
   }
 
@@ -682,8 +672,8 @@ export function suggestVisas(answers: Record<string, string>): VisaSuggestion[] 
       match: quando === 'antes_1974' ? 'strong' : 'possible',
       reason:
         quando === 'antes_1974'
-          ? 'A sua situação anterior ao 25 de Abril pode conferir direitos especiais à nacionalidade portuguesa.'
-          : 'A nova legislação sobre ex-colónias pode abrir-lhe caminhos — requer análise jurídica atualizada.',
+          ? 'Ter se mudado para Portugal antes de 25 de Abril de 1974 pode dar direitos especiais à nacionalidade portuguesa.'
+          : 'A legislação sobre as ex-colônias pode abrir caminhos para você, mas o caso pede uma análise atualizada.',
     })
   }
 
@@ -692,7 +682,7 @@ export function suggestVisas(answers: Record<string, string>): VisaSuggestion[] 
       code: 'analise_personalizada',
       name: 'Análise Personalizada Necessária',
       match: 'weak',
-      reason: 'O seu caso precisa de uma análise individual. A análise completa mostra os caminhos possíveis e indica quando vale procurar um profissional.',
+      reason: 'Seu caso precisa de uma análise individual. A análise completa mostra os caminhos possíveis e indica quando vale procurar um profissional.',
     })
   }
 

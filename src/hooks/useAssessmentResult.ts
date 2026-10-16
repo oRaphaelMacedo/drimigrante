@@ -8,7 +8,8 @@
 //
 // As vias de nacionalidade são RECALCULADAS a partir das respostas do banco
 // (suggestVisas), para que outro aparelho mostre exatamente as mesmas vias do
-// aparelho original (DI-007). Colunas sempre explícitas: o cliente não lê
+// aparelho original (DI-007). Rótulo da categoria igual ao do /results
+// (src/lib/category.ts, DI-029). Colunas sempre explícitas: o cliente não lê
 // ia_explanation_full (DI-016); a análise completa vem da RPC
 // get_full_analysis (ver fetchFullAnalysis em useAssessment.ts).
 import { useQuery } from '@tanstack/react-query'
@@ -17,6 +18,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { ASSESSMENT_RESULT_CLIENT_COLUMNS, type AssessmentResultClient } from '@/hooks/useAssessment'
 import { QUIZ_RESULT_STORAGE_KEY } from '@/lib/stored-quiz-result'
 import { computeScore, pruneAnswers, suggestVisas, type VisaSuggestion } from '@/data/quiz-questions'
+import { getCategoryPresentation } from '@/lib/category'
 import type { Json } from '@/lib/database.types'
 
 export type PathwayMatch = VisaSuggestion['match']
@@ -178,14 +180,12 @@ function getLocalData(): LocalData {
   }
 }
 
-const CATEGORY_LABEL: Record<string, string> = {
-  alta: 'Alta elegibilidade',
-  media: 'Média elegibilidade',
-  baixa: 'Elegibilidade em desenvolvimento',
-}
-
+/**
+ * Rótulo da categoria, o mesmo do /results (CATEGORY_PRESENTATION, DI-029).
+ * Categoria desconhecida usa a apresentação neutra de "baixa" (nunca o código cru).
+ */
 export function categoryLabel(category: string): string {
-  return CATEGORY_LABEL[category] ?? category
+  return getCategoryPresentation(category).label
 }
 
 /** Vias a partir das respostas (sem ramos ocultos), no formato da tela. */

@@ -1,96 +1,174 @@
 // ResultsPage.tsx — pré-resultado do quiz + oferta da análise completa.
 //
-// DI-011: o botão de compra usa useStartCheckout (1 clique, sem login; salva
-//   o diagnóstico de novo se faltar o assessmentId). Volta do Stripe com
-//   ?checkout=cancelled mostra um aviso neutro ("Nada foi cobrado").
-// DI-010: textos da oferta vêm de OFFER (nada de promessa que o produto não cumpre).
-// DI-032: erro do pagamento em português, logo abaixo do botão, com
-//   "Tentar novamente".
-// DI-033: results_viewed/quiz_completed uma vez por diagnóstico, paywall_viewed
-//   quando a oferta aparece na tela, checkout_cancelled ao voltar do Stripe.
+// Objetivo: o primeiro scroll do resultado leva ao €30, sem enganar.
+//
+// DI-029: apresentação única por categoria (src/lib/category.ts): o mesmo
+//   título e o mesmo ícone vindo do quiz, ao recarregar e em outro aparelho.
+// DI-070: caminhos para a nacionalidade, o mais forte primeiro, com o blur
+//   acessível (PathTeaser).
+// DI-028: cartão do resultado compacto, link "Ver o que inclui" e CTA de compra
+//   fixo no celular (StickyBuyBar) entre o resultado e a oferta.
+// DI-030: oferta personalizada por categoria e caminho (PaywallCard).
+// DI-031: e-mail de acesso visível e editável antes de pagar (AccessEmail).
+// DI-024: /results?r=<token> abre o resultado em outro aparelho; o token sai da
+//   URL antes de qualquer pageview e "Guardar meu resultado" copia o link.
+// DI-011/DI-032: a compra usa useStartCheckout (1 clique, sem login); erros em
+//   português logo abaixo do botão; ?checkout=cancelled mostra "Nada foi cobrado".
+// DI-033: results_viewed e paywall_viewed uma vez por diagnóstico. O
+//   quiz_completed é enviado só pelo useQuiz (aqui contaria em dobro, inclusive
+//   em outro aparelho).
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
-import { useEffect, useMemo, useRef, useState } from 'react'
-import {
-  ArrowRight,
-  Check,
-  CircleDot,
-  Compass,
-  Info,
-  Lock,
-  RotateCcw,
-  Sparkles,
-  TrendingUp,
-  X,
-  type LucideIcon,
-} from 'lucide-react'
+import { forwardRef, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { ArrowRight, ChevronDown, Info, Link2Off, Loader2, RotateCcw, WifiOff, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { QuizResult } from '@/hooks/useQuiz'
-import type { VisaSuggestion } from '@/data/quiz-questions'
+import { pruneAnswers, suggestVisas, type VisaSuggestion } from '@/data/quiz-questions'
 import { track, trackOnce } from '@/lib/analytics'
-import { OFFER } from '@/lib/offer'
 import { useAuth } from '@/hooks/useAuth'
 import { readStoredCheckoutData, useStartCheckout } from '@/hooks/useStartCheckout'
 import { QUIZ_RESULT_STORAGE_KEY } from '@/lib/stored-quiz-result'
-import { Badge, Button, Card, Container } from '@/components/ui'
-import { CheckoutFeedback } from '@/components/checkout/CheckoutFeedback'
+import { categoryForPercentage, getCategoryPresentation, isScoreCategory, CATEGORY_THRESHOLDS } from '@/lib/category'
+import { updateAccessEmail } from '@/lib/access-email'
+import {
+  RESUME_PARAM,
+  fetchAssessmentByResumeToken,
+  fetchOwnResumeToken,
+  isValidResumeToken,
+  readStoredResumeToken,
+  rememberResumeToken,
+  storeResumedResult,
+  withoutParams,
+} from '@/lib/resume-token'
+import { Button, Card, Container } from '@/components/ui'
+import { CategoryIcon } from '@/components/results/CategoryIcon'
+import { PathTeaser } from '@/components/results/PathTeaser'
+import { PAYWALL_ID, PAYWALL_TITLE_ID, PaywallCard } from '@/components/results/PaywallCard'
+import { SaveResultLink } from '@/components/results/SaveResultLink'
+import { StickyBuyBar } from '@/components/results/StickyBuyBar'
+import { firstNameOf, sortPathways } from '@/components/results/results-copy'
 
-type ScoreCategory = QuizResult['score']['category']
+/** Resultado pronto para a tela, com a identidade do envio do quiz. */
+interface LoadedResult {
+  result: QuizResult
+  /** Identifica o envio do quiz (session_id) para os eventos "uma vez por diagnóstico". */
+  key: string | null
+  assessmentId: string | null
+  sessionId: string | null
+  /** Token do link "Guardar meu resultado", se já conhecido neste aparelho. */
+  resumeToken: string | null
+}
+
+type ResumeStatus = 'idle' | 'loading' | 'ready' | 'invalid' | 'error'
+
+function prefersReducedMotion(): boolean {
+  try {
+    return window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  } catch {
+    return false
+  }
+}
+
+/** Rola até o elemento (sem animação com movimento reduzido); ignora navegadores sem a API. */
+function scrollToElement(el: Element | null | undefined, block: ScrollLogicalPosition): void {
+  if (!el || typeof el.scrollIntoView !== 'function') return
+  el.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block })
+}
+
+/** Tira parâmetros da barra de endereço na hora (antes do pageview agendado). */
+function stripFromAddressBar(keys: readonly string[]): void {
+  try {
+    const { pathname, search, hash } = window.location
+    const params = new URLSearchParams(search)
+    if (!keys.some((key) => params.has(key))) return
+    window.history.replaceState(window.history.state, '', `${pathname}${withoutParams(search, keys)}${hash}`)
+  } catch {
+    // sem history (ambiente de teste): o roteador limpa a URL logo em seguida
+  }
+}
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export function ResultsPage() {
   const location = useLocation()
-  const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
-  const { hasAccess } = useAuth()
-  // Derivado na renderização (sem piscar o estado vazio antes de ler o aparelho).
-  const loaded = useMemo(() => loadResult(location.state), [location.state])
-  const result = loaded?.result ?? null
-  const resultKey = loaded?.key ?? null
-  const [showCancelled, setShowCancelled] = useState(() => searchParams.get('checkout') === 'cancelled')
-  const cancelHandledRef = useRef(false)
+  // Lidos na primeira renderização: a URL é limpa logo depois.
+  const [initial] = useState(() => ({
+    token: searchParams.get(RESUME_PARAM),
+    cancelled: searchParams.get('checkout') === 'cancelled',
+  }))
+  const [resume, setResume] = useState<ResumeStatus>(() =>
+    initial.token === null ? 'idle' : isValidResumeToken(initial.token) ? 'loading' : 'invalid',
+  )
+  const [resumed, setResumed] = useState<LoadedResult | null>(null)
+  const [showCancelled, setShowCancelled] = useState(initial.cancelled)
+  const cancelTrackedRef = useRef(false)
 
-  // Volta do Stripe sem pagar: aviso neutro, evento único e URL limpa
-  // (recarregar a página não repete o aviso nem o evento).
-  useEffect(() => {
-    if (searchParams.get('checkout') !== 'cancelled' || cancelHandledRef.current) return
-    cancelHandledRef.current = true
-    setShowCancelled(true)
-    track('checkout_cancelled', { plan: 'one_time' })
+  // URL limpa ANTES de qualquer pageview (o analytics agenda o pageview para
+  // depois da navegação): o token de ?r= nunca fica na barra de endereço, e
+  // ?checkout=cancelled não repete o aviso ao recarregar.
+  useLayoutEffect(() => {
+    const hasToken = searchParams.has(RESUME_PARAM)
+    const cancelled = searchParams.get('checkout') === 'cancelled'
+    if (!hasToken && !cancelled) return
+    if (cancelled && !cancelTrackedRef.current) {
+      cancelTrackedRef.current = true
+      setShowCancelled(true)
+      track('checkout_cancelled', { plan: 'one_time' })
+    }
+    const keys = cancelled ? [RESUME_PARAM, 'checkout'] : [RESUME_PARAM]
+    stripFromAddressBar(keys)
     setSearchParams(
       (prev) => {
         const next = new URLSearchParams(prev)
-        next.delete('checkout')
+        for (const key of keys) next.delete(key)
         return next
       },
       { replace: true, state: location.state },
     )
   }, [searchParams, setSearchParams, location.state])
 
-  const paid = hasAccess('dashboard')
-
-  // Um evento por diagnóstico (recarregar /results não conta de novo).
+  // Link de retomada: lê o resultado pelo token e guarda neste aparelho.
   useEffect(() => {
-    if (!result) return
-    const key = resultKey ?? `${result.score.category}:${result.score.percentage}`
-    trackOnce('quiz_completed', key, {
-      score: result.score.percentage,
-      category: result.score.category,
-      top_visa: result.visas?.[0]?.code,
+    const token = initial.token
+    if (resume !== 'loading' || !token) return
+    let active = true
+    void fetchAssessmentByResumeToken(token).then((outcome) => {
+      if (!active) return
+      if (outcome.kind !== 'ok') {
+        setResume(outcome.kind === 'not_found' ? 'invalid' : 'error')
+        return
+      }
+      const record = storeResumedResult(outcome.data, token)
+      setResumed(parseStoredResult(record))
+      setResume('ready')
     })
-    trackOnce('results_viewed', key, { category: result.score.category, has_access: paid })
-  }, [result, resultKey, paid])
+    return () => {
+      active = false
+    }
+  }, [resume, initial.token])
+
+  const local = useMemo(() => loadResult(location.state), [location.state])
+  const loaded = resume === 'ready' ? resumed : resume === 'idle' ? local : null
 
   const cancelledNotice = showCancelled ? <CancelledNotice onClose={() => setShowCancelled(false)} /> : null
 
-  if (!result) {
+  if (resume === 'loading') return <ResumeLoading />
+  if (resume === 'invalid' || resume === 'error') {
+    return (
+      <ResumeProblem
+        kind={resume}
+        onRetry={() => setResume('loading')}
+        onShowLocal={local ? () => setResume('idle') : undefined}
+      />
+    )
+  }
+
+  if (!loaded) {
     return (
       <Container size="sm" className="flex min-h-[60dvh] flex-col justify-center gap-6 py-10">
         {cancelledNotice}
-        <div className="flex flex-col items-center gap-4 text-center">
-          <p className="text-base text-muted-foreground [text-wrap:pretty]">
-            Não encontramos nenhum resultado do quiz neste aparelho.
-          </p>
+        <div className="flex flex-col items-center gap-4 text-center" data-testid="results-empty">
+          <p className="text-base text-muted-foreground">Não encontramos nenhum resultado do quiz neste aparelho.</p>
           <div className="flex w-full max-w-sm flex-col gap-3">
             <Button asChild size="md" className="w-full">
               <Link to="/quiz">
@@ -109,29 +187,113 @@ export function ResultsPage() {
     )
   }
 
-  const { score, visas, leadInfo } = result
-  const onceKey = resultKey ?? `${score.category}:${score.percentage}`
+  // `key`: o useStartCheckout lê o resultado do aparelho ao montar — remonta
+  // quando o resultado muda (ex.: aberto pelo link de retomada).
+  return <ResultsContent key={loaded.key ?? 'local'} loaded={loaded} notice={cancelledNotice} />
+}
+
+// ─── Conteúdo ─────────────────────────────────────────────────────────────────
+
+function ResultsContent({ loaded, notice }: { loaded: LoadedResult; notice: ReactNode }) {
+  const navigate = useNavigate()
+  const { hasAccess } = useAuth()
+  const paid = hasAccess('dashboard')
+  const checkout = useStartCheckout()
+  const { score, visas, leadInfo } = loaded.result
+  const category = score.category
+  const onceKey = loaded.key ?? `${category}:${score.percentage}`
+
+  const scoreRef = useRef<HTMLDivElement>(null)
+  const buyBlockRef = useRef<HTMLDivElement>(null)
+  const ctaRef = useRef<HTMLButtonElement>(null)
+  const buySourceRef = useRef<'paywall' | 'sticky' | null>(null)
+  const [editedEmail, setEditedEmail] = useState<string | null>(null)
+  const [resumeToken, setResumeToken] = useState<string | null>(loaded.resumeToken)
+
+  const pathways = useMemo(() => sortPathways(visas), [visas])
+  const firstName = firstNameOf(leadInfo?.fullName)
+
+  // Um evento por diagnóstico (recarregar /results não conta de novo).
+  useEffect(() => {
+    trackOnce('results_viewed', onceKey, { category, has_access: paid })
+  }, [onceKey, category, paid])
+
+  // Token do "Guardar meu resultado" no aparelho do quiz (posse pelo session_id).
+  const { assessmentId, sessionId } = loaded
+  useEffect(() => {
+    if (resumeToken || paid || !assessmentId || !sessionId) return
+    let active = true
+    void fetchOwnResumeToken(assessmentId, sessionId).then((token) => {
+      if (!active || !token) return
+      rememberResumeToken(token, assessmentId)
+      setResumeToken(token)
+    })
+    return () => {
+      active = false
+    }
+  }, [resumeToken, paid, assessmentId, sessionId])
+
+  const buy = (source: 'paywall' | 'sticky') => {
+    buySourceRef.current = source
+    void checkout.start({ position: source === 'sticky' ? 'results_sticky' : 'results_paywall' })
+  }
+
+  // Compra iniciada pela barra fixa que voltou com erro ou aviso: leva a pessoa
+  // até o botão da oferta, onde a mensagem e o "Tentar novamente" aparecem.
+  useEffect(() => {
+    if (checkout.phase !== 'error' && checkout.phase !== 'email_sent') return
+    if (buySourceRef.current !== 'sticky') return
+    buySourceRef.current = null
+    scrollToElement(ctaRef.current, 'center')
+  }, [checkout.phase])
+
+  const goToOffer = () => {
+    scrollToElement(document.getElementById(PAYWALL_ID), 'start')
+    document.getElementById(PAYWALL_TITLE_ID)?.focus({ preventScroll: true })
+  }
+
+  const anonymous = checkout.mode === 'anonymous'
+  const email = anonymous ? (editedEmail ?? leadInfo?.email ?? checkout.email) : checkout.email
+
+  const handleEmailSave = async (next: string, source: 'manual' | 'suggestion') => {
+    const outcome = await updateAccessEmail(next)
+    if (outcome === 'saved' || outcome === 'saved_locally') {
+      setEditedEmail(next)
+      track('email_edited', { position: 'results', source })
+      // Um erro anterior (ex.: diagnóstico não encontrado) não vale para o e-mail novo.
+      if (checkout.phase === 'error' || checkout.phase === 'email_sent') checkout.reset()
+    }
+    return outcome
+  }
 
   return (
     <div className="min-h-[calc(100dvh-4rem)] bg-background">
       <Container size="sm" className="space-y-5 py-6 sm:space-y-6 sm:py-10">
-        {cancelledNotice}
+        {notice}
 
-        {/* ── Pontuação ── */}
-        <ScoreCard score={score} leadInfo={leadInfo} />
+        <ScoreCard ref={scoreRef} score={score} firstName={firstName} onSeeOffer={paid ? undefined : goToOffer} />
 
-        {/* ── Caminhos (teaser) ── */}
-        <VisaTeaserCard visas={visas} />
+        <PathTeaser pathways={pathways} />
 
-        {/* ── Oferta ── */}
         <PaywallCard
-          firstName={leadInfo?.fullName?.split(' ')[0]}
+          ctaRef={ctaRef}
+          buyBlockRef={buyBlockRef}
+          firstName={firstName}
+          category={category}
+          strongestPath={pathways[0] ?? null}
           paid={paid}
           onceKey={onceKey}
+          email={email}
+          emailEditable={anonymous}
+          onEmailSave={handleEmailSave}
+          phase={checkout.phase}
+          isPending={checkout.isPending}
+          error={checkout.error}
+          onBuy={() => buy('paywall')}
         />
 
-        {/* ── Refazer ── */}
-        <div className="flex justify-center">
+        <div className="flex flex-col items-center gap-4 pt-1">
+          {resumeToken && !paid && <SaveResultLink token={resumeToken} />}
           <Button
             id="results-restart-btn"
             variant="ghost"
@@ -144,6 +306,15 @@ export function ResultsPage() {
           </Button>
         </div>
       </Container>
+
+      {!paid && (
+        <StickyBuyBar
+          anchorRef={scoreRef}
+          offerRef={buyBlockRef}
+          isPending={checkout.isPending}
+          onBuy={() => buy('sticky')}
+        />
+      )}
     </div>
   )
 }
@@ -160,7 +331,7 @@ function CancelledNotice({ onClose }: { onClose: () => void }) {
       <Info aria-hidden="true" className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
       <div className="min-w-0 flex-1">
         <p className="text-base font-semibold text-foreground">Pagamento não concluído. Nada foi cobrado.</p>
-        <p className="mt-1 text-sm text-muted-foreground [text-wrap:pretty]">
+        <p className="mt-1 text-sm text-muted-foreground">
           Sua análise continua disponível para desbloquear quando você quiser.
         </p>
       </div>
@@ -177,59 +348,52 @@ function CancelledNotice({ onClose }: { onClose: () => void }) {
   )
 }
 
-const CATEGORY_TONE: Record<ScoreCategory, { icon: LucideIcon; text: string; tint: string; bar: string }> = {
-  alta: {
-    icon: Sparkles,
-    text: 'text-[hsl(var(--success))]',
-    tint: 'bg-[hsl(var(--success)/0.08)]',
-    bar: 'bg-[hsl(var(--success))]',
-  },
-  media: {
-    icon: TrendingUp,
-    text: 'text-[hsl(var(--warning))]',
-    tint: 'bg-[hsl(var(--warning)/0.08)]',
-    bar: 'bg-[hsl(var(--warning))]',
-  },
-  baixa: {
-    icon: Compass,
-    text: 'text-primary',
-    tint: 'bg-primary/[.08]',
-    bar: 'bg-primary',
-  },
+interface ScoreCardProps {
+  score: QuizResult['score']
+  firstName: string | null
+  /** Rola até a oferta ("Ver o que inclui"); ausente para quem já pagou. */
+  onSeeOffer?: () => void
 }
 
-function toneFor(category: string) {
-  return CATEGORY_TONE[category as ScoreCategory] ?? CATEGORY_TONE.baixa
-}
-
-function ScoreCard({ score, leadInfo }: { score: QuizResult['score']; leadInfo: QuizResult['leadInfo'] }) {
-  const firstName = leadInfo?.fullName?.split(' ')[0]
-  const tone = toneFor(score.category)
-  const presentation = categoryPresentation(score.category)
-  const Icon = tone.icon
+const ScoreCard = forwardRef<HTMLDivElement, ScoreCardProps>(function ScoreCard({ score, firstName, onSeeOffer }, ref) {
+  const presentation = getCategoryPresentation(score.category)
+  const { tone } = presentation
   const percentage = Math.max(0, Math.min(100, Math.round(score.percentage)))
 
   return (
-    <Card data-testid="results-score" className={cn('text-center', tone.tint)}>
-      <div
-        aria-hidden="true"
-        className={cn('mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-card', tone.text)}
-      >
-        <Icon className="h-6 w-6" />
+    <Card
+      ref={ref}
+      data-testid="results-score"
+      data-category={presentation.category}
+      className={cn('border-transparent', tone.tint)}
+    >
+      <div className="flex items-center gap-3">
+        <span
+          aria-hidden="true"
+          className={cn(
+            'flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-card shadow-sm',
+            tone.text,
+          )}
+        >
+          <CategoryIcon category={presentation.category} className="h-5 w-5" />
+        </span>
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-muted-foreground">
+            {firstName ? `${firstName}, este é seu resultado` : 'Seu resultado'}
+          </p>
+          <h1 className="text-h2 text-foreground" data-testid="results-title">
+            {presentation.label}
+          </h1>
+        </div>
       </div>
-      {firstName && <p className="mb-1 text-sm font-medium text-muted-foreground">{firstName}, seu resultado é:</p>}
-      <h1 className={cn('mb-2 text-2xl font-bold leading-tight [text-wrap:balance] sm:text-3xl', tone.text)}>
-        {presentation.label}
-      </h1>
-      <p className="mx-auto mb-5 max-w-md text-base text-muted-foreground [text-wrap:pretty]">
-        {presentation.sublabel}
-      </p>
 
-      {/* Medidor */}
-      <div className="mx-auto max-w-xs">
-        <div className="mb-2 flex items-baseline justify-between text-sm text-muted-foreground">
-          <span>Pontuação</span>
-          <span className={cn('text-lg font-bold', tone.text)}>{percentage}%</span>
+      <p className="mt-3 text-base text-muted-foreground">{presentation.sublabel}</p>
+
+      {/* Medidor com as faixas reais (baixa < 35% ≤ média < 60% ≤ alta). */}
+      <div className="mt-4">
+        <div className="mb-1.5 flex items-baseline justify-between text-sm text-muted-foreground">
+          <span>Pontuação do diagnóstico</span>
+          <span className={cn('text-base font-bold', tone.text)}>{percentage}%</span>
         </div>
         <div
           role="meter"
@@ -237,281 +401,241 @@ function ScoreCard({ score, leadInfo }: { score: QuizResult['score']; leadInfo: 
           aria-valuemin={0}
           aria-valuemax={100}
           aria-valuenow={percentage}
-          className="h-3 w-full overflow-hidden rounded-full bg-card shadow-inner"
+          aria-valuetext={`${percentage}%: ${presentation.label}`}
+          className="relative h-2 w-full overflow-hidden rounded-full bg-card"
         >
           <div
-            className={cn('h-full rounded-full transition-[width] [transition-duration:400ms]', tone.bar)}
+            className={cn('h-full rounded-full transition-[width] duration-slow ease-out', tone.bar)}
             style={{ width: `${percentage}%` }}
           />
+          <span
+            aria-hidden="true"
+            className="absolute inset-y-0 w-0.5 bg-background"
+            style={{ left: `${CATEGORY_THRESHOLDS.media}%` }}
+          />
+          <span
+            aria-hidden="true"
+            className="absolute inset-y-0 w-0.5 bg-background"
+            style={{ left: `${CATEGORY_THRESHOLDS.alta}%` }}
+          />
         </div>
-        <div aria-hidden="true" className="mt-1.5 flex justify-between text-xs text-muted-foreground">
-          <span>Baixa</span>
-          <span>Média</span>
-          <span>Alta</span>
-        </div>
-      </div>
-    </Card>
-  )
-}
-
-const MATCH_LABEL: Record<VisaSuggestion['match'], string> = {
-  strong: 'Alta compatibilidade',
-  possible: 'Compatibilidade possível',
-  weak: 'A explorar',
-}
-
-const MATCH_BADGE: Record<VisaSuggestion['match'], 'success' | 'warning' | 'neutral'> = {
-  strong: 'success',
-  possible: 'warning',
-  weak: 'neutral',
-}
-
-function VisaTeaserCard({ visas }: { visas: VisaSuggestion[] }) {
-  const topVisas = visas.slice(0, 3)
-  if (topVisas.length === 0) return null
-
-  return (
-    <Card>
-      <div className="mb-4 flex items-center gap-2">
-        <TrendingUp aria-hidden="true" className="h-5 w-5 shrink-0 text-primary" />
-        <h2 className="text-lg font-semibold text-foreground [text-wrap:balance]">
-          Caminhos identificados para o seu perfil
-        </h2>
-      </div>
-
-      <ul className="space-y-3">
-        {topVisas.map((visa, i) => (
-          <li
-            key={visa.code}
-            className={cn(
-              'flex items-start gap-3 rounded-xl border p-4',
-              i === 0 ? 'border-primary/20 bg-primary/[.05]' : 'border-border bg-muted',
-            )}
-          >
-            <CircleDot aria-hidden="true" className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
-            <div className="min-w-0 flex-1">
-              <div className="mb-1 flex flex-wrap items-center gap-2">
-                <span className="text-base font-semibold text-foreground">{visa.name}</span>
-                <Badge size="sm" variant={MATCH_BADGE[visa.match] ?? 'neutral'}>
-                  {MATCH_LABEL[visa.match] ?? MATCH_LABEL.weak}
-                </Badge>
-              </div>
-              {/* Teaser com desfoque: o detalhe é da análise paga. */}
-              <p aria-hidden="true" className="line-clamp-1 select-none text-sm text-muted-foreground blur-[3px]">
-                {visa.reason}
-              </p>
-              <span className="sr-only">Detalhes disponíveis na análise completa.</span>
-            </div>
-            {i > 0 && <Lock aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />}
-          </li>
-        ))}
-      </ul>
-
-      <p className="mt-4 flex items-start gap-2 rounded-xl border border-dashed border-border bg-muted p-3 text-sm text-muted-foreground">
-        <Lock aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />
-        Na análise completa você vê os detalhes de cada caminho, os requisitos e os documentos.
-      </p>
-    </Card>
-  )
-}
-
-/** Motivo de azulejo (tile 48px, 1 cor, ~7% de opacidade) só no card da oferta. */
-const AZULEJO_TILE = `url("data:image/svg+xml,${encodeURIComponent(
-  '<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48" fill="none" stroke="#1f41c7" stroke-width="1.5"><path d="M24 4 44 24 24 44 4 24Z"/><circle cx="24" cy="24" r="6"/><path d="M0 0h48v48H0z"/></svg>',
-)}")`
-
-function PaywallCard({
-  firstName,
-  paid,
-  onceKey,
-}: {
-  firstName?: string
-  paid: boolean
-  onceKey: string
-}) {
-  const cardRef = useRef<HTMLDivElement>(null)
-  const { phase, isPending, error, email, start } = useStartCheckout()
-
-  // paywall_viewed: quando metade da oferta aparece na tela (uma vez por diagnóstico).
-  useEffect(() => {
-    const el = cardRef.current
-    if (!el || paid) return
-    if (typeof IntersectionObserver === 'undefined') {
-      trackOnce('paywall_viewed', onceKey, { position: 'results' })
-      return
-    }
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (!entry?.isIntersecting) return
-        trackOnce('paywall_viewed', onceKey, { position: 'results' })
-        observer.disconnect()
-      },
-      { threshold: 0.5 },
-    )
-    observer.observe(el)
-    return () => observer.disconnect()
-  }, [onceKey, paid])
-
-  const handleUnlock = () => {
-    void start({ position: 'results_paywall' })
-  }
-
-  if (paid) {
-    return (
-      <Card variant="elevated" data-testid="results-paid">
-        <h2 className="mb-2 text-xl font-bold text-foreground [text-wrap:balance]">
-          Você já tem acesso à análise completa
-        </h2>
-        <p className="mb-5 text-base text-muted-foreground [text-wrap:pretty]">
-          Abra seu painel para ver os detalhes de cada caminho, os requisitos e os próximos passos.
-        </p>
-        <Button asChild size="lg" className="w-full">
-          <Link to="/dashboard/analysis">
-            Abrir minha análise
-            <ArrowRight aria-hidden="true" />
-          </Link>
-        </Button>
-      </Card>
-    )
-  }
-
-  return (
-    <Card
-      ref={cardRef}
-      variant="elevated"
-      padding="none"
-      role="region"
-      aria-labelledby="results-offer-title"
-      className="relative overflow-hidden border-primary/25"
-    >
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-0 opacity-[.07]"
-        style={{ backgroundImage: AZULEJO_TILE, backgroundSize: '48px 48px' }}
-      />
-      <div className="relative p-5 sm:p-6">
-        <Badge variant="primary" size="sm" className="mb-3">
-          Análise completa
-        </Badge>
-
-        <h2
-          id="results-offer-title"
-          className="mb-2 text-2xl font-bold leading-tight text-foreground [text-wrap:balance]"
-        >
-          {firstName ? `${firstName}, desbloqueie` : 'Desbloqueie'} a análise completa do seu caminho
-        </h2>
-        <p className="mb-5 text-base text-muted-foreground [text-wrap:pretty]">
-          Gerada a partir das suas respostas e da Lei da Nacionalidade. {OFFER.delivery}.
-        </p>
-
-        <ul className="mb-5 space-y-2.5">
-          {OFFER.includes.map((item) => (
-            <li key={item} className="flex items-start gap-2.5 text-base text-foreground">
-              <Check aria-hidden="true" className="mt-0.5 h-5 w-5 shrink-0 text-[hsl(var(--success))]" />
-              {item}
-            </li>
-          ))}
-        </ul>
-
-        <div className="mb-4 flex flex-wrap items-baseline gap-x-2 gap-y-1">
-          <span className="text-4xl font-bold text-foreground">{OFFER.priceLabel}</span>
-          <span className="text-sm text-muted-foreground">
-            pagamento único · acesso por {OFFER.accessDays} dias
+        <div aria-hidden="true" className="mt-1 flex text-xs text-muted-foreground">
+          <span style={{ width: `${CATEGORY_THRESHOLDS.media}%` }}>Baixa</span>
+          <span className="text-center" style={{ width: `${CATEGORY_THRESHOLDS.alta - CATEGORY_THRESHOLDS.media}%` }}>
+            Média
           </span>
+          <span className="flex-1 text-right">Alta</span>
         </div>
-
-        <Button
-          id="results-unlock-btn"
-          data-testid="results-cta-paywall"
-          variant="pay"
-          size="lg"
-          className="w-full"
-          loading={isPending}
-          onClick={handleUnlock}
-        >
-          {isPending ? (
-            'Abrindo o pagamento…'
-          ) : (
-            <>
-              Desbloquear por {OFFER.priceLabel}
-              <ArrowRight aria-hidden="true" />
-            </>
-          )}
-        </Button>
-
-        <CheckoutFeedback phase={phase} error={error} onRetry={handleUnlock} email={email} />
-
-        {email && phase !== 'email_sent' && (
-          <p className="mt-3 break-words text-center text-sm text-muted-foreground">
-            O acesso será liberado para <span className="font-medium text-foreground">{email}</span>
-          </p>
-        )}
-
-        <p className="mt-4 text-center text-sm text-muted-foreground [text-wrap:balance]">
-          <Lock aria-hidden="true" className="-mt-0.5 mr-1.5 inline h-4 w-4 align-middle" />
-          Pagamento seguro pela Stripe{'\u00a0'}· sem renovação automática
-        </p>
       </div>
+
+      {onSeeOffer && (
+        <button
+          type="button"
+          onClick={onSeeOffer}
+          className="mt-3 inline-flex min-h-11 items-center gap-1.5 rounded-xl text-sm font-semibold text-primary underline decoration-primary/40 underline-offset-4 transition-colors duration-fast ease-out hover:decoration-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          data-testid="results-see-offer"
+        >
+          Ver o que inclui a análise completa
+          <ChevronDown aria-hidden="true" className="h-4 w-4" />
+        </button>
+      )}
     </Card>
+  )
+})
+
+function ResumeLoading() {
+  return (
+    <Container size="sm" className="flex min-h-[60dvh] items-center justify-center py-10">
+      <p
+        role="status"
+        className="flex items-center gap-2 text-base text-muted-foreground"
+        data-testid="results-resume-loading"
+      >
+        <Loader2 aria-hidden="true" className="h-5 w-5 animate-spin text-primary" />
+        Abrindo seu resultado…
+      </p>
+    </Container>
+  )
+}
+
+function ResumeProblem({
+  kind,
+  onRetry,
+  onShowLocal,
+}: {
+  kind: 'invalid' | 'error'
+  onRetry: () => void
+  /** Há outro resultado salvo neste aparelho. */
+  onShowLocal?: () => void
+}) {
+  const invalid = kind === 'invalid'
+  const Icon = invalid ? Link2Off : WifiOff
+  return (
+    <Container size="sm" className="flex min-h-[60dvh] flex-col justify-center py-10">
+      <div
+        className="flex flex-col items-center gap-4 text-center"
+        data-testid={invalid ? 'results-resume-invalid' : 'results-resume-error'}
+      >
+        <span
+          aria-hidden="true"
+          className="flex h-12 w-12 items-center justify-center rounded-full bg-muted text-primary"
+        >
+          <Icon className="h-6 w-6" />
+        </span>
+        <h1 className="text-h2 text-foreground">
+          {invalid ? 'Não encontramos esse resultado' : 'Não conseguimos abrir seu resultado agora'}
+        </h1>
+        <p className="max-w-md text-base text-muted-foreground">
+          {invalid
+            ? 'O link pode estar incompleto ou ter expirado. Refaça o quiz grátis para ver seu resultado de novo.'
+            : 'Verifique sua conexão e tente de novo.'}
+        </p>
+        <div className="flex w-full max-w-sm flex-col gap-3">
+          {invalid ? (
+            <Button asChild size="md" className="w-full">
+              <Link to="/quiz">
+                Refazer o quiz grátis
+                <ArrowRight aria-hidden="true" />
+              </Link>
+            </Button>
+          ) : (
+            <Button size="md" className="w-full" onClick={onRetry}>
+              <RotateCcw aria-hidden="true" />
+              Tentar de novo
+            </Button>
+          )}
+          {onShowLocal && (
+            <Button variant="secondary" size="md" className="w-full" onClick={onShowLocal}>
+              Ver o resultado salvo neste aparelho
+            </Button>
+          )}
+          {invalid ? (
+            <Button asChild variant="ghost" size="md" className="w-full">
+              <Link to="/login" state={{ returnTo: '/dashboard' }}>
+                Já paguei, entrar
+              </Link>
+            </Button>
+          ) : (
+            <Button asChild variant="ghost" size="md" className="w-full">
+              <Link to="/quiz">Refazer o quiz grátis</Link>
+            </Button>
+          )}
+        </div>
+      </div>
+    </Container>
   )
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+const MATCHES: readonly VisaSuggestion['match'][] = ['strong', 'possible', 'weak']
+
+function asText(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value : null
+}
+
+function storedVisas(raw: unknown): VisaSuggestion[] {
+  if (!Array.isArray(raw)) return []
+  const out: VisaSuggestion[] = []
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue
+    const v = item as Record<string, unknown>
+    if (typeof v.code !== 'string' || typeof v.name !== 'string') continue
+    const match = MATCHES.includes(v.match as VisaSuggestion['match']) ? (v.match as VisaSuggestion['match']) : 'weak'
+    out.push({ code: v.code, name: v.name, match, reason: asText(v.reason) ?? '' })
+  }
+  return out
+}
+
+function storedAnswers(raw: unknown): Record<string, string> | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const entries = Object.entries(raw as Record<string, unknown>).filter(
+    (entry): entry is [string, string] => typeof entry[1] === 'string',
+  )
+  return entries.length > 0 ? Object.fromEntries(entries) : null
+}
+
+/** Score no formato da tela, com rótulos da apresentação única (DI-029). */
+function toScore(raw: { total?: unknown; max?: unknown; percentage: number; category?: unknown }): QuizResult['score'] {
+  const percentage = Math.round(raw.percentage)
+  // Categoria antiga/inválida: deduzida do percentual (nunca "?").
+  const category = isScoreCategory(raw.category) ? raw.category : categoryForPercentage(percentage)
+  const { label, sublabel } = getCategoryPresentation(category)
+  return {
+    total: typeof raw.total === 'number' ? raw.total : 0,
+    max: typeof raw.max === 'number' ? raw.max : 0,
+    percentage,
+    category,
+    label,
+    sublabel,
+  }
+}
+
+/**
+ * Resultado salvo (localStorage ou o registro recém-criado pelo link de
+ * retomada) no formato da tela. As vias são recalculadas das respostas, como no
+ * painel, para que recarregar e abrir em outro aparelho mostrem o mesmo.
+ */
+function parseStoredResult(parsed: Record<string, unknown> | null): LoadedResult | null {
+  if (!parsed) return null
+  const rawScore = parsed.score as
+    { total?: unknown; max?: unknown; percentage?: unknown; category?: unknown } | undefined
+  if (!rawScore || typeof rawScore.percentage !== 'number' || !Number.isFinite(rawScore.percentage)) return null
+  const answers = storedAnswers(parsed.answers)
+  const visas = answers ? suggestVisas(pruneAnswers(answers)) : storedVisas(parsed.visas)
+  const lead = parsed.leadInfo as { fullName?: unknown; email?: unknown; phone?: unknown } | null | undefined
+  const sessionId = asText(parsed.sessionId)
+  const assessmentId = asText(parsed.assessmentId)
+  return {
+    key: sessionId ?? assessmentId ?? asText(parsed.completedAt),
+    sessionId,
+    assessmentId,
+    resumeToken: readStoredResumeToken(),
+    result: {
+      score: toScore({ ...rawScore, percentage: rawScore.percentage }),
+      visas,
+      leadInfo:
+        lead && typeof lead === 'object'
+          ? {
+              fullName: asText(lead.fullName) ?? '',
+              email: asText(lead.email) ?? '',
+              ...(asText(lead.phone) ? { phone: asText(lead.phone) as string } : {}),
+            }
+          : null,
+    },
+  }
+}
 
 /**
  * Resultado a mostrar: o do roteador (vindo direto do quiz) ou o salvo neste
  * aparelho. `key` identifica o envio do quiz (session_id), estável mesmo quando
  * o assessmentId só aparece depois, ao salvar de novo.
  */
-function loadResult(state: unknown): { result: QuizResult; key: string | null } | null {
+function loadResult(state: unknown): LoadedResult | null {
   const stored = readStoredCheckoutData()
   const routerState = (state ?? null) as { result?: QuizResult; assessmentId?: string | null } | null
-  if (routerState?.result) {
-    return { result: routerState.result, key: stored?.sessionId ?? routerState.assessmentId ?? stored?.assessmentId ?? null }
+  if (routerState?.result?.score) {
+    const { result } = routerState
+    return {
+      key: stored?.sessionId ?? routerState.assessmentId ?? stored?.assessmentId ?? null,
+      sessionId: stored?.sessionId ?? null,
+      assessmentId: stored?.assessmentId ?? routerState.assessmentId ?? null,
+      resumeToken: readStoredResumeToken(),
+      result: {
+        score: toScore(result.score),
+        visas: Array.isArray(result.visas) ? result.visas : [],
+        leadInfo: result.leadInfo ?? null,
+      },
+    }
   }
   try {
     const raw = localStorage.getItem(QUIZ_RESULT_STORAGE_KEY)
-    if (!raw) return null
-    const parsed = JSON.parse(raw)
-    if (!parsed?.score) return null
-    const presentation = categoryPresentation(parsed.score.category)
-    return {
-      key: parsed.sessionId ?? parsed.assessmentId ?? parsed.completedAt ?? null,
-      result: {
-        score: {
-          total: parsed.score.total,
-          max: parsed.score.max,
-          percentage: parsed.score.percentage,
-          category: parsed.score.category,
-          label: presentation.label,
-          sublabel: presentation.sublabel,
-          color: '',
-          bgColor: '',
-          emoji: '',
-        },
-        visas: Array.isArray(parsed.visas) ? parsed.visas : [],
-        leadInfo: parsed.leadInfo || null,
-      },
-    }
+    const parsed: unknown = raw ? JSON.parse(raw) : null
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parseStoredResult(parsed as Record<string, unknown>)
+      : null
   } catch {
     // JSON inválido ou sem storage: mostra o estado vazio
     return null
-  }
-}
-
-function categoryPresentation(category: string): { label: string; sublabel: string } {
-  if (category === 'alta')
-    return {
-      label: 'Perfil de alta elegibilidade',
-      sublabel: 'Suas respostas indicam boas chances de elegibilidade para a nacionalidade portuguesa.',
-    }
-  if (category === 'media')
-    return {
-      label: 'Perfil de média elegibilidade',
-      sublabel: 'Seu perfil tem chances, mas pode haver condições a cumprir antes do pedido.',
-    }
-  return {
-    label: 'Perfil em desenvolvimento',
-    sublabel: 'Existem opções a explorar. A análise completa mostra os caminhos disponíveis para você.',
   }
 }
