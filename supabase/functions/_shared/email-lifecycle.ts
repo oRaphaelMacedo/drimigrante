@@ -1,6 +1,6 @@
 // _shared/email-lifecycle.ts — regras dos e-mails do ciclo de vida (DI-077), sem I/O.
 //
-// Usado por compute-eligibility (welcome_free), lifecycle-emails (nutrição, avisos de
+// Usado por compute-eligibility (welcome_free_v2), lifecycle-emails (nutrição, avisos de
 // prazo e lista de espera), unsubscribe (descadastro) e stripe-webhook
 // (subscription_cancelled). Módulo puro: sem Deno.*, sem imports remotos — roda no
 // Deno e no Vitest (_shared/email-lifecycle.test.ts).
@@ -9,10 +9,14 @@
 //  · Tudo começa DESLIGADO: LIFECYCLE_EMAILS_DRY_RUN só desliga o dry-run com o valor
 //    explícito "false" (parseDryRun). Em dry-run nada vai para o Resend nem para o
 //    send-email; só logs e a lista de quem receberia.
-//  · Nutrição (nurture_*) e aviso da lista de espera são MARKETING: só com opt-in
-//    explícito (answers.marketing_opt_in === true no quiz) e sem descadastro.
-//  · welcome_free e avisos de prazo (access_*) são de SERVIÇO: não pedem opt-in de
-//    marketing, mas respeitam o descadastro geral ('all') e, para quem tem conta, a
+//  · Nutrição (nurture_*) é MARKETING: só com opt-in explícito no quiz
+//    (answers.marketing_opt_in === true), sem descadastro e, para quem tem conta, sem
+//    "Novidades e dicas" desligado em Configurações (notification_preferences.offers === false).
+//  · O aviso da lista de espera (waitlist_launch) também é marketing e respeita o
+//    descadastro, mas não pede o opt-in do quiz: a inscrição na lista já é o pedido de
+//    aviso. Só sai por disparo manual do dono, por produto.
+//  · welcome_free_v2 e avisos de prazo (access_*) são de SERVIÇO: não pedem opt-in de
+//    marketing, mas respeitam o descadastro geral ('all') e, nos avisos de prazo, a
 //    preferência "Sua conta e sua análise" (profiles.notification_preferences.process_updates).
 //  · payment_confirmed e subscription_cancelled são transacionais (dinheiro): saem
 //    para todos, sem link de descadastro.
@@ -40,8 +44,26 @@ export function parseDryRun(raw: string | null | undefined): boolean {
 export type EmailCategory = 'marketing' | 'service' | 'transactional'
 export type UnsubscribeScope = 'marketing' | 'all'
 
+/**
+ * Modelo de boas-vindas do quiz (DI-077). Chave NOVA de propósito (expandir e depois
+ * contrair): o modelo antigo 'welcome_free' fica intacto no banco porque o
+ * generate-explanation que está em produção ainda o envia, com outras variáveis (name,
+ * score_category, cta_link). Reescrevê-lo antes do deploy novo faria sair e-mail com
+ * `{{greeting}}` cru. O antigo só é desativado num release seguinte, depois que o
+ * generate-explanation novo (que não manda mais e-mail) estiver no ar.
+ */
+export const WELCOME_TEMPLATE_KEY = 'welcome_free_v2'
+
+/** Antigo e novo: "já recebeu as boas-vindas" confere os dois. */
+export const WELCOME_TEMPLATE_KEYS: readonly string[] = ['welcome_free', WELCOME_TEMPLATE_KEY]
+
+/** Chave da trava de envio do welcome_free_v2 (uma por assessment). */
+export function welcomeDedupeKey(assessmentId: string): string {
+  return `${WELCOME_TEMPLATE_KEY}:${assessmentId}`
+}
+
 export type LifecycleTemplateKey =
-  | 'welcome_free'
+  | typeof WELCOME_TEMPLATE_KEY
   | 'nurture_d1'
   | 'nurture_d3'
   | 'nurture_d7'
@@ -64,7 +86,7 @@ export interface TemplateSpec {
 }
 
 export const TEMPLATE_SPECS: Readonly<Record<LifecycleTemplateKey, TemplateSpec>> = {
-  welcome_free: { category: 'service', variables: ['greeting', 'category_label', 'result_link', 'unsubscribe_link'] },
+  welcome_free_v2: { category: 'service', variables: ['greeting', 'category_label', 'result_link', 'unsubscribe_link'] },
   nurture_d1: { category: 'marketing', variables: ['greeting', 'category_label', 'result_link', 'unsubscribe_link'] },
   nurture_d3: { category: 'marketing', variables: ['greeting', 'category_label', 'result_link', 'unsubscribe_link'] },
   nurture_d7: { category: 'marketing', variables: ['greeting', 'category_label', 'result_link', 'unsubscribe_link'] },
@@ -428,6 +450,17 @@ export interface NurtureContext extends PlanContext {
   /** Contas com €30 pago ou assinatura ativa (por user_id e por e-mail normalizado). */
   paidUserIds: ReadonlySet<string>
   paidEmails: ReadonlySet<string>
+  /** Contas com "Novidades e dicas" desligado em Configurações (offers === false). */
+  offersOffUserIds: ReadonlySet<string>
+  offersOffEmails: ReadonlySet<string>
+}
+
+/**
+ * Preferência "Novidades e dicas" da SettingsPage. Só bloqueia com false explícito: sem a
+ * chave, vale o opt-in do quiz (a pessoa ainda não mexeu nas Configurações).
+ */
+export function wantsOffers(preferences: unknown): boolean {
+  return asRecord(preferences).offers !== false
 }
 
 const RESUME_TOKEN_RE = /^[0-9a-f]{64}$/
@@ -439,7 +472,8 @@ export function nurtureDedupeKey(template: string, assessmentId: string): string
 
 /**
  * Série de nutrição: uma pessoa (e-mail) por vez, sempre pelo quiz mais recente.
- * Só entra quem marcou o opt-in nesse quiz, ainda não pagou e não se descadastrou.
+ * Só entra quem marcou o opt-in nesse quiz, ainda não pagou, não desligou "Novidades e
+ * dicas" na conta e não se descadastrou.
  */
 export function planNurture(candidates: readonly NurtureCandidate[], ctx: NurtureContext): PlanResult {
   const skipped: SkipCounts = {}
@@ -471,6 +505,10 @@ export function planNurture(candidates: readonly NurtureCandidate[], ctx: Nurtur
     }
     if ((c.userId && ctx.paidUserIds.has(c.userId)) || ctx.paidEmails.has(email)) {
       bump(skipped, 'paid')
+      continue
+    }
+    if ((c.userId && ctx.offersOffUserIds.has(c.userId)) || ctx.offersOffEmails.has(email)) {
+      bump(skipped, 'prefs_off')
       continue
     }
     const completedMs = Date.parse(c.completedAt ?? '')
@@ -599,7 +637,11 @@ export function waitlistDedupeKey(product: WaitlistProduct, emailHashOrNull: str
   return `waitlist_launch:${product}:${emailHashOrNull ?? 'sem-hash'}`
 }
 
-/** Aviso de lançamento para a lista de espera de UM produto (disparo manual do dono). */
+/**
+ * Aviso de lançamento para a lista de espera de UM produto (disparo manual do dono).
+ * Não exige o opt-in de marketing do quiz (a inscrição na lista é o pedido de aviso),
+ * mas respeita o descadastro de marketing.
+ */
 export function planWaitlist(
   candidates: readonly WaitlistCandidate[],
   product: WaitlistProduct,

@@ -7,25 +7,39 @@
 --   1. public.email_suppressions: lista de descadastro por HASH do e-mail
 --      (HMAC-SHA256 com EMAIL_UNSUBSCRIBE_SECRET, calculado nas Edge
 --      Functions). Nunca guarda o e-mail. Escopos: 'marketing' (nutrição e
---      lista de espera) e 'all' (também os avisos de serviço: welcome_free e
---      avisos de prazo). Confirmações de pagamento e de fim de assinatura
+--      lista de espera) e 'all' (também os avisos de serviço: welcome_free_v2
+--      e avisos de prazo). Confirmações de pagamento e de fim de assinatura
 --      sempre saem. Só a service_role lê e escreve. Como não tem o e-mail,
 --      o descadastro continua valendo mesmo depois de a conta ser apagada
 --      (W4-03), sem guardar dado pessoal legível.
 --   2. email_send_log: índices por variables_used->>'dedupe_key' (consulta
---      e trava de envio) e por variables_used->>'assessment_id' (welcome_free).
+--      e trava de envio) e por variables_used->>'assessment_id' (welcome_free_v2).
 --      O índice único parcial (status 'pending' ou 'sent') impede que duas
---      execuções do lifecycle-emails mandem o mesmo e-mail duas vezes; linhas
---      'failed' não bloqueiam uma nova tentativa (o código desiste depois de 2).
+--      execuções do lifecycle-emails mandem o mesmo e-mail duas vezes, e que duas
+--      chamadas do compute-eligibility ao mesmo tempo (fim do quiz e início do
+--      checkout) mandem dois welcome_free_v2; linhas 'failed' não bloqueiam uma
+--      nova tentativa (o lifecycle-emails desiste depois de 2).
 --   3. Modelos em pt-BR, honestos e sem urgência falsa (aprovação do dono):
---      novos — nurture_d1, nurture_d3, nurture_d7, access_expiring_d7,
---      access_expiring_d3, access_expired, waitlist_launch;
---      revisados — welcome_free (categoria certa + link /results?r=<token> +
---      descadastro), subscription_cancelled, payment_confirmed e
---      analysis_ready (sem "análise jurídica", sem pt-PT, sem emoji).
+--      novos — welcome_free_v2, nurture_d1, nurture_d3, nurture_d7,
+--      access_expiring_d7, access_expiring_d3, access_expired, waitlist_launch;
+--      revisados — subscription_cancelled, payment_confirmed e analysis_ready
+--      (sem "análise jurídica", sem pt-PT, sem emoji).
 --      As variáveis de cada modelo são o contrato de
 --      supabase/functions/_shared/email-lifecycle.ts (TEMPLATE_SPECS), conferido
 --      pelo teste _shared/email-lifecycle.test.ts.
+--
+--   O modelo antigo 'welcome_free' NÃO é alterado aqui (expandir e depois contrair).
+--   O generate-explanation que está em produção (e o das ondas 1 a 3) ainda o envia
+--   com name, score_category e cta_link; se o texto novo, com {{greeting}},
+--   {{category_label}}, {{result_link}} e {{unsubscribe_link}}, entrasse no lugar,
+--   quem concluísse o quiz entre o `db push` e o deploy do generate-explanation novo
+--   receberia um e-mail com as variáveis cruas. O texto novo fica em welcome_free_v2,
+--   usado só pelo compute-eligibility novo.
+--   Os modelos revisados no lugar só usam variáveis que o código em produção já
+--   manda: payment_confirmed usa name, amount e dashboard_link, como o antigo (o
+--   stripe-webhook manda amount e dashboard_link; o send-email completa o name);
+--   subscription_cancelled e analysis_ready não são enviados por nenhuma versão em
+--   produção (o subscription_cancelled só sai do stripe-webhook novo, com dry-run).
 --
 -- Nada aqui envia e-mail nem agenda nada. O envio continua desligado até o
 -- dono definir LIFECYCLE_EMAILS_DRY_RUN=false (padrão: dry-run) — ver
@@ -33,13 +47,25 @@
 --
 -- ORDEM DE RELEASE
 --   · Depende de 20261025000200_resume_token.sql (coluna assessments.resume_token,
---     usada no link do welcome_free e da nutrição) — aplicar aquela antes.
---   · Aplicar ESTA migration antes do deploy de lifecycle-emails e unsubscribe
---     (leem/escrevem email_suppressions) e do compute-eligibility novo
---     (welcome_free). O compute-eligibility tolera a tabela ausente (o
---     welcome_free só é pulado e logado), mas o resultado do quiz não depende dela.
---   · generate-explanation novo (sem welcome_free) e compute-eligibility novo
---     (com welcome_free) vão no MESMO deploy; o dry-run só sai depois dos dois.
+--     usada no link do welcome_free_v2 e da nutrição) — aplicar aquela antes (o
+--     timestamp já garante isso no `db push`).
+--   · Entra no `db push` junto com as outras (passo 2 de docs/operacao/release.md).
+--     Não muda nada para o código que já está no ar: o welcome_free antigo continua
+--     igual e as tabelas e os índices novos só são usados pelas functions novas.
+--   · compute-eligibility novo: pode ir antes ou depois desta migration (passo 1 do
+--     runbook). Em dry-run (padrão) não envia nada; com o envio ligado e esta
+--     migration ainda ausente, o send-email responde template_not_found e nada sai.
+--   · lifecycle-emails e unsubscribe: DEPOIS desta migration (leem e escrevem
+--     email_suppressions), com --no-verify-jwt.
+--   · NÃO desligar o dry-run antes do generate-explanation novo (que não manda mais
+--     o welcome_free) estar no ar; senão a mesma pessoa recebe os dois e-mails.
+--   · Com o dry-run padrão, o e-mail de boas-vindas deixa de sair em produção assim
+--     que o generate-explanation novo for publicado, até o dono desligar o dry-run.
+--     É intencional (DI-077), mas muda o comportamento de hoje.
+--   · Contração, num release SEGUINTE (migration nova, depois do generate-explanation
+--     novo no ar): desativar o modelo antigo —
+--       UPDATE public.email_templates SET is_active = FALSE, updated_at = now()
+--       WHERE trigger_key = 'welcome_free';
 --   · Ações do dono antes de desligar o dry-run: domínio verificado no Resend
 --     (DI-014), secret EMAIL_UNSUBSCRIBE_SECRET (openssl rand -hex 32; nunca
 --     trocar depois), aprovação dos textos e da frequência, extensões pg_cron e
@@ -64,7 +90,7 @@ CREATE TABLE IF NOT EXISTS public.email_suppressions (
 COMMENT ON TABLE public.email_suppressions IS
   'DI-077: descadastro de e-mails. email_hash = HMAC-SHA256(EMAIL_UNSUBSCRIBE_SECRET, ''email:v1:'' || lower(trim(email))), calculado nas Edge Functions. Nunca guarda o e-mail. Só service_role.';
 COMMENT ON COLUMN public.email_suppressions.scope IS
-  'marketing = nutrição e lista de espera; all = também welcome_free e avisos de prazo. Pagamentos sempre saem.';
+  'marketing = nutrição e lista de espera; all = também boas-vindas (welcome_free_v2) e avisos de prazo. Pagamentos sempre saem.';
 
 ALTER TABLE public.email_suppressions ENABLE ROW LEVEL SECURITY;
 
@@ -92,25 +118,25 @@ CREATE INDEX IF NOT EXISTS email_send_log_dedupe_key_idx
   ON public.email_send_log ((variables_used->>'dedupe_key'))
   WHERE (variables_used->>'dedupe_key') IS NOT NULL;
 
--- welcome_free: no máximo um por assessment (compute-eligibility).
+-- welcome_free_v2: no máximo um por assessment (compute-eligibility).
 CREATE INDEX IF NOT EXISTS email_send_log_assessment_idx
   ON public.email_send_log ((variables_used->>'assessment_id'))
   WHERE (variables_used->>'assessment_id') IS NOT NULL;
 
 COMMENT ON COLUMN public.email_send_log.status IS
-  'sent | failed | pending (envio do lifecycle-emails em andamento; trava pelo índice email_send_log_dedupe_key_active).';
+  'sent | failed | pending (envio em andamento: lifecycle-emails, ou a trava do welcome_free_v2 no compute-eligibility, apagada ao terminar; trava pelo índice email_send_log_dedupe_key_active).';
 
 -- ─── 3. Modelos de e-mail (pt-BR) ───────────────────────────────────────────
 -- Gerados a partir de um único layout (HTML inline, 560px, cores da marca:
 -- cobalto #1f41c7 com texto branco 7,96:1; texto #141a29; secundário #5c6372).
 -- ON CONFLICT atualiza o texto e mantém is_active como estiver no banco.
 
--- template: welcome_free
+-- template: welcome_free_v2
 INSERT INTO public.email_templates (trigger_key, name, description, subject_pt, body_html_pt, variables, is_active)
 VALUES (
-  'welcome_free',
-  'Pré-diagnóstico pronto (welcome_free)',
-  'Enviado pelo compute-eligibility ao concluir o quiz, com o link de retomada do resultado. Serviço: respeita o descadastro geral. DI-077.',
+  'welcome_free_v2',
+  'Pré-diagnóstico pronto (welcome_free_v2)',
+  'Enviado pelo compute-eligibility ao concluir o quiz, com o link de retomada do resultado. Substitui o welcome_free (desativado num release seguinte). Serviço: respeita o descadastro geral. DI-077.',
   $subject$Seu pré-diagnóstico de nacionalidade ficou pronto$subject$,
   $body$<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">Resultado: {{category_label}}. Abra quando quiser, em qualquer aparelho.</div>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f9fafd;">
@@ -545,17 +571,21 @@ ON CONFLICT (trigger_key) DO UPDATE SET
 --    SET ROLE anon;  SELECT count(*) FROM public.email_suppressions;   -- permission denied
 --    RESET ROLE;
 --
--- 2) Os 11 modelos ativos e com o assunto novo:
+-- 2) Os 11 modelos desta migration ativos e com o assunto novo:
 --    SELECT trigger_key, is_active, subject_pt FROM public.email_templates
---    WHERE trigger_key IN ('welcome_free','nurture_d1','nurture_d3','nurture_d7',
+--    WHERE trigger_key IN ('welcome_free_v2','nurture_d1','nurture_d3','nurture_d7',
 --      'access_expiring_d7','access_expiring_d3','access_expired','waitlist_launch',
 --      'subscription_cancelled','payment_confirmed','analysis_ready')
 --    ORDER BY 1;                                                       -- 11 linhas
 --
--- 3) Nenhum resto de pt-PT, promessa jurídica ou emoji nesses modelos:
+-- 3) Nenhum resto de pt-PT, promessa jurídica ou emoji nos modelos revisados:
 --    SELECT trigger_key FROM public.email_templates
---    WHERE trigger_key IN ('welcome_free','payment_confirmed','analysis_ready','subscription_cancelled')
+--    WHERE trigger_key IN ('welcome_free_v2','payment_confirmed','analysis_ready','subscription_cancelled')
 --      AND (body_html_pt || subject_pt) ~* '(aceder|subscrição|subscrever|está a ser|análise jurídica|diagnóstico profissional|🎉|✅)';  -- 0 linhas
+--
+-- 3b) O welcome_free antigo continua como estava (o generate-explanation em produção usa):
+--    SELECT is_active, variables FROM public.email_templates WHERE trigger_key = 'welcome_free';
+--    -- t | ["{{name}}", "{{score_category}}", "{{cta_link}}"]
 --
 -- 4) Trava de envio: a segunda linha 'pending' com a mesma chave falha (23505):
 --    BEGIN;

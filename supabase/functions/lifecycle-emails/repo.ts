@@ -4,9 +4,14 @@
 // Toda query checa `error` e lança: o handler responde 500 sem enviar nada.
 
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2.105.4'
-import type { AccessCandidate, NurtureCandidate, WaitlistCandidate } from '../_shared/email-lifecycle.ts'
+import {
+  type AccessCandidate,
+  type NurtureCandidate,
+  type WaitlistCandidate,
+  wantsOffers,
+} from '../_shared/email-lifecycle.ts'
 import { normalizeEmail, PG_UNIQUE_VIOLATION } from '../_shared/payments.ts'
-import type { EmailTemplateRow, LifecycleRepo } from './handler.ts'
+import type { AccountFlags, EmailTemplateRow, LifecycleRepo } from './handler.ts'
 
 /** Teto de linhas por consulta (o volume diário real é bem menor). */
 const MAX_ROWS = 2000
@@ -17,6 +22,21 @@ function chunks<T>(items: readonly T[], size = CHUNK): T[][] {
   const out: T[][] = []
   for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size))
   return out
+}
+
+/**
+ * Item de lista do PostgREST (`{a,b}`) entre aspas: o e-mail pode ter vírgula, chaves
+ * ou aspas. "%" e "_" seguem como curingas do ilike; o resultado é filtrado depois pelo
+ * e-mail exato, então um curinga só traz linhas a mais, nunca um falso positivo.
+ */
+export function quotePgrstListItem(value: string): string {
+  return `"${value.replace(/["\\]/g, '\\$&')}"`
+}
+
+interface ProfileFlagsRow {
+  id: string
+  email: string | null
+  notification_preferences: unknown
 }
 
 interface AssessmentRow {
@@ -59,19 +79,45 @@ export function createLifecycleRepo(db: SupabaseClient): LifecycleRepo {
       })
     },
 
-    async getPaidAccounts(userIds, emails) {
-      const emailById = new Map<string, string>()
-      for (const part of chunks(emails)) {
-        const { data, error } = await db.from('profiles').select('id, email').in('email', part)
-        if (error) throw error
-        for (const p of (data ?? []) as Array<{ id: string; email: string | null }>) {
+    async getAccountFlags(userIds, emails) {
+      const wanted = new Set(emails)
+      const profiles = new Map<string, { email: string | null; prefs: unknown }>()
+      const keep = (rows: ProfileFlagsRow[], byEmail: boolean) => {
+        for (const p of rows) {
           const email = normalizeEmail(p.email)
-          if (email) emailById.set(p.id, email)
+          // Pela busca por e-mail, só o e-mail exato (normalizado) vale.
+          if (byEmail && (!email || !wanted.has(email))) continue
+          profiles.set(p.id, { email, prefs: p.notification_preferences })
         }
       }
-      const ids = [...new Set([...userIds, ...emailById.keys()])]
-      const paidUserIds = new Set<string>()
-      const paidEmails = new Set<string>()
+      // profiles.email pode ter maiúsculas (contas antigas): ilike, sem diferenciar.
+      for (const part of chunks(emails)) {
+        const { data, error } = await db
+          .from('profiles')
+          .select('id, email, notification_preferences')
+          .ilikeAnyOf('email', part.map(quotePgrstListItem))
+        if (error) throw error
+        keep((data ?? []) as ProfileFlagsRow[], true)
+      }
+      // Contas ligadas pelo user_id do assessment (preferência "Novidades e dicas").
+      for (const part of chunks(userIds.filter((id) => !profiles.has(id)))) {
+        const { data, error } = await db.from('profiles').select('id, email, notification_preferences').in('id', part)
+        if (error) throw error
+        keep((data ?? []) as ProfileFlagsRow[], false)
+      }
+
+      const flags: AccountFlags = {
+        paidUserIds: new Set(),
+        paidEmails: new Set(),
+        offersOffUserIds: new Set(),
+        offersOffEmails: new Set(),
+      }
+      for (const [id, p] of profiles) {
+        if (wantsOffers(p.prefs)) continue
+        flags.offersOffUserIds.add(id)
+        if (p.email) flags.offersOffEmails.add(p.email)
+      }
+      const ids = [...new Set([...userIds, ...profiles.keys()])]
       for (const part of chunks(ids)) {
         const { data, error } = await db
           .from('subscriptions')
@@ -80,12 +126,12 @@ export function createLifecycleRepo(db: SupabaseClient): LifecycleRepo {
           .or('one_time_paid.eq.true,recurring_active.eq.true')
         if (error) throw error
         for (const s of (data ?? []) as Array<{ user_id: string }>) {
-          paidUserIds.add(s.user_id)
-          const email = emailById.get(s.user_id)
-          if (email) paidEmails.add(email)
+          flags.paidUserIds.add(s.user_id)
+          const email = profiles.get(s.user_id)?.email
+          if (email) flags.paidEmails.add(email)
         }
       }
-      return { userIds: paidUserIds, emails: paidEmails }
+      return flags
     },
 
     async listAccessCandidates(fromIso, toIso) {

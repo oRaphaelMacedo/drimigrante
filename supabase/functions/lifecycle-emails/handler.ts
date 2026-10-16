@@ -81,8 +81,12 @@ export interface PendingLogRow {
 export interface LifecycleRepo {
   /** Quizzes concluídos com e-mail entre as datas (nutrição). */
   listCompletedAssessments(sinceIso: string, untilIso: string): Promise<NurtureCandidate[]>
-  /** Quem já pagou o €30 ou tem assinatura ativa, por user_id e por e-mail. */
-  getPaidAccounts(userIds: string[], emails: string[]): Promise<{ userIds: Set<string>; emails: Set<string> }>
+  /**
+   * Contas dos candidatos da nutrição, por user_id e por e-mail (sem diferenciar
+   * maiúsculas): quem já pagou o €30 ou tem assinatura ativa, e quem desligou
+   * "Novidades e dicas" em Configurações.
+   */
+  getAccountFlags(userIds: string[], emails: string[]): Promise<AccountFlags>
   /** Quem pagou o €30 com fim de acesso entre as datas (avisos de prazo). */
   listAccessCandidates(fromIso: string, toIso: string): Promise<AccessCandidate[]>
   /** Linhas da lista de espera de um produto. */
@@ -103,6 +107,14 @@ export interface LifecycleRepo {
       sent_at: string | null
     },
   ): Promise<void>
+}
+
+export interface AccountFlags {
+  paidUserIds: Set<string>
+  /** E-mails normalizados. */
+  paidEmails: Set<string>
+  offersOffUserIds: Set<string>
+  offersOffEmails: Set<string>
 }
 
 export interface LifecycleDeps {
@@ -229,17 +241,17 @@ async function buildPlan(
     }
   }
 
-  const paid = wantNurture
-    ? await repo.getPaidAccounts(
+  const accounts: AccountFlags = wantNurture
+    ? await repo.getAccountFlags(
       uniq(collected.nurture.map((c) => c.userId).filter((id): id is string => !!id)),
       uniq(collected.nurture.map((c) => normalizeEmail(c.email)).filter((e): e is string => !!e)),
     )
-    : { userIds: new Set<string>(), emails: new Set<string>() }
+    : { paidUserIds: new Set(), paidEmails: new Set(), offersOffUserIds: new Set(), offersOffEmails: new Set() }
 
   const run = (sentState: SentState) => {
     const ctx: PlanContext = { nowMs, appUrl: deps.env.appUrl, sentState, suppressions, emailHashes }
     const parts = [
-      planNurture(collected.nurture, { ...ctx, paidUserIds: paid.userIds, paidEmails: paid.emails }),
+      planNurture(collected.nurture, { ...ctx, ...accounts }),
       planAccess(collected.access, ctx),
       ...(product ? [planWaitlist(collected.waitlist, product, ctx)] : []),
     ]

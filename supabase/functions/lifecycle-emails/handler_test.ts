@@ -94,6 +94,8 @@ interface World {
   waitlist: WaitlistCandidate[]
   paidUserIds: Set<string>
   paidEmails: Set<string>
+  offersOffUserIds: Set<string>
+  offersOffEmails: Set<string>
   suppressions: Map<string, Set<string>>
   templates: Map<string, EmailTemplateRow>
   log: LogRow[]
@@ -112,6 +114,8 @@ function makeWorld(overrides: Partial<World> = {}): World {
     waitlist: [],
     paidUserIds: new Set(),
     paidEmails: new Set(),
+    offersOffUserIds: new Set(),
+    offersOffEmails: new Set(),
     suppressions: new Map(),
     templates: templateRows(),
     log: [],
@@ -128,7 +132,13 @@ function makeHandler(world: World, env: Partial<LifecycleDeps['env']> = {}) {
   return createLifecycleEmailsHandler({
     repo: {
       listCompletedAssessments: () => Promise.resolve(world.nurture),
-      getPaidAccounts: () => Promise.resolve({ userIds: world.paidUserIds, emails: world.paidEmails }),
+      getAccountFlags: () =>
+        Promise.resolve({
+          paidUserIds: world.paidUserIds,
+          paidEmails: world.paidEmails,
+          offersOffUserIds: world.offersOffUserIds,
+          offersOffEmails: world.offersOffEmails,
+        }),
       listAccessCandidates: () => Promise.resolve(world.access),
       listWaitlist: () => Promise.resolve(world.waitlist),
       getSentState: (keys) => {
@@ -269,6 +279,23 @@ Deno.test('envio real: ninguém sem opt-in recebe nutrição', async () => {
   assertEquals(json.sent, 1)
   assertEquals(world.resendCalls.map((c) => (c.body.to as string[])[0]), ['com@example.com'])
   assertEquals(json.skipped.no_opt_in, 3)
+})
+
+Deno.test('envio real: quem pagou ou desligou "Novidades e dicas" na conta não recebe nutrição', async () => {
+  const world = makeWorld({
+    nurture: [
+      nurture('livre@example.com'),
+      nurture('pagou@example.com', { userId: 'u-pagou' }),
+      nurture('semdicas@example.com', { userId: 'u-semdicas' }),
+      nurture('Conta@Example.com'),
+    ],
+    paidUserIds: new Set(['u-pagou']),
+    offersOffUserIds: new Set(['u-semdicas']),
+    offersOffEmails: new Set(['conta@example.com']),
+  })
+  const json = await (await makeHandler(world)(post({ sequence: 'nurture' }))).json()
+  assertEquals(world.resendCalls.map((c) => (c.body.to as string[])[0]), ['livre@example.com'])
+  assertEquals([json.sent, json.skipped.paid, json.skipped.prefs_off], [1, 1, 2])
 })
 
 Deno.test('envio real: link de descadastro válido no corpo e List-Unsubscribe one-click; log sent', async () => {

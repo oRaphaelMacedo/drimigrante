@@ -7,12 +7,15 @@
 // Score: _shared/quiz-engine.ts, o mesmo cálculo do front (DI-006). Query com erro → 500
 // sem gravar nada. Para corrigir resultados antigos: scripts/backfill-scores.mjs (dono).
 //
-// welcome_free (DI-077): sai daqui, depois da resposta, sem depender da OpenAI — com a
-// categoria certa, o link /results?r=<token> e o descadastro. DRY-RUN por padrão: só
-// envia com LIFECYCLE_EMAILS_DRY_RUN=false (ver lifecycle-emails/index.ts).
-// ORDEM DE RELEASE: migrations 20261025000200 (resume_token) e 20261030000000
-// (email_suppressions e modelos) antes de desligar o dry-run; publicar no MESMO deploy
-// do generate-explanation novo (que não manda mais o welcome_free).
+// Boas-vindas (DI-077, modelo welcome_free_v2): saem daqui, depois da resposta, sem
+// depender da OpenAI — com a categoria certa, o link /results?r=<token> e o descadastro.
+// DRY-RUN por padrão: só envia com LIFECYCLE_EMAILS_DRY_RUN=false (ver
+// lifecycle-emails/index.ts).
+// ORDEM DE RELEASE: pode ir no passo 1 do runbook (antes das migrations), como hoje: em
+// dry-run não envia nada e, sem a migration 20261030000000, o welcome_free_v2 não existe
+// e nada sai. O modelo antigo 'welcome_free' não é tocado (o generate-explanation em
+// produção ainda o usa). Desligar o dry-run só depois das migrations 20261025000200 e
+// 20261030000000 E do generate-explanation novo no ar (senão saem dois e-mails).
 //
 // CORS: allowlist de _shared/cors.ts (chamada pelo navegador, no fim do quiz).
 // Observabilidade: _shared/observability.ts (logs JSON e Sentry com SENTRY_DSN_BACKEND).

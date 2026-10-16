@@ -3,9 +3,11 @@
 //
 // Corpo: { assessment_id: uuid, session_id?: string, mode?: 'short' | 'full' }  (padrão: 'short')
 //
-// mode 'short' — fim do quiz (useQuiz). Gera SÓ o resumo grátis. Não envia e-mail: o
-//   welcome_free sai do compute-eligibility, sem depender da OpenAI (DI-077) — publicar
-//   as duas functions no MESMO deploy para não haver dois remetentes.
+// mode 'short' — fim do quiz (useQuiz). Gera SÓ o resumo grátis. Não envia e-mail: as
+//   boas-vindas saem do compute-eligibility (modelo welcome_free_v2), sem depender da
+//   OpenAI (DI-077). A versão em produção ainda manda o welcome_free antigo, que a
+//   migration 20261030000000 não altera; segue a ordem do runbook (passo 3). O dono só
+//   desliga o dry-run das boas-vindas depois desta versão no ar (senão saem as duas).
 //   Posse: JWT do dono OU session_id do assessment ainda anônimo → senão 404.
 //   200 { status: 'ready', short, cached? }
 // mode 'full' — AnalysisPage, sob demanda, depois do pagamento (DI-018).

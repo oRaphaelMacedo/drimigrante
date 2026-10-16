@@ -6,7 +6,9 @@
 //  · descadastro por HMAC: token sem o e-mail, à prova de adulteração e de outro segredo;
 //  · dry-run é o padrão para qualquer valor que não seja "false" explícito;
 //  · os modelos da migration 20261030000000 só usam as variáveis que o código fornece
-//    (nenhum `{{x}}` cru chega à caixa de entrada) — conferido só no Vitest (lê arquivo).
+//    (nenhum `{{x}}` cru chega à caixa de entrada), e a migration não reescreve modelo
+//    que o código em produção ainda envia com outras variáveis (o welcome_free antigo)
+//    — conferido só no Vitest (lê arquivo).
 
 import { assert, assertEquals, assertNotIncludes, assertStringIncludes } from './test-asserts.ts'
 import { isDeno, test } from './testing/dual-runner.ts'
@@ -38,6 +40,10 @@ import {
   TEMPLATE_SPECS,
   unsubscribeFunctionUrl,
   verifyUnsubscribeToken,
+  wantsOffers,
+  WELCOME_TEMPLATE_KEY,
+  WELCOME_TEMPLATE_KEYS,
+  welcomeDedupeKey,
 } from './email-lifecycle.ts'
 import { CATEGORY_PRESENTATION } from '../../../src/lib/category.ts'
 
@@ -71,6 +77,8 @@ function nurtureCtx(overrides: Partial<Parameters<typeof planNurture>[1]> = {}) 
     suppressions: new Map<string, Set<string>>(),
     paidUserIds: new Set<string>(),
     paidEmails: new Set<string>(),
+    offersOffUserIds: new Set<string>(),
+    offersOffEmails: new Set<string>(),
     ...overrides,
   }
 }
@@ -217,6 +225,25 @@ test('nutrição: quem pagou, quem se descadastrou, lista de espera e envio repe
     nurtureCtx({ sentState: { sent: new Set(), failedAttempts: new Map([[key, 2]]) } }),
   )
   assertEquals(gaveUp.skipped.gave_up, 1)
+})
+
+test('nutrição: "Novidades e dicas" desligado na conta bloqueia; sem a chave vale o opt-in do quiz', () => {
+  assertEquals(wantsOffers({ offers: false }), false)
+  for (const prefs of [{ offers: true }, { email: true, sms: false }, {}, null, 'x']) {
+    assertEquals(wantsOffers(prefs), true, JSON.stringify(prefs))
+  }
+  const byId = planNurture([candidate({ userId: 'u1' })], nurtureCtx({ offersOffUserIds: new Set(['u1']) }))
+  assertEquals([byId.due.length, byId.skipped.prefs_off], [0, 1])
+  const byEmail = planNurture([candidate()], nurtureCtx({ offersOffEmails: new Set(['pessoa@example.com']) }))
+  assertEquals([byEmail.due.length, byEmail.skipped.prefs_off], [0, 1])
+})
+
+test('boas-vindas: modelo novo com chave própria; o antigo continua contando como já recebido', () => {
+  assertEquals(WELCOME_TEMPLATE_KEY, 'welcome_free_v2')
+  assertEquals([...WELCOME_TEMPLATE_KEYS], ['welcome_free', 'welcome_free_v2'])
+  assertEquals(welcomeDedupeKey('a1'), 'welcome_free_v2:a1')
+  assert(!('welcome_free' in TEMPLATE_SPECS), 'o código novo não envia o modelo antigo')
+  assertEquals(TEMPLATE_SPECS.welcome_free_v2.category, 'service')
 })
 
 test('nutrição: só o quiz mais recente de cada e-mail; sem token de retomada não envia', () => {
@@ -387,6 +414,49 @@ if (!isDeno) {
       // Sem resto de pt-PT, promessas e emoji.
       for (const banned of [/aceder/i, /subscriç/i, /está a ser/i, /análise jurídica/i, /garantid/i, /urgente/i, /últimas vagas/i, /🎉|✅/u]) {
         assert(!banned.test(`${subject}\n${body}`), `${key}: ${banned}`)
+      }
+    }
+  })
+
+  /**
+   * Variáveis que o código EM PRODUÇÃO (main e ondas 1 a 3) manda para cada modelo que já
+   * existia. Entre o `db push` e o deploy das functions novas, é esse código que envia:
+   * um modelo reescrito no lugar não pode usar nada fora desta lista.
+   *  · welcome_free: generate-explanation (name, score_category, cta_link);
+   *  · payment_confirmed: stripe-webhook (amount, dashboard_link) + name do send-email;
+   *  · subscription_cancelled e analysis_ready: nenhuma versão em produção envia.
+   */
+  const PRODUCTION_SENDS: Record<string, readonly string[] | null> = {
+    welcome_free: ['name', 'score_category', 'cta_link'],
+    payment_confirmed: ['name', 'amount', 'dashboard_link'],
+    subscription_cancelled: null,
+    analysis_ready: null,
+  }
+
+  test('a migration não reescreve modelo que o código em produção envia com outras variáveis', async () => {
+    const { readFileSync } = await import('node:fs')
+    const sql = readFileSync(
+      new URL('../../migrations/20261030000000_lifecycle_emails.sql', import.meta.url),
+      'utf8',
+    )
+    // Só o SQL executável (sem as linhas de comentário).
+    const code = sql
+      .split('\n')
+      .filter((line) => !line.trimStart().startsWith('--'))
+      .join('\n')
+    // O welcome_free antigo fica intacto: nenhum INSERT/UPDATE com a chave dele.
+    assert(!/'welcome_free'/.test(code), "a migration não pode tocar o modelo 'welcome_free'")
+    assertStringIncludes(code, "'welcome_free_v2'")
+
+    for (const block of sql.split('-- template: ').slice(1)) {
+      const key = block.slice(0, block.indexOf('\n')).trim()
+      if (!(key in PRODUCTION_SENDS)) continue
+      const allowed = PRODUCTION_SENDS[key]
+      if (allowed === null) continue
+      const subject = /\$subject\$([\s\S]*?)\$subject\$/.exec(block)?.[1] ?? ''
+      const body = /\$body\$([\s\S]*?)\$body\$/.exec(block)?.[1] ?? ''
+      for (const name of placeholdersIn(`${subject}\n${body}`)) {
+        assert(allowed.includes(name), `${key}: {{${name}}} não é enviado pelo código em produção`)
       }
     }
   })

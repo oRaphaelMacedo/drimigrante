@@ -1,9 +1,11 @@
 // compute-eligibility/repo.ts — acesso ao banco (service role) usado pelo handler.
 // Toda query checa `error` e lança: o handler responde 500 sem gravar nada (DI-006).
-// As leituras do welcome_free (DI-077) rodam depois da resposta e o handler trata os
-// erros delas (ex.: migration 20261030000000 ainda não aplicada) sem afetar o score.
+// As leituras e a trava das boas-vindas (DI-077) rodam depois da resposta e o handler
+// trata os erros delas (ex.: migration 20261030000000 ainda não aplicada) sem afetar o score.
 
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2.105.4'
+import { WELCOME_TEMPLATE_KEYS } from '../_shared/email-lifecycle.ts'
+import { PG_UNIQUE_VIOLATION } from '../_shared/payments.ts'
 import { type DbScoringQuestionRow, QUIZ_SCORING_SELECT } from '../_shared/quiz-engine.ts'
 import type { EligibilityRepo, SafeResult, VisaRule } from './handler.ts'
 
@@ -110,23 +112,28 @@ export function createEligibilityRepo(db: SupabaseClient): EligibilityRepo {
     },
 
     async hasWelcomeEmail(assessmentId) {
-      // Qualquer linha conta (enviada ou com falha): no máximo uma tentativa por assessment.
+      // Qualquer envio conta (enviado ou com falha, modelo antigo ou novo): no máximo uma
+      // tentativa por assessment. As travas 'pending' ficam de fora (a própria inclusive).
       const { data, error } = await db
         .from('email_send_log')
         .select('id, email_templates!inner(trigger_key)')
-        .eq('email_templates.trigger_key', 'welcome_free')
+        .in('email_templates.trigger_key', [...WELCOME_TEMPLATE_KEYS])
         .eq('variables_used->>assessment_id', assessmentId)
+        .neq('status', 'pending')
         .limit(1)
       if (error) throw error
       return (data?.length ?? 0) > 0
     },
 
     async hasRecentWelcomeTo(email, sinceIso) {
+      // ilike: o welcome_free antigo gravava o e-mail como foi digitado (com maiúsculas).
+      // Um "_" no e-mail vira curinga e pode casar outro endereço: aí só deixa de enviar.
       const { data, error } = await db
         .from('email_send_log')
         .select('id, email_templates!inner(trigger_key)')
-        .eq('email_templates.trigger_key', 'welcome_free')
-        .eq('recipient_email', email)
+        .in('email_templates.trigger_key', [...WELCOME_TEMPLATE_KEYS])
+        .ilike('recipient_email', email)
+        .neq('status', 'pending')
         .gte('created_at', sinceIso)
         .limit(1)
       if (error) throw error
@@ -137,6 +144,32 @@ export function createEligibilityRepo(db: SupabaseClient): EligibilityRepo {
       const { data, error } = await db.from('email_suppressions').select('scope').eq('email_hash', emailHash)
       if (error) throw error
       return new Set(((data ?? []) as Array<{ scope: string }>).map((r) => r.scope))
+    },
+
+    async getActiveTemplateId(triggerKey) {
+      const { data, error } = await db
+        .from('email_templates')
+        .select('id')
+        .eq('trigger_key', triggerKey)
+        .eq('is_active', true)
+        .maybeSingle()
+      if (error) throw error
+      return (data as { id: string } | null)?.id ?? null
+    },
+
+    async claimWelcome(row) {
+      const { data, error } = await db.from('email_send_log').insert(row).select('id').single()
+      if (error) {
+        // Índice único email_send_log_dedupe_key_active: outra chamada já travou.
+        if ((error as { code?: string }).code === PG_UNIQUE_VIOLATION) return null
+        throw error
+      }
+      return { id: (data as { id: string }).id }
+    },
+
+    async releaseWelcomeClaim(id) {
+      const { error } = await db.from('email_send_log').delete().eq('id', id).eq('status', 'pending')
+      if (error) throw error
     },
   }
 }
