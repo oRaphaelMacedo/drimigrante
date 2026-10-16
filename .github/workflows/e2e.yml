@@ -1,8 +1,15 @@
+# ATENÇÃO (DI-003): os specs E2E atuais gravam no banco com a service role
+# (e2e/fixtures/seeded.ts) e usam a Edge Function e2e-login. Este workflow só
+# pode rodar contra Supabase LOCAL ou de STAGING — nunca contra produção
+# (projeto krjirhlmdnxqqrpzmowz / www.drimigrante.com).
+#
+# Por isso ele NÃO roda em pull_request: só manualmente (workflow_dispatch), com
+# os secrets E2E_* apontando para staging. O primeiro passo aborta se algum deles
+# apontar para produção. A parte autenticada do spec 04 e o spec 05 ficam em skip
+# sem E2E_LOGIN_SECRET (ver docs/testes.md).
 name: E2E Tests
 
 on:
-  pull_request:
-    branches: [main]
   workflow_dispatch:
 
 jobs:
@@ -13,7 +20,29 @@ jobs:
       fail-fast: false
       matrix:
         shard: [1, 2, 3]
+    env:
+      E2E_BASE_URL: ${{ secrets.E2E_BASE_URL }}
+      VITE_SUPABASE_URL: ${{ secrets.E2E_SUPABASE_URL }}
+      VITE_SUPABASE_ANON_KEY: ${{ secrets.E2E_SUPABASE_ANON_KEY }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.E2E_SUPABASE_SERVICE_ROLE_KEY }}
+      E2E_LOGIN_SECRET: ${{ secrets.E2E_LOGIN_SECRET }}
     steps:
+      - name: Bloquear execução contra produção
+        run: |
+          set -euo pipefail
+          if [ -z "${VITE_SUPABASE_URL:-}" ]; then
+            echo "::error::Defina o secret E2E_SUPABASE_URL com o Supabase de staging (ver docs/testes.md)."
+            exit 1
+          fi
+          for value in "${VITE_SUPABASE_URL:-}" "${E2E_BASE_URL:-}"; do
+            case "${value}" in
+              *krjirhlmdnxqqrpzmowz*|*drimigrante.com*)
+                echo "::error::Os secrets E2E apontam para PRODUÇÃO. Execução abortada."
+                exit 1
+                ;;
+            esac
+          done
+
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
@@ -28,12 +57,6 @@ jobs:
 
       - name: Run Playwright tests (shard ${{ matrix.shard }}/3)
         run: npx playwright test --shard=${{ matrix.shard }}/3
-        env:
-          E2E_BASE_URL: ${{ secrets.E2E_BASE_URL }}
-          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
-          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          INTERNAL_SECRET: ${{ secrets.INTERNAL_SECRET }}
 
       - uses: actions/upload-artifact@v4
         if: failure()
