@@ -5,6 +5,8 @@
 // - A barra é segmentada pelos temas das perguntas visíveis (não pela lista
 //   fixa de temas), cada segmento proporcional ao número de perguntas.
 // - O tema atual aparece uma vez só, aqui.
+// - Acessibilidade (DI-069): role="progressbar" com aria-valuenow/valuetext
+//   quando o total é conhecido; sem animação com "reduzir movimento".
 import type { ThemeProgress } from '@/lib/quiz-flow'
 
 interface QuizProgressProps {
@@ -54,7 +56,7 @@ export function QuizProgress({ label, themeName, percentage, segments = [] }: Qu
               style={{ flexGrow: Math.max(1, segment.total), flexBasis: 0 }}
             >
               <div
-                className="h-full w-full origin-left rounded-full bg-primary transition-transform duration-slow ease-out"
+                className="h-full w-full origin-left rounded-full bg-primary transition-transform duration-slow ease-out motion-reduce:transition-none"
                 style={{ transform: `scaleX(${segment.total > 0 ? segment.answered / segment.total : 0})` }}
               />
             </div>

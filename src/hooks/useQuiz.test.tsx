@@ -7,7 +7,9 @@
  *  - DI-040: nada de total nem de "Ver meu resultado" na primeira pergunta;
  *  - DI-042: só respostas visíveis no envio, functions lentas não seguram o
  *    resultado além de ~9s, análise de IA sem await;
- *  - DI-068: eventos por etapa uma vez por pergunta.
+ *  - DI-068: eventos por etapa uma vez por pergunta;
+ *  - DI-043: "Voltar às perguntas" na captura e opt-in de novidades no envio;
+ *  - DI-037: lista de espera "Em breve" pela RPC e atalho para a nacionalidade.
  */
 import { act, render } from '@testing-library/react'
 import { createMemoryRouter, RouterProvider, useLocation } from 'react-router-dom'
@@ -17,6 +19,7 @@ import { QUIZ_RESULT_KEY } from '@/lib/quiz-submission'
 
 const mocks = vi.hoisted(() => ({
   persistAssessment: vi.fn(),
+  joinWaitlist: vi.fn(),
   invoke: vi.fn(),
   track: vi.fn(),
   trackOnce: vi.fn(() => true),
@@ -24,7 +27,10 @@ const mocks = vi.hoisted(() => ({
   captureMessage: vi.fn(),
 }))
 
-vi.mock('@/hooks/useAssessment', () => ({ persistAssessment: mocks.persistAssessment }))
+vi.mock('@/hooks/useAssessment', () => ({
+  persistAssessment: mocks.persistAssessment,
+  joinWaitlist: mocks.joinWaitlist,
+}))
 vi.mock('@/lib/supabase', () => ({ supabase: { functions: { invoke: mocks.invoke } } }))
 vi.mock('@/lib/analytics', () => ({ track: mocks.track, trackOnce: mocks.trackOnce }))
 vi.mock('@/lib/sentry', () => ({
@@ -100,6 +106,8 @@ beforeEach(() => {
   mocks.track.mockReset()
   mocks.trackOnce.mockReset().mockReturnValue(true)
   mocks.captureException.mockReset()
+  mocks.captureMessage.mockReset()
+  mocks.joinWaitlist.mockReset()
 })
 
 afterEach(() => {
@@ -494,5 +502,141 @@ describe('envio (DI-041/DI-042)', () => {
     expect((resultsState as { assessmentId: string }).assessmentId).toBe('a-antigo')
     // Sem gravação confirmada, a sessão continua retomável.
     expect(readStoredQuizSession()?.sessionId).toBe('s_1760000000000_reenvio')
+  })
+})
+
+describe('captura (DI-043)', () => {
+  function reachCapture() {
+    act(() => api.startQuiz())
+    answerAndNext('processo_tipo', 'nacionalidade')
+    answerAndNext('caso_tipo', 'B')
+    answerAndNext('b1_tempo_casamento', 'mais_3_anos')
+    expect(api.quizState).toBe('capture')
+  }
+
+  it('"Voltar às perguntas" mostra a última pergunta com a resposta marcada', async () => {
+    const { router } = renderQuiz()
+    reachCapture()
+    expect(search(router)).toBe('?passo=contato')
+
+    await act(async () => {
+      api.backFromCapture()
+    })
+    expect(api.quizState).toBe('question')
+    expect(api.currentQuestion?.key).toBe('b1_tempo_casamento')
+    expect(api.currentAnswer).toBe('mais_3_anos')
+    expect(api.animationDirection).toBe('backward')
+    expect(search(router)).toBe('?passo=3')
+    expect(api.session.answers).toMatchObject({
+      processo_tipo: 'nacionalidade',
+      caso_tipo: 'B',
+      b1_tempo_casamento: 'mais_3_anos',
+    })
+    expect(trackedNames().filter((name) => name === 'quiz_back')).toHaveLength(1)
+
+    // E dá para seguir de novo até a captura.
+    act(() => {
+      api.nextQuestion()
+    })
+    expect(api.quizState).toBe('capture')
+  })
+
+  async function submitWith(lead: Parameters<QuizApi['submitQuiz']>[0]) {
+    vi.useFakeTimers()
+    mocks.persistAssessment.mockResolvedValue(okPersist('a-1'))
+    renderQuiz()
+    reachCapture()
+    await act(async () => {
+      const done = api.submitQuiz(lead)
+      await vi.advanceTimersByTimeAsync(2000)
+      await done
+    })
+    return mocks.persistAssessment.mock.calls[0][0] as { marketingOptIn?: boolean; answers: Record<string, string> }
+  }
+
+  it('opt-in desmarcado chega ao envio como false (e não entra nas respostas do quiz)', async () => {
+    const params = await submitWith(LEAD)
+    expect(params.marketingOptIn).toBe(false)
+    expect(params.answers).not.toHaveProperty('marketing_opt_in')
+  })
+
+  it('opt-in marcado chega ao envio como true', async () => {
+    const params = await submitWith({ ...LEAD, marketingOptIn: true })
+    expect(params.marketingOptIn).toBe(true)
+  })
+})
+
+describe('"em breve" (DI-037)', () => {
+  function reachComingSoon(option: string) {
+    act(() => api.startQuiz())
+    act(() => api.answerQuestion('processo_tipo', option))
+    act(() => {
+      api.nextQuestion()
+    })
+    expect(api.quizState).toBe('comingsoon')
+  }
+
+  it('lista de espera: RPC com o session_id do quiz e o objetivo escolhido; evento só com sucesso', async () => {
+    mocks.joinWaitlist.mockResolvedValue({ ok: true, error: null })
+    renderQuiz()
+    reachComingSoon('visto')
+    let ok = false
+    await act(async () => {
+      ok = await api.joinWaitlist('ana@example.com')
+    })
+    expect(ok).toBe(true)
+    expect(mocks.joinWaitlist).toHaveBeenCalledTimes(1)
+    expect(mocks.joinWaitlist).toHaveBeenCalledWith(
+      expect.objectContaining({
+        quizSessionId: api.session.sessionId,
+        email: 'ana@example.com',
+        processoTipo: 'visto',
+        utmSource: 'teste',
+      }),
+    )
+    expect(mocks.track).toHaveBeenCalledWith('waitlist_joined', { processo_tipo: 'visto' })
+  })
+
+  it('lista de espera: erro do servidor não confirma nem registra o evento', async () => {
+    mocks.joinWaitlist.mockResolvedValue({ ok: false, error: 'permission denied' })
+    renderQuiz()
+    reachComingSoon('regularizacao')
+    let ok = true
+    await act(async () => {
+      ok = await api.joinWaitlist('ana@example.com')
+    })
+    expect(ok).toBe(false)
+    expect(trackedNames()).not.toContain('waitlist_joined')
+    expect(mocks.captureMessage).toHaveBeenCalledTimes(1)
+    // Sem PII no relato de erro.
+    expect(JSON.stringify(mocks.captureMessage.mock.calls[0])).not.toContain('ana@example.com')
+  })
+
+  it('lista de espera: falha de rede vira false', async () => {
+    mocks.joinWaitlist.mockRejectedValue(new Error('Failed to fetch'))
+    renderQuiz()
+    reachComingSoon('nao_sei')
+    let ok = true
+    await act(async () => {
+      ok = await api.joinWaitlist('ana@example.com')
+    })
+    expect(ok).toBe(false)
+    expect(trackedNames()).not.toContain('waitlist_joined')
+  })
+
+  it('"Verificar se tenho direito à nacionalidade" segue para a pergunta de caso; voltar leva à primeira', async () => {
+    const { router } = renderQuiz()
+    reachComingSoon('regularizacao')
+    act(() => api.switchToNationality())
+    expect(api.quizState).toBe('question')
+    expect(api.currentQuestion?.key).toBe('caso_tipo')
+    expect(api.session.answers.processo_tipo).toBe('nacionalidade')
+    expect(api.animationDirection).toBe('forward')
+    expect(search(router)).toBe('?passo=2')
+
+    await act(async () => {
+      await router.navigate(-1)
+    })
+    expect(api.currentQuestion?.key).toBe('processo_tipo')
   })
 })

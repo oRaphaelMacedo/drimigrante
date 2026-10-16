@@ -99,6 +99,38 @@ describe('quizReducer — GO_TO_STEP (?passo=)', () => {
   })
 })
 
+describe('quizReducer — BACK_FROM_CAPTURE (DI-043)', () => {
+  const capture: QuizMachineState = { ...initialQuizState, quizState: 'capture', currentIndex: 2 }
+
+  it('volta da captura para a última pergunta, com animação para trás', () => {
+    const next = quizReducer(capture, { type: 'BACK_FROM_CAPTURE', lastIndex: 5 })
+    expect(next).toMatchObject({ quizState: 'question', currentIndex: 5, animationDirection: 'backward' })
+  })
+
+  it('índice negativo vira a primeira pergunta', () => {
+    expect(quizReducer(capture, { type: 'BACK_FROM_CAPTURE', lastIndex: -1 }).currentIndex).toBe(0)
+  })
+
+  it('fora da captura ou durante o envio não muda nada', () => {
+    const question = atQuestion(3)
+    expect(quizReducer(question, { type: 'BACK_FROM_CAPTURE', lastIndex: 1 })).toBe(question)
+    const submitting = quizReducer(capture, { type: 'SUBMIT_START' })
+    expect(quizReducer(submitting, { type: 'BACK_FROM_CAPTURE', lastIndex: 1 })).toBe(submitting)
+  })
+})
+
+describe('quizReducer — "em breve"', () => {
+  it('o atalho para a nacionalidade (pergunta 2) anima para frente; voltar à 1 anima para trás', () => {
+    const comingSoon: QuizMachineState = { ...initialQuizState, quizState: 'comingsoon' }
+    expect(
+      quizReducer(comingSoon, { type: 'GO_TO_STEP', step: { kind: 'question', index: 1 } }).animationDirection,
+    ).toBe('forward')
+    expect(
+      quizReducer(comingSoon, { type: 'GO_TO_STEP', step: { kind: 'question', index: 0 } }).animationDirection,
+    ).toBe('backward')
+  })
+})
+
 describe('quizReducer — envio', () => {
   it('SUBMIT_START é idempotente e SUBMIT_ERROR devolve a captura', () => {
     const started = quizReducer({ ...initialQuizState, quizState: 'capture' }, { type: 'SUBMIT_START' })

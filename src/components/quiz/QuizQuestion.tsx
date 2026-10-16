@@ -4,11 +4,15 @@
 // - Rádio com semântica de radiogroup: setas mudam a seleção SEM avançar;
 //   toque/clique, Enter ou Espaço confirmam (`commit: true`) e permitem o
 //   auto-avanço feito pela página (DI-039).
+// - Múltipla escolha com semântica de group/checkbox (DI-069); select e número
+//   nomeados pelo título da pergunta.
+// - Com "reduzir movimento" do sistema, sem animação de entrada (DI-069).
 // - O tema aparece uma vez só, no progresso (DI-040).
 import * as React from 'react'
 import { Check, ChevronDown } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { QuizQuestion, QuizOption } from '@/data/quiz-questions'
+import { useKeyboardActivation } from './keyboard-activation'
 
 export interface QuizAnswerMeta {
   /**
@@ -17,6 +21,11 @@ export interface QuizAnswerMeta {
    * escolha única com commit, e ignora o toque "fantasma" logo após um avanço.
    */
   commit: boolean
+  /**
+   * true quando o clique veio do teclado (Enter/Espaço, sem pointerdown antes).
+   * A proteção contra toque fantasma vale só para dedo/mouse.
+   */
+  keyboard?: boolean
 }
 
 interface QuizQuestionProps {
@@ -52,7 +61,7 @@ export function QuizQuestionCard({
       key={question.key}
       data-testid="quiz-question"
       className={cn(
-        'animate-in fade-in-0 duration-300',
+        'animate-in fade-in-0 duration-300 motion-reduce:animate-none',
         animationDirection === 'backward' ? 'slide-in-from-left-4' : 'slide-in-from-right-4',
       )}
     >
@@ -129,6 +138,7 @@ const optionClass = (selected: boolean) =>
     'flex min-h-[3.25rem] w-full select-none items-center gap-3 rounded-xl border-2 px-3.5 py-3 text-left text-base font-medium leading-snug text-foreground',
     'transition-[border-color,background-color,box-shadow,transform] duration-150 ease-out [-webkit-tap-highlight-color:transparent]',
     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 active:scale-[.99]',
+    'motion-reduce:transition-none motion-reduce:active:scale-100',
     selected
       ? 'border-primary bg-brand-50 shadow-[var(--shadow-sm)]'
       : 'border-border bg-card hover:border-brand-300 hover:bg-muted',
@@ -153,6 +163,7 @@ function RadioGroup({
   onChange: (v: string, meta: QuizAnswerMeta) => void
 }) {
   const refs = React.useRef<Array<HTMLButtonElement | null>>([])
+  const activation = useKeyboardActivation()
   const selectedIndex = options.findIndex((opt) => opt.key === value)
   // Tabulação "itinerante": só a opção marcada (ou a primeira) entra no Tab.
   const tabStop = selectedIndex >= 0 ? selectedIndex : 0
@@ -166,6 +177,7 @@ function RadioGroup({
   }
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
+    activation.onKeyDown(event)
     const n = options.length
     if (event.key in ARROW_STEP) {
       event.preventDefault()
@@ -201,20 +213,21 @@ function RadioGroup({
             role="radio"
             aria-checked={selected}
             tabIndex={index === tabStop ? 0 : -1}
-            onClick={() => onChange(opt.key, { commit: true })}
+            onPointerDown={activation.onPointerDown}
+            onClick={() => onChange(opt.key, { commit: true, keyboard: activation.consumeKeyboard() })}
             onKeyDown={(event) => handleKeyDown(event, index)}
             className={optionClass(selected)}
           >
             <span
               aria-hidden="true"
               className={cn(
-                'flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 transition-colors',
+                'flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 transition-colors motion-reduce:transition-none',
                 selected ? 'border-primary' : 'border-muted-foreground/70',
               )}
             >
               <span
                 className={cn(
-                  'h-2.5 w-2.5 rounded-full bg-primary transition-transform duration-150',
+                  'h-2.5 w-2.5 rounded-full bg-primary transition-transform duration-150 motion-reduce:transition-none',
                   selected ? 'scale-100' : 'scale-0',
                 )}
               />
@@ -238,12 +251,13 @@ function MultiCheckbox({
   onChange: (v: string, meta: QuizAnswerMeta) => void
 }) {
   const selected = value ? value.split(',').filter(Boolean) : []
+  const activation = useKeyboardActivation()
 
-  const toggle = (key: string) => {
+  const toggle = (key: string, keyboard: boolean) => {
     const next = selected.includes(key) ? selected.filter((k) => k !== key) : [...selected, key]
     // Múltipla escolha nunca avança sozinha (a página só avança escolha única):
     // a pessoa confirma no "Próximo".
-    onChange(next.join(','), { commit: true })
+    onChange(next.join(','), { commit: true, keyboard })
   }
 
   return (
@@ -258,13 +272,15 @@ function MultiCheckbox({
             type="button"
             role="checkbox"
             aria-checked={isSelected}
-            onClick={() => toggle(opt.key)}
+            onPointerDown={activation.onPointerDown}
+            onKeyDown={activation.onKeyDown}
+            onClick={() => toggle(opt.key, activation.consumeKeyboard())}
             className={optionClass(isSelected)}
           >
             <span
               aria-hidden="true"
               className={cn(
-                'flex h-5 w-5 shrink-0 items-center justify-center rounded-md border-2 transition-colors',
+                'flex h-5 w-5 shrink-0 items-center justify-center rounded-md border-2 transition-colors motion-reduce:transition-none',
                 isSelected ? 'border-primary bg-primary text-primary-foreground' : 'border-muted-foreground/70 bg-card',
               )}
             >

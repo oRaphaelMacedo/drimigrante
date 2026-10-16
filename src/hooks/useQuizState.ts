@@ -26,6 +26,11 @@ export type QuizAction =
    * ?passo= da URL (voltar/avançar do sistema), já ajustada por clampStep.
    */
   | { type: 'GO_TO_STEP'; step: QuizStep }
+  /**
+   * "Voltar às perguntas" na captura (DI-043): mostra a última pergunta visível
+   * (`lastIndex`, já ajustado por clampStep). As respostas ficam na sessão.
+   */
+  | { type: 'BACK_FROM_CAPTURE'; lastIndex: number }
   | { type: 'SUBMIT_START' }
   | { type: 'SUBMIT_SUCCESS'; payload: QuizResult }
   | { type: 'SUBMIT_ERROR' }
@@ -45,6 +50,9 @@ function stepRank(state: QuizMachineState): number {
       return -1
     case 'question':
       return state.currentIndex
+    case 'comingsoon':
+      // Logo depois da primeira pergunta (o atalho para nacionalidade anima para frente).
+      return 0.5
     default:
       return Number.MAX_SAFE_INTEGER
   }
@@ -83,6 +91,15 @@ export function quizReducer(state: QuizMachineState, action: QuizAction): QuizMa
           return state
       }
     }
+    case 'BACK_FROM_CAPTURE':
+      // Só a partir da captura; durante o envio a tela não muda.
+      if (state.quizState !== 'capture' || state.isSubmitting) return state
+      return {
+        ...state,
+        quizState: 'question',
+        currentIndex: Math.max(0, action.lastIndex),
+        animationDirection: 'backward',
+      }
     case 'SUBMIT_START':
       if (state.isSubmitting) return state
       return { ...state, quizState: 'processing', isSubmitting: true }

@@ -39,6 +39,12 @@ export interface PersistAssessmentParams {
   utmSource?: string | null
   utmMedium?: string | null
   utmCampaign?: string | null
+  /**
+   * Consentimento para receber novidades por e-mail (DI-043), desmarcado por
+   * padrão. Vai em `p_answers.marketing_opt_in` (boolean) sem mudar a
+   * assinatura do RPC; o motor do servidor ignora valores não textuais.
+   */
+  marketingOptIn?: boolean
 }
 
 export interface PersistAssessmentResult {
@@ -62,9 +68,14 @@ export async function persistAssessment(
       ? Math.round((params.questionsAnswered / params.totalQuestions) * 100)
       : 0
 
+  const answers: Record<string, string | boolean> =
+    params.marketingOptIn === undefined
+      ? params.answers
+      : { ...params.answers, marketing_opt_in: params.marketingOptIn }
+
   const { data, error } = await supabase.rpc('upsert_anon_assessment', {
     p_session_id: params.sessionId,
-    p_answers: params.answers,
+    p_answers: answers,
     p_full_name: params.fullName,
     p_email: params.email,
     p_phone: params.phone ?? undefined,
@@ -83,6 +94,61 @@ export async function persistAssessment(
   }
 
   return { assessment: (data as Assessment) ?? null, error: null }
+}
+
+// ─── Lista de espera "Em breve" (DI-037) ────────────────────────────────────
+
+/** Sufixo do session_id próprio da lista de espera (aceito pelo DI-081). */
+export const WAITLIST_SESSION_SUFFIX = '-wl'
+/** Limite de tamanho do session_id no RPC (upsert_anon_assessment). */
+const MAX_SESSION_ID_LENGTH = 64
+
+/**
+ * session_id da lista de espera derivado da sessão do quiz: `${sid}-wl`.
+ * Não reaproveita o session_id do quiz (que vira o assessment do diagnóstico)
+ * e repetir o envio atualiza a mesma linha em vez de criar outra.
+ */
+export function waitlistSessionId(quizSessionId: string): string {
+  return `${quizSessionId.slice(0, MAX_SESSION_ID_LENGTH - WAITLIST_SESSION_SUFFIX.length)}${WAITLIST_SESSION_SUFFIX}`
+}
+
+export interface JoinWaitlistParams {
+  /** session_id do quiz (o sufixo -wl é acrescentado aqui). */
+  quizSessionId: string
+  email: string
+  /** Opção escolhida em processo_tipo (visto, regularizacao, nao_sei…). */
+  processoTipo: string
+  utmSource?: string | null
+  utmMedium?: string | null
+  utmCampaign?: string | null
+}
+
+/**
+ * Guarda o e-mail da lista de espera pela RPC anônima `upsert_anon_assessment`.
+ *
+ * O insert direto em `assessments` é bloqueado pela RLS para visitantes (só
+ * `authenticated` insere), e por isso os e-mails se perdiam. A linha fica com
+ * status `incomplete` e `answers.waitlist = true`, visível para o admin.
+ */
+export async function joinWaitlist(params: JoinWaitlistParams): Promise<{ ok: boolean; error: string | null }> {
+  const { error } = await supabase.rpc('upsert_anon_assessment', {
+    p_session_id: waitlistSessionId(params.quizSessionId),
+    p_answers: { processo_tipo: params.processoTipo, waitlist: true },
+    p_email: params.email.trim(),
+    p_questions_answered: 1,
+    p_total_questions: 1,
+    p_completion_percentage: 0,
+    p_status: 'incomplete',
+    p_utm_source: params.utmSource ?? undefined,
+    p_utm_medium: params.utmMedium ?? undefined,
+    p_utm_campaign: params.utmCampaign ?? undefined,
+  })
+
+  if (error) {
+    console.error('[useAssessment] waitlist error:', error)
+    return { ok: false, error: error.message }
+  }
+  return { ok: true, error: null }
 }
 
 /**
