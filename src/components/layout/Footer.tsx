@@ -1,45 +1,135 @@
+/**
+ * Rodapé público (DI-038).
+ *
+ *  - `full` (padrão): marca, navegação e links legais, com alvos de 44px.
+ *  - `compact` (modo foco do funil): só os links legais, numa linha.
+ *  - O fundo reserva a altura do banner de cookies (`--cookie-banner-h`) e a
+ *    safe-area para que os links não fiquem cobertos no celular.
+ */
 import { Link } from 'react-router-dom'
+import { COMPANY } from '@/data/company'
+import { cn } from '@/lib/utils'
+import { Container } from '@/components/ui/Container'
+import { BrandLogo } from './BrandLogo'
 
-export function Footer() {
+const SERVICE_LINKS = [
+  { to: '/quiz', label: 'Diagnóstico gratuito' },
+  { to: '/#como-funciona', label: 'Como funciona' },
+  { to: '/#precos', label: 'Preços' },
+] as const
+
+const LEGAL_LINKS = [
+  { to: '/termos', label: 'Termos de Serviço', shortLabel: 'Termos' },
+  { to: '/privacidade', label: 'Privacidade', shortLabel: 'Privacidade' },
+  { to: '/cookies', label: 'Cookies', shortLabel: 'Cookies' },
+] as const
+
+const linkClass = cn(
+  'inline-flex min-h-11 items-center rounded-md text-sm text-muted-foreground',
+  'underline-offset-4 transition-colors hover:text-foreground hover:underline',
+  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
+)
+
+export interface FooterProps {
+  /** `compact` no modo foco do funil (quiz, resultado, checkout). */
+  variant?: 'full' | 'compact'
+}
+
+export function Footer({ variant = 'full' }: FooterProps) {
+  if (variant === 'compact') return <CompactFooter />
+
   const year = new Date().getFullYear()
 
   return (
-    <footer className="border-t border-gray-200 bg-gray-50">
-      <div className="container py-10">
-        <div className="grid gap-8 md:grid-cols-4">
-          {/* Brand */}
-          <div className="md:col-span-2">
-            <span className="text-lg font-bold text-brand-700">Doutor Imigrante</span>
-            <p className="mt-2 max-w-xs text-sm text-gray-500">
-              Análise jurídica personalizada para o seu processo de imigração para Portugal.
+    <footer
+      data-variant="full"
+      className="border-t border-border bg-card pb-[calc(env(safe-area-inset-bottom)+var(--cookie-banner-h,0px))]"
+    >
+      <Container className="pb-6 pt-10">
+        <div className="grid grid-cols-2 gap-x-6 gap-y-8 md:grid-cols-4">
+          <div className="col-span-2">
+            <Link
+              to="/"
+              className="inline-flex rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            >
+              <BrandLogo />
+            </Link>
+            <p className="mt-3 max-w-sm text-sm text-muted-foreground [text-wrap:pretty]">
+              Diagnóstico de elegibilidade à nacionalidade portuguesa, feito a partir das suas
+              respostas.
             </p>
           </div>
 
-          {/* Links */}
-          <div>
-            <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-gray-400">Serviços</h3>
-            <ul className="space-y-2">
-              <li><Link to="/quiz" className="text-sm text-gray-600 hover:text-brand-700">Quiz Gratuito</Link></li>
-              <li><Link to="/#como-funciona" className="text-sm text-gray-600 hover:text-brand-700">Como Funciona</Link></li>
-              <li><Link to="/#precos" className="text-sm text-gray-600 hover:text-brand-700">Preços</Link></li>
+          <nav aria-labelledby="footer-servico">
+            <h2 id="footer-servico" className="text-sm font-semibold text-foreground">
+              Serviço
+            </h2>
+            <ul className="mt-1">
+              {SERVICE_LINKS.map(({ to, label }) => (
+                <li key={to}>
+                  <Link to={to} className={linkClass}>
+                    {label}
+                  </Link>
+                </li>
+              ))}
             </ul>
-          </div>
+          </nav>
 
-          <div>
-            <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-gray-400">Legal</h3>
-            <ul className="space-y-2">
-              <li><Link to="/termos" className="text-sm text-gray-600 hover:text-brand-700">Termos de Serviço</Link></li>
-              <li><Link to="/privacidade" className="text-sm text-gray-600 hover:text-brand-700">Privacidade</Link></li>
-              <li><Link to="/cookies" className="text-sm text-gray-600 hover:text-brand-700">Cookies</Link></li>
+          <nav aria-labelledby="footer-legal">
+            <h2 id="footer-legal" className="text-sm font-semibold text-foreground">
+              Legal
+            </h2>
+            <ul className="mt-1">
+              {LEGAL_LINKS.map(({ to, label }) => (
+                <li key={to}>
+                  <Link to={to} className={linkClass}>
+                    {label}
+                  </Link>
+                </li>
+              ))}
             </ul>
-          </div>
+          </nav>
         </div>
 
-        <div className="mt-8 border-t border-gray-200 pt-6 text-center text-xs text-gray-400">
-          © {year} Doutor Imigrante. Todos os direitos reservados. |{' '}
-          <span>A informação disponibilizada não constitui aconselhamento jurídico.</span>
+        <div className="mt-8 space-y-1 border-t border-border pt-6 text-center text-sm text-muted-foreground [text-wrap:pretty]">
+          <p>
+            © {year} {COMPANY.brandName}. Todos os direitos reservados.
+          </p>
+          <p>As informações deste site não constituem aconselhamento jurídico.</p>
         </div>
-      </div>
+      </Container>
+    </footer>
+  )
+}
+
+/**
+ * Modo foco: links legais numa linha. No celular reserva também a altura de uma
+ * barra de ação fixa (quiz, StickyCTA) — ela fica em `bottom: --cookie-banner-h`
+ * e cobriria os links no fim da rolagem.
+ */
+function CompactFooter() {
+  return (
+    <footer
+      data-variant="compact"
+      className={cn(
+        'border-t border-border bg-background',
+        'pb-[calc(5.5rem+env(safe-area-inset-bottom)+var(--cookie-banner-h,0px))]',
+        'md:pb-[calc(env(safe-area-inset-bottom)+var(--cookie-banner-h,0px))]',
+      )}
+    >
+      <Container className="py-1">
+        <nav aria-label="Links legais">
+          <ul className="flex flex-wrap items-center justify-center gap-x-4">
+            {LEGAL_LINKS.map(({ to, label, shortLabel }) => (
+              <li key={to}>
+                <Link to={to} className={linkClass} aria-label={label === shortLabel ? undefined : label}>
+                  {shortLabel}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </nav>
+      </Container>
     </footer>
   )
 }
