@@ -14,6 +14,56 @@ import { useQuizPersistence, type QuizSession } from './useQuizPersistence'
 import { useQuizState, type QuizFlowState } from './useQuizState'
 import { useQuizQuestions } from './useQuizQuestions'
 import { supabase } from '@/lib/supabase'
+import {
+  answersKey,
+  createSessionId,
+  pickSubmissionSessionId,
+  QUIZ_RESULT_KEY,
+  readSubmittedSessions,
+  rememberSubmission,
+} from '@/lib/quiz-submission'
+
+// Atribuição (UTMs) — contrato com o W1-07: src/lib/attribution.ts exporta
+// getAttribution(): { utm_source?, utm_medium?, utm_campaign? } (first-touch).
+// O glob abaixo usa o módulo quando ele existe e cai para a URL atual quando não.
+// TODO(W1-07): depois do merge, trocar por `import { getAttribution } from '@/lib/attribution'`.
+interface Attribution {
+  utm_source?: string | null
+  utm_medium?: string | null
+  utm_campaign?: string | null
+}
+const attributionModules = import.meta.glob<{ getAttribution?: () => Attribution }>(
+  '../lib/attribution.ts',
+  { eager: true },
+)
+
+function readAttribution(): Attribution {
+  const params = new URLSearchParams(window.location.search)
+  const fromUrl: Attribution = {
+    utm_source: params.get('utm_source'),
+    utm_medium: params.get('utm_medium'),
+    utm_campaign: params.get('utm_campaign'),
+  }
+  let stored: Attribution = {}
+  try {
+    stored = Object.values(attributionModules)[0]?.getAttribution?.() ?? {}
+  } catch {
+    stored = {}
+  }
+  return {
+    utm_source: stored.utm_source || fromUrl.utm_source || null,
+    utm_medium: stored.utm_medium || fromUrl.utm_medium || null,
+    utm_campaign: stored.utm_campaign || fromUrl.utm_campaign || null,
+  }
+}
+
+function browserStorage(): Storage | null {
+  try {
+    return window.localStorage
+  } catch {
+    return null
+  }
+}
 
 export type QuizState = QuizFlowState
 export type { QuizSession }
@@ -104,21 +154,32 @@ export function useQuiz() {
           leadInfo,
         }
 
+        // Um session_id = um conjunto de respostas enviado (DI-004/DI-041): refazer o
+        // quiz com respostas novas numa sessão já enviada usa um session_id novo, para
+        // não reescrever um assessment cujo resultado e análise já foram gerados.
+        const storage = browserStorage()
+        const submissionSessionId = pickSubmissionSessionId({
+          currentSessionId: session.sessionId,
+          answers: session.answers,
+          submitted: readSubmittedSessions(storage),
+          createId: createSessionId,
+        })
+
         // Persist to Supabase (fails gracefully)
         let assessmentId: string | null = null
         try {
-          const urlParams = new URLSearchParams(window.location.search)
+          const attribution = readAttribution()
           const { assessment } = await persistAssessment({
-            sessionId: session.sessionId,
+            sessionId: submissionSessionId,
             answers: session.answers,
             fullName: leadInfo.fullName,
             email: leadInfo.email,
             phone: leadInfo.phone,
             questionsAnswered: Object.keys(session.answers).length,
             totalQuestions: visibleQuestions.length,
-            utmSource: urlParams.get('utm_source'),
-            utmMedium: urlParams.get('utm_medium'),
-            utmCampaign: urlParams.get('utm_campaign'),
+            utmSource: attribution.utm_source,
+            utmMedium: attribution.utm_medium,
+            utmCampaign: attribution.utm_campaign,
           })
           if (assessment) {
             assessmentId = assessment.id
@@ -130,9 +191,9 @@ export function useQuiz() {
         // Store result in localStorage
         try {
           localStorage.setItem(
-            'dr_imigrante_quiz_result',
+            QUIZ_RESULT_KEY,
             JSON.stringify({
-              sessionId: session.sessionId,
+              sessionId: submissionSessionId,
               assessmentId,
               answers: session.answers,
               score: {
@@ -148,18 +209,29 @@ export function useQuiz() {
           )
         } catch {}
 
+        if (assessmentId) {
+          rememberSubmission(storage, {
+            sessionId: submissionSessionId,
+            answersKey: answersKey(session.answers),
+          })
+          // Sessão nova para o próximo quiz: "Refazer o quiz" começa do zero e vira
+          // outro assessment (o resultado acima guarda o session_id deste envio).
+          resetSession()
+        }
+
         // Run edge functions: compute-eligibility → generate-explanation (fire & forget — errors don't block UX)
         if (assessmentId) {
           try {
             // 1. Compute eligibility score and visa suggestions (server-side, writes to assessment_results)
+            // session_id prova a posse do assessment anônimo (DI-004).
             const { error: eligErr } = await supabase.functions.invoke('compute-eligibility', {
-              body: { assessment_id: assessmentId },
+              body: { assessment_id: assessmentId, session_id: submissionSessionId },
             })
             if (eligErr) console.warn('[useQuiz] compute-eligibility failed:', eligErr)
 
             // 2. Generate AI explanation (requires assessment_results row from step 1)
             const { error: explErr } = await supabase.functions.invoke('generate-explanation', {
-              body: { assessment_id: assessmentId },
+              body: { assessment_id: assessmentId, session_id: submissionSessionId },
             })
             if (explErr) console.warn('[useQuiz] generate-explanation failed:', explErr)
           } catch (fnErr) {
@@ -176,7 +248,7 @@ export function useQuiz() {
         dispatch({ type: 'SUBMIT_ERROR' })
       }
     },
-    [session, navigate, visibleQuestions.length, dispatch, allQuestions],
+    [session, navigate, visibleQuestions.length, dispatch, allQuestions, resetSession],
   )
 
   // Voltar da tela "em breve" para P0
