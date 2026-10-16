@@ -1,89 +1,131 @@
-// QuizIntro.tsx — Intro screen before the quiz starts
-import { ArrowRight, Clock, Shield, Star } from 'lucide-react'
+// QuizIntro.tsx — tela inicial do quiz, com "Continue de onde parou" (DI-041).
+import { ArrowRight, Clock, RotateCcw, Shield, Zap } from 'lucide-react'
+import { Badge, Button, Card } from '@/components/ui'
+
+export interface QuizIntroResume {
+  /** Perguntas já respondidas nesta sessão (deste aparelho). */
+  answeredCount: number
+  onContinue: () => void
+  onRestart: () => void
+}
 
 interface QuizIntroProps {
   onStart: () => void
+  /** Presente quando há respostas salvas neste aparelho. */
+  resume?: QuizIntroResume | null
 }
 
 const highlights = [
-  { icon: Clock,  text: '5 minutos para completar' },
+  { icon: Clock, text: 'Cerca de 5 minutos' },
   { icon: Shield, text: 'Análise privada e confidencial' },
-  { icon: Star,   text: 'Resultado imediato — sem espera' },
+  { icon: Zap, text: 'Resultado na hora' },
 ]
 
 const cases = [
-  { label: 'Descendência',  description: 'Filho, neto, bisneto de português(a)' },
-  { label: 'Matrimônio',    description: 'Casado(a) com cidadão(ã) português(a)' },
-  { label: 'Nascimento',    description: 'Nasceu em Portugal' },
-  { label: 'Residência',    description: 'Mora em Portugal' },
-  { label: 'Ex-nacional',   description: 'Já teve a nacionalidade portuguesa' },
-  { label: 'Ex-Colónias',   description: 'Família originária das ex-colónias' },
+  { label: 'Descendência', description: 'Filho, neto ou bisneto de português(a)' },
+  { label: 'Matrimônio', description: 'Casado(a) com cidadão(ã) português(a)' },
+  { label: 'Nascimento', description: 'Nasceu em Portugal' },
+  { label: 'Residência', description: 'Mora em Portugal' },
+  { label: 'Ex-nacional', description: 'Já teve a nacionalidade portuguesa' },
+  { label: 'Ex-colônias', description: 'Família originária das ex-colônias' },
 ]
 
-export function QuizIntro({ onStart }: QuizIntroProps) {
+export function QuizIntro({ onStart, resume }: QuizIntroProps) {
   return (
-    <div className="animate-in fade-in-0 slide-in-from-bottom-4 duration-500 space-y-8">
-      {/* Header */}
-      <div className="text-center">
-        <div className="mb-3 inline-flex items-center gap-2 rounded-full bg-brand-50 px-4 py-1.5 text-sm font-medium text-brand-700">
-          <Star className="h-3.5 w-3.5" />
-          Diagnóstico Gratuito de Elegibilidade
-        </div>
-        <h1 className="mb-3 text-3xl font-extrabold leading-tight text-gray-900 sm:text-4xl">
-          Descubra se tem direito à{' '}
-          <span className="text-brand-700">Nacionalidade Portuguesa</span>
+    <div className="animate-in fade-in-0 slide-in-from-bottom-4 space-y-8 duration-500">
+      {/* Cabeçalho */}
+      <header className="text-center">
+        <Badge variant="primary" className="mb-3">
+          Diagnóstico gratuito de elegibilidade
+        </Badge>
+        <h1 className="mb-3 text-[1.75rem] font-bold leading-tight text-foreground [text-wrap:balance] sm:text-4xl">
+          Descubra se você tem direito à <span className="text-primary">nacionalidade portuguesa</span>
         </h1>
-        <p className="mx-auto max-w-md text-base text-gray-500">
-          Responda a algumas perguntas sobre o seu perfil e receba uma análise de elegibilidade personalizada, gratuita e imediata.
+        <p className="mx-auto max-w-md text-base text-muted-foreground [text-wrap:pretty]">
+          Responda a algumas perguntas sobre o seu perfil e veja na hora uma pré-análise da sua elegibilidade,
+          sem custo.
         </p>
-      </div>
+      </header>
 
-      {/* Highlights */}
-      <div className="flex flex-wrap justify-center gap-3">
-        {highlights.map(({ icon: Icon, text }) => (
-          <div
-            key={text}
-            className="flex items-center gap-2 rounded-lg border border-gray-100 bg-white px-3 py-2 text-sm font-medium text-gray-600 shadow-sm"
-          >
-            <Icon className="h-4 w-4 text-brand-600" />
-            {text}
-          </div>
-        ))}
-      </div>
-
-      {/* CTA */}
-      <div className="text-center">
-        <button
-          id="quiz-start-btn"
-          data-testid="quiz-intro-start"
-          onClick={onStart}
-          className="group inline-flex items-center gap-2 rounded-xl bg-brand-700 px-8 py-4 text-base font-bold text-white shadow-lg shadow-brand-200 transition-all duration-200 hover:bg-brand-600 hover:shadow-xl hover:-translate-y-0.5 active:translate-y-0"
-        >
-          Iniciar Diagnóstico Gratuito
-          <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
-        </button>
-        <p className="mt-3 text-xs text-gray-400">
-          Sem necessidade de criar conta. Pode retomar depois se sair.
-        </p>
-      </div>
-
-      {/* Cases preview */}
-      <div className="rounded-2xl border border-gray-100 bg-gray-50 p-5">
-        <p className="mb-4 text-xs font-semibold uppercase tracking-wider text-gray-400">
-          Casos cobertos pelo diagnóstico
-        </p>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-          {cases.map(({ label, description }) => (
-            <div
-              key={label}
-              className="rounded-xl bg-white p-3 shadow-sm ring-1 ring-gray-100"
+      {resume ? (
+        <Card variant="elevated" data-testid="quiz-resume-card" className="text-left">
+          <h2 className="text-xl font-bold text-foreground">Continue de onde parou</h2>
+          <p className="mt-1.5 text-base text-muted-foreground [text-wrap:pretty]">
+            Você já respondeu {resume.answeredCount} {resume.answeredCount === 1 ? 'pergunta' : 'perguntas'}. Suas
+            respostas ficaram salvas neste aparelho.
+          </p>
+          <div className="mt-5 flex flex-col gap-3 sm:flex-row">
+            <Button
+              id="quiz-resume-btn"
+              data-testid="quiz-resume-continue"
+              size="lg"
+              className="w-full sm:w-auto sm:min-w-[12rem]"
+              onClick={resume.onContinue}
             >
-              <p className="text-sm font-semibold text-gray-800">{label}</p>
-              <p className="mt-0.5 text-xs text-gray-500 leading-snug">{description}</p>
-            </div>
-          ))}
+              Continuar
+              <ArrowRight aria-hidden="true" />
+            </Button>
+            <Button
+              id="quiz-restart-btn"
+              data-testid="quiz-resume-restart"
+              variant="secondary"
+              size="lg"
+              className="w-full sm:w-auto"
+              onClick={resume.onRestart}
+            >
+              <RotateCcw aria-hidden="true" />
+              Recomeçar do zero
+            </Button>
+          </div>
+        </Card>
+      ) : (
+        <div className="text-center">
+          <Button
+            id="quiz-start-btn"
+            data-testid="quiz-intro-start"
+            size="lg"
+            className="group w-full sm:w-auto sm:px-8"
+            onClick={onStart}
+          >
+            Iniciar diagnóstico gratuito
+            <ArrowRight aria-hidden="true" className="transition-transform group-hover:translate-x-1" />
+          </Button>
+          <p className="mt-3 text-sm text-muted-foreground">
+            Não precisa criar conta. Se sair, você continua de onde parou neste aparelho.
+          </p>
         </div>
-      </div>
+      )}
+
+      {/* Destaques */}
+      <ul className="flex flex-wrap justify-center gap-2.5">
+        {highlights.map(({ icon: Icon, text }) => (
+          <li
+            key={text}
+            className="flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 text-sm font-medium text-foreground shadow-[var(--shadow-sm)]"
+          >
+            <Icon className="h-4 w-4 text-primary" aria-hidden="true" />
+            {text}
+          </li>
+        ))}
+      </ul>
+
+      {/* Casos cobertos */}
+      <section aria-labelledby="quiz-intro-cases" className="rounded-[var(--radius)] bg-muted p-4 sm:p-5">
+        <h2
+          id="quiz-intro-cases"
+          className="mb-4 text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+        >
+          Casos cobertos pelo diagnóstico
+        </h2>
+        <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+          {cases.map(({ label, description }) => (
+            <li key={label} className="rounded-xl bg-card p-3 shadow-[var(--shadow-sm)]">
+              <p className="text-sm font-semibold text-foreground">{label}</p>
+              <p className="mt-0.5 text-sm leading-snug text-muted-foreground">{description}</p>
+            </li>
+          ))}
+        </ul>
+      </section>
     </div>
   )
 }
