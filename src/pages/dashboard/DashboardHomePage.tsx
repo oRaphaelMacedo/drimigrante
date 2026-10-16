@@ -12,10 +12,16 @@
  *
  * Parâmetros lidos (e removidos da URL): ?upsell=chat (ProtectedRoute, DI-025),
  * ?acesso=expirado e ?subscribed=1 (volta do Stripe → confirmação com polling).
+ *
+ * Retenção (DI-049, DI-078, DI-072):
+ * - "Próximo passo" com o checklist do caminho (useChecklist) para quem pode
+ *   enviar documentos; a contagem da linha do tempo usa a mesma lista.
+ * - Convite discreto para instalar o app, só aqui e só com acesso pago vigente.
+ * - Evento dashboard_viewed { plan_status, days_left } (os avisos de prazo
+ *   disparam access_expiring_viewed/access_expired_viewed no AccessBanner).
  */
 import { forwardRef, useEffect, useMemo, useRef, useState, type ElementType, type ReactNode } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
 import {
   ArrowRight,
   BadgeCheck,
@@ -35,6 +41,8 @@ import {
   X,
 } from 'lucide-react'
 import { AccessBanner } from '@/components/dashboard/AccessBanner'
+import { InstallCard } from '@/components/dashboard/InstallCard'
+import { NextStepCard } from '@/components/dashboard/NextStepCard'
 import { SubscriptionUpsellCard } from '@/components/dashboard/SubscriptionUpsellCard'
 import { UpsellSheet } from '@/components/dashboard/UpsellSheet'
 import {
@@ -48,11 +56,11 @@ import { hasOpenedAnalysis, hasSeenWelcome, markWelcomeSeen } from '@/components
 import { Badge, Button, Card, StickyCTA } from '@/components/ui'
 import { useAuth } from '@/hooks/useAuth'
 import { useAssessmentResult, type AssessmentResult } from '@/hooks/useAssessmentResult'
+import { useChecklist } from '@/hooks/useChecklist'
 import { useSubscriptionConfirmation } from '@/hooks/useSubscribeCheckout'
 import { canOfferRecurring, hasActiveAccess, type AccessFeature } from '@/lib/access'
 import { track } from '@/lib/analytics'
 import { OFFER } from '@/lib/offer'
-import { supabase } from '@/lib/supabase'
 import { cn } from '@/lib/utils'
 
 const HANDLED_PARAMS = ['upsell', 'acesso', 'subscribed'] as const
@@ -158,18 +166,15 @@ export function DashboardHomePage() {
   const showUpsellCard =
     offersEnabled && access.state === 'active' && canOfferRecurring(access) && analysisOpened
 
-  // ── Documentos enviados (linha do tempo) ───────────────────────────────────
-  // Chave sob ['user-documents', userId]: o upload/remoção na DocumentsPage invalida esta contagem.
-  const documentsQuery = useQuery({
-    queryKey: ['user-documents', userId, 'count'],
-    queryFn: async () => {
-      const { data, error } = await supabase.from('user_documents').select('id').eq('user_id', userId!)
-      if (error) throw error
-      return data?.length ?? 0
-    },
-    enabled: !!userId && canDocuments,
-    staleTime: 30_000,
-  })
+  // ── Checklist e documentos enviados (DI-049) ───────────────────────────────
+  // Mesma chave ['user-documents', userId] da DocumentsPage: upload/remoção lá atualiza aqui.
+  const { checklist, isLoading: isLoadingChecklist } = useChecklist({ enabled: canDocuments })
+  const canUploadDocuments = hasAccess('documents_upload')
+  const showNextStep = canUploadDocuments && !isLoadingChecklist && checklist.total > 0
+  const documentsCount = canDocuments && !isLoadingChecklist ? checklist.uploadedCount : null
+
+  // ── Convite para instalar o app (DI-078): só pós-compra, com acesso vigente ──
+  const showInstallInvite = paidAccess && !access.isStaff && access.hasPaidOnce
 
   useEffect(() => {
     track('dashboard_viewed', { plan_status: access.state, days_left: access.daysLeft })
@@ -294,6 +299,9 @@ export function DashboardHomePage() {
         <NoQuizBanner />
       ) : null}
 
+      {/* ── Próximo passo do checklist ── */}
+      {showNextStep && <NextStepCard checklist={checklist} />}
+
       {/* ── Funcionalidades ── */}
       <section aria-labelledby="dashboard-features-title">
         <h2 id="dashboard-features-title" className="mb-3 text-lg font-semibold text-foreground">
@@ -320,8 +328,10 @@ export function DashboardHomePage() {
         canAnalysis={canAnalysis}
         accessEndedAt={access.state === 'expired' ? access.expiresAt : null}
         canDocuments={canDocuments}
-        documentsCount={documentsQuery.data ?? null}
+        documentsCount={documentsCount}
       />
+
+      {showInstallInvite && <InstallCard />}
 
       {showUpsellCard && (
         <SubscriptionUpsellCard placement="home_card" emphasis="quiet" assessmentId={assessmentId} />
