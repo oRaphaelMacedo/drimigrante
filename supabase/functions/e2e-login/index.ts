@@ -12,13 +12,19 @@
 //   4. E-mail na allowlist e2e+<n>-<id>@drimigrante.test.
 //   5. Erros devolvem mensagem genérica; o detalhe fica só no log.
 //
+// Sem CORS (_shared/cors.ts → withoutCors): quem chama é o fixture do Playwright
+// (Node), nunca uma página. Logs JSON por requisição (_shared/observability.ts).
+//
 // Fluxo da sessão:
 //   cria o usuário se faltar (idempotente) → admin.generateLink (magic link)
 //   → auth.verifyOtp troca o token por uma sessão real → devolve os tokens.
 
-import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient } from 'npm:@supabase/supabase-js@2.105.4'
+import { withoutCors } from '../_shared/cors.ts'
+import { createObservability } from '../_shared/observability.ts'
 import { createHandler, type E2ESession } from './handler.ts'
+
+const obs = createObservability('e2e-login')
 
 async function createSession(email: string): Promise<E2ESession> {
   const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
@@ -73,10 +79,14 @@ async function createSession(email: string): Promise<E2ESession> {
   }
 }
 
-serve(
-  createHandler({
-    env: (name) => Deno.env.get(name),
-    createSession,
-    logError: (message) => console.error(`e2e-login: ${message}`),
-  }),
+Deno.serve(
+  withoutCors(
+    obs.wrap(
+      createHandler({
+        env: (name) => Deno.env.get(name),
+        createSession,
+        logError: (message) => console.error(`e2e-login: ${message}`),
+      }),
+    ),
+  ),
 )

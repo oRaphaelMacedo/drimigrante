@@ -24,7 +24,7 @@
 //    da assinatura cancela a assinatura no Stripe e revoga o acesso recorrente.
 //  - Falha de pagamento da assinatura só revoga na última tentativa.
 
-import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import type { SupabaseClient } from 'npm:@supabase/supabase-js@2.105.4'
 import { findOrCreateBuyer } from '../_shared/buyer.ts'
 import {
   addCalendarMonthsUtc,
@@ -132,8 +132,9 @@ interface ProcessResult {
 
 // ── Constantes ───────────────────────────────────────────────────────────────
 
+// Sem Access-Control-Allow-Origin: o CORS (allowlist ou nenhum) é aplicado no index.ts
+// por _shared/cors.ts, que substitui qualquer Access-Control-* daqui (DI-082).
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers':
     'authorization, x-client-info, apikey, content-type, stripe-signature',
 }

@@ -22,7 +22,7 @@
 //            400 invalid_request/no_email · 403 payment_not_completed
 //            404 not_found · 500 internal_error
 
-import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import type { SupabaseClient } from 'npm:@supabase/supabase-js@2.105.4'
 import { findOrCreateBuyer, wasCreatedByCheckout } from '../_shared/buyer.ts'
 import { isCheckoutSettled, normalizeEmail, PG_UNIQUE_VIOLATION } from '../_shared/payments.ts'
 
@@ -54,8 +54,9 @@ export const CLAIM_TOKEN_WINDOW_SECONDS = 24 * 60 * 60
 
 const SESSION_ID_RE = /^cs_(?:test|live)_[A-Za-z0-9]+$/
 
+// Sem Access-Control-Allow-Origin: o CORS (allowlist ou nenhum) é aplicado no index.ts
+// por _shared/cors.ts, que substitui qualquer Access-Control-* daqui (DI-082).
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 }

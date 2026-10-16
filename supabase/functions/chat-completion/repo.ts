@@ -2,7 +2,7 @@
 // Todas as escritas em `messages` passam por aqui (o cliente perde o INSERT na
 // migration 20261016000300_messages_server_only_insert.sql).
 
-import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import type { SupabaseClient } from 'npm:@supabase/supabase-js@2.105.4'
 import type { ChatRepo } from './handler.ts'
 
 const STAFF_ROLES = ['super_admin', 'hub_admin', 'lawyer', 'paralegal']

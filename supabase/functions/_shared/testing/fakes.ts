@@ -7,7 +7,7 @@
 // auth.signInWithOtp; functions.invoke. Restrições UNIQUE são simuladas
 // (erro 23505), e falhas podem ser injetadas por tabela/operação.
 
-import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import type { SupabaseClient } from 'npm:@supabase/supabase-js@2.105.4'
 
 export type Row = Record<string, unknown>
 export interface FakeError {

@@ -1,6 +1,6 @@
 // generate-explanation/repo.ts — acesso ao banco (service role) usado pelo handler.
 
-import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import type { SupabaseClient } from 'npm:@supabase/supabase-js@2.105.4'
 import type { AssessmentWithResult, ExplanationRepo } from './handler.ts'
 import { LOCK_PREFIX } from './handler.ts'
 

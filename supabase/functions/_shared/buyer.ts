@@ -7,7 +7,7 @@
 // NUNCA usar profiles.email para isso: era editável pelo próprio cliente e
 // permitia sequestrar a compra de outra pessoa.
 
-import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import type { SupabaseClient } from 'npm:@supabase/supabase-js@2.105.4'
 
 /**
  * Chave em app_metadata (só o service_role escreve) com o id da Checkout

@@ -29,7 +29,7 @@
 //  409 { error: 'already_active', message }
 //  500 { error: 'internal_error' }
 
-import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import type { SupabaseClient } from 'npm:@supabase/supabase-js@2.105.4'
 import { findAuthUserIdByEmail } from '../_shared/buyer.ts'
 import { hasActivePaidAccess, normalizeEmail } from '../_shared/payments.ts'
 
@@ -67,8 +67,9 @@ interface RequestBody {
   email?: unknown
 }
 
+// Sem Access-Control-Allow-Origin: o CORS (allowlist ou nenhum) é aplicado no index.ts
+// por _shared/cors.ts, que substitui qualquer Access-Control-* daqui (DI-082).
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 }

@@ -4,6 +4,11 @@
 // para ninguém reescrever resultados de terceiros. Se a análise de IA já foi gerada,
 // o resultado fica congelado (devolve o existente sem reescrever), para score e análise
 // não divergirem. A resposta só traz colunas de score — nunca as análises de IA.
+//
+// DI-006: o score vem de _shared/quiz-engine.ts, o mesmo cálculo do front (só perguntas
+// visíveis, limiares 60/35, bônus do caso E), sobre as perguntas ativas do banco. Toda
+// leitura acontece antes de qualquer escrita: se uma query falhar, a resposta é 500 e
+// nada é gravado (antes, o erro PGRST201 virava score 0/'baixa' para todo mundo).
 
 import {
   canAccessAssessment,
@@ -12,7 +17,8 @@ import {
   resolveCaller,
 } from '../_shared/assessment-access.ts'
 import { corsHeaders, errorCode, jsonResponse, type Logger, readJsonBody } from '../_shared/http.ts'
-import { calculateScore, evaluateRule, type ScoringOption, scoreCategoryFor } from './scoring.ts'
+import { type DbScoringQuestionRow, scoreAssessment } from '../_shared/quiz-engine.ts'
+import { evaluateRule } from './scoring.ts'
 
 export interface EligibilityAssessment {
   id: string
@@ -50,7 +56,8 @@ export interface EligibilityRepo {
   getUserIdFromToken(token: string): Promise<string | null>
   getAssessment(assessmentId: string): Promise<EligibilityAssessment | null>
   getResult(assessmentId: string): Promise<{ result: SafeResult; hasAnalysis: boolean } | null>
-  getScoringOptions(): Promise<ScoringOption[]>
+  /** Perguntas ativas com as opções ativas (select QUIZ_SCORING_SELECT). Lança em erro. */
+  getScoringQuestions(): Promise<DbScoringQuestionRow[]>
   getActiveVisaRules(): Promise<VisaRule[]>
   upsertResult(row: {
     assessment_id: string
@@ -101,20 +108,32 @@ export function createComputeEligibilityHandler(deps: ComputeEligibilityDeps) {
         return jsonResponse(200, { result: existing.result, cached: true })
       }
 
-      const answers = (assessment.answers && typeof assessment.answers === 'object'
+      // Leituras primeiro: qualquer erro aqui cai no catch (500) sem gravar nada.
+      const [questionRows, visaRules] = await Promise.all([
+        repo.getScoringQuestions(),
+        repo.getActiveVisaRules(),
+      ])
+
+      const score = scoreAssessment(assessment.answers, questionRows)
+      if (score.repairedConditions.length > 0) {
+        // Condições incompletas no banco (migration 20261016000200 ainda não aplicada):
+        // usamos a regra do código, como o navegador faz.
+        log('warn', 'quiz_conditions_repaired', { question_keys: score.repairedConditions })
+      }
+      if (score.usedCodeQuestions) log('warn', 'quiz_questions_empty', {})
+
+      // As regras de visto (JSON-Logic) continuam lendo as respostas como estão no banco.
+      const rawAnswers = (assessment.answers && typeof assessment.answers === 'object'
         ? assessment.answers
         : {}) as Record<string, unknown>
 
-      const scoreNumeric = calculateScore(answers, await repo.getScoringOptions())
-      const scoreCategory = scoreCategoryFor(scoreNumeric)
-
       const suggestedVisaTypes: SuggestedVisaType[] = []
-      for (const vt of await repo.getActiveVisaRules()) {
+      for (const vt of visaRules) {
         suggestedVisaTypes.push({
           visa_type_id: vt.id,
           visa_type_code: vt.code,
           visa_type_name: vt.name_pt,
-          eligible: evaluateRule(vt.rules, answers),
+          eligible: evaluateRule(vt.rules, rawAnswers),
           rule_version_id: vt.ruleVersionId,
         })
       }
@@ -124,8 +143,8 @@ export function createComputeEligibilityHandler(deps: ComputeEligibilityDeps) {
       const nowIso = new Date(deps.now()).toISOString()
       const result = await repo.upsertResult({
         assessment_id: assessmentId,
-        score_numeric: scoreNumeric,
-        score_category: scoreCategory,
+        score_numeric: score.percentage,
+        score_category: score.category,
         suggested_visa_types: suggestedVisaTypes,
         computed_at: nowIso,
       })
