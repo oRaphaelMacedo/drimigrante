@@ -1,354 +1,236 @@
-// CheckoutPage.tsx — Day 4: Stripe Integration
-// Handles one-time (€30) and recurring (€4,90/mês) plan selection
-// Wired to create-checkout-session edge function → Stripe Hosted Checkout
+// CheckoutPage.tsx — resumo da compra do €30 (DI-011, DI-010, DI-033).
+//
+// Três modos (useStartCheckout):
+//  - anônimo com o resultado do quiz neste aparelho → 1 clique direto para o
+//    Stripe, sem login;
+//  - autenticado → mesma compra com a conta (JWT);
+//  - vazio → "Fazer o quiz grátis" ou "Já paguei, entrar".
+// Volta do Stripe com ?cancelled (ou ?checkout=cancelled) mostra o aviso
+// "Pagamento não concluído. Nada foi cobrado." acima da dobra.
+// Um só cabeçalho (o do Layout); resumo único (sem escolha de plano: só o €30
+// é vendido antes do pagamento); textos da oferta vêm de OFFER.
 
-import { useState } from 'react'
-import { supabase } from '@/lib/supabase'
-import { useLocation, useNavigate, Link, Navigate } from 'react-router-dom'
-import {
-  ArrowLeft,
-  CheckCircle,
-  Loader2,
-  Lock,
-  Shield,
-  Star,
-  Zap,
-  CreditCard,
-  RefreshCw,
-} from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { useEffect, useRef, useState } from 'react'
+import { Link, Navigate, useLocation, useSearchParams } from 'react-router-dom'
+import { ArrowLeft, ArrowRight, Check, ChevronDown, Info, Loader2, Lock, X } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
-import { toast } from 'sonner'
+import { readStoredCheckoutData, useStartCheckout } from '@/hooks/useStartCheckout'
 import { track } from '@/lib/analytics'
+import { OFFER } from '@/lib/offer'
+import { Button, Card, Container } from '@/components/ui'
+import { CheckoutFeedback } from '@/components/checkout/CheckoutFeedback'
 
-// ─── Types ──────────────────────────────────────────────────────────────────
-
-type PlanId = 'one_time' | 'recurring'
-
-interface Plan {
-  id: PlanId
-  name: string
-  price: string
-  priceNote: string
-  description: string
-  badge?: string
-  badgeColor?: string
-  features: string[]
-  highlight: boolean
-}
-
-// ─── Plans ──────────────────────────────────────────────────────────────────
-
-// P0 (2026-06-30): pre-payment only shows the €30 one-time plan. The €4,90/mês
-// subscription moved to a dashboard-only upsell (sequential commercial model).
-// This page remains as a fallback checkout for authenticated users.
-const PLANS: Plan[] = [
-  {
-    id: 'one_time',
-    name: 'Análise Completa',
-    price: '€30',
-    priceNote: 'pagamento único',
-    description: 'Diagnóstico jurídico completo do seu perfil de imigração, uma vez.',
-    badge: 'Mais popular',
-    badgeColor: 'bg-brand-600 text-white',
-    highlight: true,
-    features: [
-      'Análise jurídica personalizada do perfil',
-      'Top 3 vistos com requisitos exactos',
-      'Lista completa de documentos necessários',
-      'Acesso ao Dashboard pessoal por 30 dias',
-      'Resultado em até 24h úteis',
-      'Garantia de satisfação ou reembolso',
-    ],
-  },
-]
-
-// ─── Component ──────────────────────────────────────────────────────────────
-
-// Read assessmentId from localStorage — needed after the auth redirect clears location.state
-function getStoredAssessmentId(): string | null {
-  try {
-    const raw = localStorage.getItem('dr_imigrante_quiz_result')
-    return raw ? (JSON.parse(raw)?.assessmentId as string | null) ?? null : null
-  } catch {
-    return null
-  }
+function isCancelledReturn(params: URLSearchParams): boolean {
+  return params.has('cancelled') || params.get('checkout') === 'cancelled'
 }
 
 export function CheckoutPage() {
   const location = useLocation()
-  const navigate = useNavigate()
-  const { authUser, hasAccess } = useAuth()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const { loading, hasAccess } = useAuth()
+  const { mode, phase, isPending, error, email, start } = useStartCheckout()
+  const [hasLocalResult] = useState(() => readStoredCheckoutData() !== null)
+  const [showCancelled, setShowCancelled] = useState(() => isCancelledReturn(searchParams))
+  const cancelHandledRef = useRef(false)
 
-  // Plan can be pre-selected from Results page link.
-  // Only one_time is sellable here now (recurring moved to dashboard upsell),
-  // so any other value falls back to one_time to avoid a missing-plan crash.
-  const requestedPlan = (location.state?.plan as PlanId) ?? 'one_time'
-  const initialPlan: PlanId = PLANS.some((p) => p.id === requestedPlan)
-    ? requestedPlan
-    : 'one_time'
-  const [selectedPlan, setSelectedPlan] = useState<PlanId>(initialPlan)
-  const [isProcessing, setIsProcessing] = useState(false)
+  // Volta do Stripe sem pagar: evento único e URL limpa (recarregar não repete).
+  useEffect(() => {
+    if (!isCancelledReturn(searchParams) || cancelHandledRef.current) return
+    cancelHandledRef.current = true
+    setShowCancelled(true)
+    track('checkout_cancelled', { plan: 'one_time' })
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        next.delete('cancelled')
+        next.delete('checkout')
+        return next
+      },
+      { replace: true, state: location.state },
+    )
+  }, [searchParams, setSearchParams, location.state])
 
-  // Guard: if user already paid, redirect to dashboard (hooks must come first)
-  const alreadyPaid = hasAccess('dashboard')
-  if (alreadyPaid) {
+  // Quem já tem acesso não compra de novo.
+  if (hasAccess('dashboard')) {
     return <Navigate to="/dashboard" replace />
   }
 
-  // assessmentId: prefer location.state (direct nav), fall back to localStorage
-  // (localStorage is the only source after the magic-link auth round-trip clears state)
-  const assessmentId = (location.state?.assessmentId as string | null) ?? getStoredAssessmentId()
-
-  const plan = PLANS.find((p) => p.id === selectedPlan)!
-
-  const handleCheckout = async () => {
-    // If not logged in, redirect to login with return intent
-    if (!authUser) {
-      navigate('/login', { state: { returnTo: '/checkout', plan: selectedPlan, assessmentId } })
-      return
-    }
-
-    setIsProcessing(true)
-    track('checkout_started', { plan: selectedPlan, assessment_id: assessmentId })
-    try {
-      const { data, error } = await supabase.functions.invoke('create-checkout-session', {
-        body: {
-          plan: selectedPlan,
-          assessmentId: assessmentId ?? null,
-        },
-      })
-
-      if (error) throw error
-      if (!data?.url) throw new Error('Stripe session URL não recebida.')
-
-      // Redirect to Stripe Hosted Checkout
-      window.location.href = data.url
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err)
-      toast.error('Erro ao iniciar pagamento', {
-        description: message,
-        duration: 6000,
-      })
-      setIsProcessing(false)
-    }
+  const handlePay = () => {
+    void start({ position: 'checkout' })
   }
 
+  // Enquanto a sessão carrega, ainda não sabemos se a compra é com a conta (ou
+  // se a pessoa já tem acesso): não mostra a oferta anônima para depois trocar.
+  const waitingForAccount = loading
+
+  // Voltar para onde faz sentido: o resultado deste aparelho ou o painel.
+  const back =
+    mode === 'empty' || waitingForAccount
+      ? null
+      : hasLocalResult
+        ? { to: '/results', label: 'Voltar ao resultado' }
+        : { to: '/dashboard', label: 'Voltar ao painel' }
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-brand-50/50 via-white to-blue-50/30">
-      {/* Back nav */}
-      <div className="border-b border-gray-100 bg-white/80 backdrop-blur-sm">
-        <div className="container flex h-14 items-center gap-3">
-          <button
-            onClick={() => navigate(-1)}
-            className="flex items-center gap-1.5 text-sm text-gray-500 transition hover:text-gray-900"
+    <div className="min-h-[calc(100dvh-4rem)] bg-background">
+      <Container size="sm" className="pb-10 pt-2 sm:pb-16 sm:pt-6">
+        {back && (
+          <Link
+            to={back.to}
+            className="-ml-2 inline-flex min-h-11 items-center gap-1.5 rounded-xl px-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
-            <ArrowLeft className="h-4 w-4" />
-            Voltar
-          </button>
-          <span className="text-gray-300">|</span>
-          <span className="text-sm font-medium text-gray-700">Doutor Imigrante</span>
-          <span className="ml-auto flex items-center gap-1.5 text-xs text-gray-400">
-            <Lock className="h-3 w-3" />
-            Pagamento seguro
-          </span>
-        </div>
-      </div>
+            <ArrowLeft aria-hidden="true" className="h-4 w-4" />
+            {back.label}
+          </Link>
+        )}
 
-      <div className="container py-10 sm:py-16">
-        <div className="mx-auto max-w-4xl">
-          {/* Header */}
-          <div className="mb-10 text-center">
-            <h1 className="mb-2 text-3xl font-extrabold text-gray-900 sm:text-4xl">
-              Desbloqueie a sua análise
-            </h1>
-            <p className="text-gray-500">
-              Escolha o plano que melhor se adapta à sua situação.
-            </p>
-          </div>
-
-          <div className="grid gap-6 lg:grid-cols-2">
-            {/* ── Left: Plan Selector ── */}
-            <div className="space-y-4">
-              <h2 className="text-sm font-semibold uppercase tracking-wider text-gray-400">
-                Selecione o plano
-              </h2>
-
-              {PLANS.map((p) => (
-                <PlanCard
-                  key={p.id}
-                  plan={p}
-                  selected={selectedPlan === p.id}
-                  onSelect={() => setSelectedPlan(p.id)}
-                />
-              ))}
-
-              {/* Trust badges */}
-              <div className="mt-2 grid grid-cols-3 gap-3 pt-2">
-                {[
-                  { icon: Shield, label: 'Pagamento SSL seguro' },
-                  { icon: RefreshCw, label: 'Cancele quando quiser' },
-                  { icon: Star, label: 'Garantia de satisfação' },
-                ].map(({ icon: Icon, label }) => (
-                  <div
-                    key={label}
-                    className="flex flex-col items-center gap-1 rounded-xl border border-gray-100 bg-white p-3 text-center"
-                  >
-                    <Icon className="h-4 w-4 text-brand-600" />
-                    <span className="text-[10px] font-medium text-gray-500">{label}</span>
-                  </div>
-                ))}
-              </div>
+        {showCancelled && (
+          <div
+            role="status"
+            data-testid="checkout-cancelled-banner"
+            className="mt-2 flex items-start gap-3 rounded-lg border border-border bg-muted p-4"
+          >
+            <Info aria-hidden="true" className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
+            <div className="min-w-0 flex-1">
+              <p className="text-base font-semibold text-foreground">Pagamento não concluído. Nada foi cobrado.</p>
+              <p className="mt-1 text-sm text-muted-foreground">Você pode tentar de novo quando quiser.</p>
             </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setShowCancelled(false)}
+              aria-label="Fechar aviso"
+              className="-mr-2 -mt-2 shrink-0 text-muted-foreground"
+            >
+              <X aria-hidden="true" />
+            </Button>
+          </div>
+        )}
 
-            {/* ── Right: Order Summary ── */}
-            <div>
-              <h2 className="mb-4 text-sm font-semibold uppercase tracking-wider text-gray-400">
-                Resumo do pedido
-              </h2>
+        {waitingForAccount ? (
+          <div role="status" className="flex min-h-[40dvh] items-center justify-center gap-2 text-muted-foreground">
+            <Loader2 aria-hidden="true" className="h-5 w-5 animate-spin text-primary" />
+            <span className="text-sm">Carregando…</span>
+          </div>
+        ) : mode === 'empty' ? (
+          <EmptyCheckout />
+        ) : (
+          <>
+            <header className="mb-5 mt-4">
+              <h1 className="text-2xl font-bold leading-tight text-foreground [text-wrap:balance] sm:text-3xl">
+                Desbloqueie sua análise completa
+              </h1>
+              <p className="mt-2 text-base text-muted-foreground [text-wrap:pretty]">
+                Gerada a partir das suas respostas e da Lei da Nacionalidade.
+              </p>
+            </header>
 
-              <div className="sticky top-6 rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
-                {/* Plan summary */}
-                <div className="mb-5 flex items-start justify-between gap-3">
-                  <div>
-                    <p className="font-semibold text-gray-900">{plan.name}</p>
-                    <p className="mt-0.5 text-sm text-gray-500">{plan.description}</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-2xl font-extrabold text-gray-900">{plan.price}</p>
-                    <p className="text-xs text-gray-400">{plan.priceNote}</p>
-                  </div>
+            {/* Resumo único do pedido (só o €30 é vendido antes do pagamento). */}
+            <Card variant="elevated" data-testid="checkout-plan-onetime" aria-labelledby="checkout-summary-title" role="region">
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <h2 id="checkout-summary-title" className="text-lg font-semibold text-foreground">
+                    Análise completa
+                  </h2>
+                  <p className="text-sm text-muted-foreground">pagamento único</p>
                 </div>
+                <p className="text-3xl font-bold text-foreground">{OFFER.priceLabel}</p>
+              </div>
 
-                {/* Features */}
-                <ul className="mb-6 space-y-2 border-t border-gray-100 pt-4">
-                  {plan.features.map((f) => (
-                    <li key={f} className="flex items-start gap-2 text-sm text-gray-600">
-                      <CheckCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-500" />
-                      {f}
-                    </li>
-                  ))}
-                </ul>
-
-                {/* User info (if logged in) */}
-                {authUser && (
-                  <div className="mb-4 rounded-xl bg-gray-50 p-3 text-sm">
-                    <p className="text-xs font-medium text-gray-400">A pagar como</p>
-                    <p className="font-medium text-gray-800">{authUser.profile?.full_name}</p>
-                    <p className="text-gray-500">{authUser.user.email}</p>
+              <dl className="mt-4 space-y-2 border-t border-border pt-4 text-sm">
+                <div className="flex justify-between gap-4">
+                  <dt className="text-muted-foreground">Acesso</dt>
+                  <dd className="text-right font-medium text-foreground">
+                    {OFFER.accessDays} dias de painel{OFFER.includesChat ? ' e chat IA' : ''}
+                  </dd>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <dt className="text-muted-foreground">Entrega</dt>
+                  <dd className="text-right font-medium text-foreground">{OFFER.delivery}</dd>
+                </div>
+                {email && (
+                  // E-mail em linha própria no celular: não quebra no meio do endereço.
+                  <div className="flex flex-col gap-0.5 sm:flex-row sm:justify-between sm:gap-4">
+                    <dt className="shrink-0 text-muted-foreground">
+                      {mode === 'authenticated' ? 'Conta' : 'E-mail de acesso'}
+                    </dt>
+                    <dd className="min-w-0 font-medium text-foreground [overflow-wrap:anywhere] sm:text-right">{email}</dd>
                   </div>
                 )}
+              </dl>
 
-                {/* CTA */}
-                <button
-                  id="checkout-pay-btn"
-                  data-testid="checkout-submit"
-                  onClick={handleCheckout}
-                  disabled={isProcessing}
-                  className={cn(
-                    'flex w-full items-center justify-center gap-2 rounded-xl py-4 text-base font-bold transition',
-                    'bg-brand-700 text-white shadow-md hover:bg-brand-600',
-                    'disabled:cursor-not-allowed disabled:opacity-60',
-                  )}
-                >
-                  {isProcessing ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      A processar...
-                    </>
-                  ) : authUser ? (
-                    <>
-                      <CreditCard className="h-4 w-4" />
-                      Pagar {plan.price}
-                    </>
-                  ) : (
-                    <>
-                      <Zap className="h-4 w-4" />
-                      Continuar para pagamento
-                    </>
-                  )}
-                </button>
-
-                {!authUser && (
-                  <p className="mt-3 text-center text-xs text-gray-400">
-                    Será pedido para entrar ou criar conta.{' '}
-                    <Link to="/login" className="text-brand-600 underline">
-                      Já tem conta? Entre aqui.
-                    </Link>
-                  </p>
+              <Button
+                id="checkout-pay-btn"
+                data-testid="checkout-submit"
+                variant="pay"
+                size="lg"
+                className="mt-5 w-full"
+                loading={isPending}
+                onClick={handlePay}
+              >
+                {isPending ? (
+                  'Abrindo o pagamento…'
+                ) : (
+                  <>
+                    Pagar {OFFER.priceLabel}
+                    <ArrowRight aria-hidden="true" />
+                  </>
                 )}
+              </Button>
 
-                <p className="mt-4 text-center text-xs text-gray-400">
-                  🔒 Pagamento processado por Stripe · PCI DSS compliant
-                </p>
-              </div>
-            </div>
-          </div>
+              <CheckoutFeedback phase={phase} error={error} onRetry={handlePay} email={email} />
 
-          {/* FAQ mini */}
-          <FaqSection />
-        </div>
-      </div>
+              <p className="mt-4 text-center text-sm text-muted-foreground [text-wrap:balance]">
+                <Lock aria-hidden="true" className="-mt-0.5 mr-1.5 inline h-4 w-4 align-middle" />
+                Pagamento processado pela Stripe{'\u00a0'}· sem renovação automática
+              </p>
+            </Card>
+
+            <Card className="mt-5">
+              <h2 className="mb-3 text-lg font-semibold text-foreground">O que está incluído</h2>
+              <ul className="space-y-2.5">
+                {OFFER.includes.map((item) => (
+                  <li key={item} className="flex items-start gap-2.5 text-base text-foreground">
+                    <Check aria-hidden="true" className="mt-0.5 h-5 w-5 shrink-0 text-[hsl(var(--success))]" />
+                    {item}
+                  </li>
+                ))}
+              </ul>
+            </Card>
+
+            <FaqSection />
+          </>
+        )}
+      </Container>
     </div>
   )
 }
 
-// ─── PlanCard ────────────────────────────────────────────────────────────────
+// ─── Estado vazio ─────────────────────────────────────────────────────────────
 
-function PlanCard({
-  plan,
-  selected,
-  onSelect,
-}: {
-  plan: Plan
-  selected: boolean
-  onSelect: () => void
-}) {
-  const testid = plan.id === 'one_time' ? 'checkout-plan-onetime' : 'checkout-plan-subscription'
+function EmptyCheckout() {
   return (
-    <button
-      onClick={onSelect}
-      data-testid={testid}
-      className={cn(
-        'relative w-full rounded-2xl border-2 p-5 text-left transition-all',
-        selected
-          ? 'border-brand-600 bg-brand-50/60 shadow-sm'
-          : 'border-gray-200 bg-white hover:border-gray-300',
-      )}
-    >
-      {/* Badge */}
-      {plan.badge && (
-        <span
-          className={cn(
-            'absolute right-4 top-4 rounded-full px-2.5 py-0.5 text-[10px] font-bold',
-            plan.badgeColor,
-          )}
-        >
-          {plan.badge}
-        </span>
-      )}
-
-      {/* Radio */}
-      <div className="mb-3 flex items-center gap-3">
-        <div
-          className={cn(
-            'flex h-5 w-5 items-center justify-center rounded-full border-2 transition',
-            selected ? 'border-brand-600' : 'border-gray-300',
-          )}
-        >
-          {selected && <div className="h-2.5 w-2.5 rounded-full bg-brand-600" />}
-        </div>
-        <div>
-          <p className="font-semibold text-gray-900">{plan.name}</p>
-          <p className="text-xs text-gray-500">{plan.description}</p>
-        </div>
+    <div data-testid="checkout-empty" className="mt-6 text-center">
+      <h1 className="text-2xl font-bold leading-tight text-foreground [text-wrap:balance]">
+        Faça o quiz para desbloquear sua análise
+      </h1>
+      <p className="mx-auto mt-2 max-w-md text-base text-muted-foreground [text-wrap:pretty]">
+        Não encontramos seu diagnóstico neste aparelho. O quiz é grátis e mostra seu resultado na hora.
+      </p>
+      <div className="mx-auto mt-6 flex max-w-sm flex-col gap-3">
+        <Button asChild size="lg" className="w-full">
+          <Link to="/quiz">
+            Fazer o quiz grátis
+            <ArrowRight aria-hidden="true" />
+          </Link>
+        </Button>
+        <Button asChild variant="secondary" size="md" className="w-full">
+          <Link to="/login" state={{ returnTo: '/dashboard' }}>
+            Já paguei, entrar
+          </Link>
+        </Button>
       </div>
-
-      <div className="flex items-baseline gap-1">
-        <span className="text-2xl font-extrabold text-gray-900">{plan.price}</span>
-        <span className="text-sm text-gray-400">{plan.priceNote}</span>
-      </div>
-    </button>
+    </div>
   )
 }
 
@@ -357,30 +239,49 @@ function PlanCard({
 function FaqSection() {
   const faqs = [
     {
-      q: 'O que acontece após o pagamento?',
-      a: 'A nossa equipa recebe imediatamente o seu perfil e inicia a análise. Receberá o resultado no seu dashboard em até 24h úteis.',
+      q: 'O que acontece depois do pagamento?',
+      a: `${OFFER.delivery}, no seu painel. O acesso ao painel${
+        OFFER.includesChat ? ' e ao chat IA' : ''
+      } dura ${OFFER.accessDays} dias.`,
     },
     {
-      q: 'Posso cancelar a subscrição mensal?',
-      a: 'Sim, pode cancelar a qualquer momento sem penalizações. O acesso continua até ao fim do período pago.',
+      q: 'Como a análise é feita?',
+      a: `É gerada automaticamente a partir das suas respostas e das regras da Lei da Nacionalidade, com textos produzidos com apoio de inteligência artificial${
+        OFFER.reviewedBy ? ` e revisados por ${OFFER.reviewedBy}` : ''
+      }. É informativa e não substitui a consulta com um advogado.`,
     },
     {
-      q: 'A análise é feita por advogados reais?',
-      a: 'Sim. A nossa IA faz um pré-diagnóstico e a nossa equipa jurídica especializada valida e aprofunda cada caso.',
+      q: 'É uma assinatura?',
+      a: `Não. É um pagamento único de ${OFFER.priceLabel}, sem renovação automática.`,
     },
   ]
 
   return (
-    <div className="mt-12">
-      <h2 className="mb-6 text-center text-lg font-bold text-gray-900">Perguntas frequentes</h2>
-      <div className="grid gap-4 sm:grid-cols-3">
+    <section className="mt-8" aria-labelledby="checkout-faq-title">
+      <h2 id="checkout-faq-title" className="mb-3 text-lg font-semibold text-foreground">
+        Perguntas frequentes
+      </h2>
+      <div className="divide-y divide-border rounded-lg border border-border bg-card">
         {faqs.map(({ q, a }) => (
-          <div key={q} className="rounded-xl border border-gray-100 bg-white p-5">
-            <p className="mb-2 font-semibold text-gray-900 text-sm">{q}</p>
-            <p className="text-sm text-gray-500">{a}</p>
-          </div>
+          <details key={q} className="group">
+            <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-base font-medium text-foreground [&::-webkit-details-marker]:hidden">
+              {q}
+              <ChevronDown
+                aria-hidden="true"
+                className="h-5 w-5 shrink-0 text-muted-foreground transition-transform duration-150 group-open:rotate-180"
+              />
+            </summary>
+            <p className="px-4 pb-4 text-sm leading-relaxed text-muted-foreground">{a}</p>
+          </details>
         ))}
       </div>
-    </div>
+      <p className="mt-3 text-sm text-muted-foreground">
+        Detalhes de pagamento e reembolso nos{' '}
+        <Link to="/termos" className="font-medium text-primary underline underline-offset-4">
+          Termos e condições
+        </Link>
+        .
+      </p>
+    </section>
   )
 }
