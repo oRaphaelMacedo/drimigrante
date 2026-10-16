@@ -4,7 +4,8 @@
 -- chat-completion com service role). O cliente continua LENDO as próprias
 -- mensagens (policy "Users can read own messages"), mas perde o INSERT direto —
 -- antes qualquer conta inseria mensagens com role 'system'/'assistant' e
--- contornava os limites de uso do chat.
+-- contornava os limites de uso do chat. A function também apaga (service role) a
+-- pergunta que ficou sem resposta quando a OpenAI falha.
 --
 -- ORDEM DE RELEASE (obrigatória):
 --   1. deploy da nova chat-completion (insere via service role);

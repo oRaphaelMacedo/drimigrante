@@ -69,9 +69,12 @@ interface World {
   staff: boolean
   hourCount: number
   dayCount: number
-  inserted: Array<{ role: string; content: string }>
+  inserted: Array<{ id: string; role: string; content: string }>
+  deleted: string[]
   openaiBodies: Array<Record<string, unknown>>
   openaiChunks: string[]
+  /** HTTP da OpenAI (200 = stream normal); 'network' = fetch lança; 'stream_error' = cai no meio. */
+  openaiMode: number | 'network' | 'stream_error'
   aiConfig: Record<string, unknown> | null
 }
 
@@ -86,8 +89,10 @@ function makeWorld(overrides: Partial<World> = {}): World {
     hourCount: 0,
     dayCount: 0,
     inserted: [],
+    deleted: [],
     openaiBodies: [],
     openaiChunks: ['Olá', ', tudo bem?'],
+    openaiMode: 200,
     aiConfig: { model: 'gpt-4o-mini', temperature: 0.5, max_tokens: 1500, system_prompt: 'Tom acolhedor.' },
     ...overrides,
   }
@@ -103,6 +108,21 @@ function sse(chunks: string[]): ReadableStream<Uint8Array> {
       controller.close()
     },
   })
+}
+
+function brokenSse(firstChunk: string): ReadableStream<Uint8Array> {
+  const enc = new TextEncoder()
+  return new ReadableStream({
+    start(controller) {
+      controller.enqueue(enc.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: firstChunk } }] })}\n\n`))
+      controller.error(new Error('upstream_reset'))
+    },
+  })
+}
+
+/** Só as mensagens que continuam gravadas (sem o id gerado pelo fake). */
+function persisted(world: World) {
+  return world.inserted.map(({ role, content }) => ({ role, content }))
 }
 
 function makeHandler(world: World) {
@@ -125,7 +145,13 @@ function makeHandler(world: World) {
         { role: 'user', content: 'pergunta antiga', created_at: new Date(NOW - 2000).toISOString() },
       ]),
     insertMessage: (row) => {
-      world.inserted.push({ role: row.role, content: row.content })
+      const id = `msg-${world.inserted.length + world.deleted.length + 1}`
+      world.inserted.push({ id, role: row.role, content: row.content })
+      return Promise.resolve(id)
+    },
+    deleteMessage: (id) => {
+      world.deleted.push(id)
+      world.inserted = world.inserted.filter((m) => m.id !== id)
       return Promise.resolve()
     },
     getAiConfig: () => Promise.resolve(world.aiConfig),
@@ -134,6 +160,13 @@ function makeHandler(world: World) {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
     assertEquals(url, OPENAI_CHAT_URL)
     world.openaiBodies.push(JSON.parse(String(init?.body)))
+    if (world.openaiMode === 'network') return Promise.reject(new TypeError('network'))
+    if (world.openaiMode === 'stream_error') {
+      return Promise.resolve(new Response(brokenSse(world.openaiChunks[0] ?? 'Olá'), { status: 200 }))
+    }
+    if (world.openaiMode !== 200) {
+      return Promise.resolve(new Response('{"error":"x"}', { status: world.openaiMode }))
+    }
     return Promise.resolve(new Response(sse(world.openaiChunks), { status: 200 }))
   }
   return createChatHandler({
@@ -224,15 +257,47 @@ Deno.test('sucesso: stream SSE, histórico em ordem, max_tokens ≤ 1000 e respo
   assertNotIncludes(messages[0].content, /lawyer|pt-PT|D7/)
   assertStringIncludes(messages[0].content, 'Nacionalidade por Descendência (1.º grau)')
 
-  assertEquals(world.inserted, [
+  assertEquals(persisted(world), [
     { role: 'user', content: 'Quais documentos preciso?' },
     { role: 'assistant', content: 'Olá, tudo bem?' },
   ])
+  assertEquals(world.deleted, [])
 })
 
-Deno.test('resposta vazia da IA não é gravada', async () => {
+// Mensagem sem resposta não pode ficar gravada: ela contaria nos limites de 30/h e
+// 200/dia e apareceria sem resposta no histórico.
+Deno.test('resposta vazia da IA não é gravada e a pergunta não fica órfã', async () => {
   const world = makeWorld({ openaiChunks: [] })
   const res = await makeHandler(world)(post({ message: 'oi', assessmentId: ASSESSMENT_ID }))
   await res.text()
-  assertEquals(world.inserted, [{ role: 'user', content: 'oi' }])
+  assertEquals(persisted(world), [])
+  assertEquals(world.deleted.length, 1)
+})
+
+Deno.test('OpenAI com erro HTTP → 502 e a mensagem do usuário não fica gravada', async () => {
+  const world = makeWorld({ openaiMode: 500 })
+  const res = await makeHandler(world)(post({ message: 'oi', assessmentId: ASSESSMENT_ID }))
+  assertEquals(res.status, 502)
+  assertEquals(await res.json(), { error: 'ai_unavailable' })
+  assertEquals(persisted(world), [])
+})
+
+Deno.test('falha de rede na OpenAI → 502 (não 500) e a mensagem do usuário não fica gravada', async () => {
+  const world = makeWorld({ openaiMode: 'network' })
+  const res = await makeHandler(world)(post({ message: 'oi', assessmentId: ASSESSMENT_ID }))
+  assertEquals(res.status, 502)
+  assertEquals(persisted(world), [])
+})
+
+Deno.test('stream interrompido no meio → nada gravado (nem pergunta nem resposta parcial)', async () => {
+  const world = makeWorld({ openaiMode: 'stream_error' })
+  const res = await makeHandler(world)(post({ message: 'oi', assessmentId: ASSESSMENT_ID }))
+  assertEquals(res.status, 200)
+  try {
+    await res.text()
+  } catch {
+    // o stream do cliente termina com erro
+  }
+  assertEquals(persisted(world), [])
+  assertEquals(world.deleted.length, 1)
 })

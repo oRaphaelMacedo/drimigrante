@@ -25,16 +25,17 @@ import { cn } from '@/lib/utils'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
+/** Cada contagem é carregada à parte: null = não foi possível carregar (o card mostra "—"). */
 interface Stats {
-  totalLeads: number
-  leadsThisWeek: number
-  leadsLastWeek: number
-  completedQuizzes: number
-  paidUsers: number
-  mrrCents: number
-  oneTimePaidCount: number
-  recurringCount: number
-  conversionRate: number
+  totalLeads: number | null
+  leadsThisWeek: number | null
+  leadsLastWeek: number | null
+  completedQuizzes: number | null
+  paidUsers: number | null
+  mrrCents: number | null
+  oneTimePaidCount: number | null
+  recurringCount: number | null
+  conversionRate: number | null
 }
 
 interface RecentPayment {
@@ -90,22 +91,39 @@ function formatDateTime(iso: string | null): string {
 }
 
 /**
- * error_message do email_send_log pode ser JSON ({ code, status, message } no formato
- * novo, ou a resposta crua do Resend no antigo) ou texto. Devolve uma frase curta.
+ * error_message do email_send_log pode ser JSON ({ code, status, message, trigger_key }
+ * no formato novo, ou a resposta crua do Resend no antigo) ou texto. Devolve uma frase
+ * curta e o modelo (trigger_key), quando gravado.
  */
-function summarizeEmailError(raw: string | null): string | null {
-  if (!raw) return null
+function parseEmailError(raw: string | null): { message: string | null; triggerKey: string | null } {
+  if (!raw) return { message: null, triggerKey: null }
   let text = raw
+  let triggerKey: string | null = null
   try {
-    const parsed = JSON.parse(raw) as { message?: unknown; code?: unknown; name?: unknown }
+    const parsed = JSON.parse(raw) as { message?: unknown; code?: unknown; name?: unknown; trigger_key?: unknown }
     if (typeof parsed.message === 'string' && parsed.message) text = parsed.message
     else if (typeof parsed.code === 'string' && parsed.code) text = parsed.code
     else if (typeof parsed.name === 'string' && parsed.name) text = parsed.name
+    if (typeof parsed.trigger_key === 'string' && parsed.trigger_key) triggerKey = parsed.trigger_key
   } catch {
     // texto puro
   }
   const flat = text.replace(/\s+/g, ' ').trim()
-  return flat.length > 180 ? `${flat.slice(0, 179)}…` : flat
+  return { message: flat.length > 180 ? `${flat.slice(0, 179)}…` : flat, triggerKey }
+}
+
+/** Valor que não carregou: traço visível e "Indisponível" para leitores de tela. */
+function Unavailable() {
+  return (
+    <span title="Indisponível">
+      <span aria-hidden="true">—</span>
+      <span className="sr-only">Indisponível</span>
+    </span>
+  )
+}
+
+function countOrUnavailable(n: number | null): React.ReactNode {
+  return n === null ? <Unavailable /> : n
 }
 
 // ─── Stat Card ───────────────────────────────────────────────────────────────
@@ -120,7 +138,7 @@ function StatCard({
   tone = 'brand',
 }: {
   label: string
-  value: string | number
+  value: React.ReactNode
   sub?: string
   icon: React.ElementType
   trend?: 'up' | 'down' | 'neutral'
@@ -201,15 +219,18 @@ function useEmailHealth() {
           email_templates: { trigger_key: string } | Array<{ trigger_key: string }> | null
         } | null
         const template = Array.isArray(last?.email_templates) ? last?.email_templates[0] : last?.email_templates
+        const parsedError = parseEmailError(last?.error_message ?? null)
         if (!cancelled) {
           setHealth({
             sent: sentRes.count ?? 0,
             failed: failedRes.count ?? 0,
             lastFailure: last
               ? {
-                  triggerKey: template?.trigger_key ?? null,
+                  // email_templates tem RLS sem policy de leitura: o embed costuma voltar
+                  // null para o cliente, então o trigger_key gravado no erro é o principal.
+                  triggerKey: template?.trigger_key ?? parsedError.triggerKey,
                   createdAt: last.created_at,
-                  message: summarizeEmailError(last.error_message),
+                  message: parsedError.message,
                 }
               : null,
           })
@@ -311,90 +332,121 @@ function EmailHealthCard() {
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
-async function countRows(build: () => PromiseLike<{ count: number | null; error: unknown }>): Promise<number> {
-  const { count, error } = await build()
-  if (error) throw error
-  return count ?? 0
+/**
+ * Contagem isolada: uma consulta que falha não derruba o painel inteiro —
+ * devolve null e só aquele número aparece como indisponível.
+ */
+async function countRows(
+  label: string,
+  build: () => PromiseLike<{ count: number | null; error: unknown }>,
+): Promise<number | null> {
+  try {
+    const { count, error } = await build()
+    if (error) throw error
+    return count ?? 0
+  } catch (err) {
+    console.error(`[AdminDashboard] ${label}:`, err)
+    return null
+  }
+}
+
+async function fetchRecentPayments(): Promise<RecentPayment[] | null> {
+  try {
+    const { data, error } = await supabase
+      .from('payments')
+      .select('id, user_id, product, amount_cents, currency, paid_at, status')
+      .order('paid_at', { ascending: false })
+      .limit(8)
+    if (error) throw error
+    return (data as RecentPayment[] | null) ?? []
+  } catch (err) {
+    console.error('[AdminDashboard] pagamentos recentes:', err)
+    return null
+  }
+}
+
+function sumOrNull(a: number | null, b: number | null): number | null {
+  return a === null || b === null ? null : a + b
 }
 
 export function AdminDashboardPage() {
   const [stats, setStats] = useState<Stats | null>(null)
-  const [payments, setPayments] = useState<RecentPayment[]>([])
+  /** null = não foi possível carregar os pagamentos. */
+  const [payments, setPayments] = useState<RecentPayment[] | null>([])
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
+    let cancelled = false
+
     async function fetchStats() {
       setLoading(true)
-      setError(null)
+      const now = Date.now()
+      const thisWeekStart = new Date(now - 7 * DAY_MS).toISOString()
+      const lastWeekStart = new Date(now - 14 * DAY_MS).toISOString()
 
-      try {
-        const now = Date.now()
-        const thisWeekStart = new Date(now - 7 * DAY_MS).toISOString()
-        const lastWeekStart = new Date(now - 14 * DAY_MS).toISOString()
-
-        const [
-          totalLeads,
-          leadsThisWeek,
-          leadsLastWeek,
-          completedQuizzes,
-          oneTimePaidCount,
-          recurringCount,
-          recentPayments,
-        ] = await Promise.all([
-          countRows(() => supabase.from('assessments').select('id', { count: 'exact', head: true })),
-          countRows(() =>
-            supabase.from('assessments').select('id', { count: 'exact', head: true }).gte('created_at', thisWeekStart),
-          ),
-          countRows(() =>
-            supabase
-              .from('assessments')
-              .select('id', { count: 'exact', head: true })
-              .gte('created_at', lastWeekStart)
-              .lt('created_at', thisWeekStart),
-          ),
-          countRows(() =>
-            supabase.from('assessments').select('id', { count: 'exact', head: true }).eq('status', 'completed'),
-          ),
-          countRows(() =>
-            supabase.from('subscriptions').select('id', { count: 'exact', head: true }).eq('one_time_paid', true),
-          ),
-          countRows(() =>
-            supabase.from('subscriptions').select('id', { count: 'exact', head: true }).eq('recurring_active', true),
-          ),
+      const [
+        totalLeads,
+        leadsThisWeek,
+        leadsLastWeek,
+        completedQuizzes,
+        oneTimePaidCount,
+        recurringCount,
+        recentPayments,
+      ] = await Promise.all([
+        countRows('total de leads', () => supabase.from('assessments').select('id', { count: 'exact', head: true })),
+        countRows('leads da semana', () =>
+          supabase.from('assessments').select('id', { count: 'exact', head: true }).gte('created_at', thisWeekStart),
+        ),
+        countRows('leads da semana passada', () =>
           supabase
-            .from('payments')
-            .select('id, user_id, product, amount_cents, currency, paid_at, status')
-            .order('paid_at', { ascending: false })
-            .limit(8),
-        ])
+            .from('assessments')
+            .select('id', { count: 'exact', head: true })
+            .gte('created_at', lastWeekStart)
+            .lt('created_at', thisWeekStart),
+        ),
+        countRows('quizzes completos', () =>
+          supabase.from('assessments').select('id', { count: 'exact', head: true }).eq('status', 'completed'),
+        ),
+        countRows('pagamentos únicos', () =>
+          supabase.from('subscriptions').select('id', { count: 'exact', head: true }).eq('one_time_paid', true),
+        ),
+        countRows('assinaturas ativas', () =>
+          supabase.from('subscriptions').select('id', { count: 'exact', head: true }).eq('recurring_active', true),
+        ),
+        fetchRecentPayments(),
+      ])
+      if (cancelled) return
 
-        const paidUsers = oneTimePaidCount + recurringCount
-        const conversionRate = totalLeads > 0 ? Math.round((paidUsers / totalLeads) * 1000) / 10 : 0
+      const paidUsers = sumOrNull(oneTimePaidCount, recurringCount)
+      const conversionRate =
+        totalLeads === null || paidUsers === null
+          ? null
+          : totalLeads > 0
+          ? Math.round((paidUsers / totalLeads) * 1000) / 10
+          : 0
 
-        setStats({
-          totalLeads,
-          leadsThisWeek,
-          leadsLastWeek,
-          completedQuizzes,
-          paidUsers,
-          mrrCents: recurringCount * 490,
-          oneTimePaidCount,
-          recurringCount,
-          conversionRate,
-        })
-        setPayments((recentPayments.data as RecentPayment[] | null) ?? [])
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Erro ao carregar os dados.')
-      } finally {
-        setLoading(false)
-      }
+      setStats({
+        totalLeads,
+        leadsThisWeek,
+        leadsLastWeek,
+        completedQuizzes,
+        paidUsers,
+        mrrCents: recurringCount === null ? null : recurringCount * 490,
+        oneTimePaidCount,
+        recurringCount,
+        conversionRate,
+      })
+      setPayments(recentPayments)
+      setLoading(false)
     }
 
     fetchStats()
+    return () => {
+      cancelled = true
+    }
   }, [])
 
-  if (loading) {
+  if (loading || !stats) {
     return (
       <div className="flex min-h-[60dvh] items-center justify-center" role="status" aria-label="Carregando">
         <Loader2 className="h-7 w-7 animate-spin text-brand-700" aria-hidden="true" />
@@ -402,24 +454,19 @@ export function AdminDashboardPage() {
     )
   }
 
-  if (error) {
-    return (
-      <div className="rounded-xl border border-red-200 bg-red-50 p-6 text-center text-sm text-red-800" role="alert">
-        <p className="mb-1 font-semibold">Erro ao carregar o painel</p>
-        <p>{error}</p>
-      </div>
-    )
+  const s = stats
+  const somethingMissing = Object.values(s).some((v) => v === null) || payments === null
+
+  let leadsWeekTrend: 'up' | 'down' | 'neutral' | undefined
+  let leadsWeekLabel: string | undefined
+  if (s.leadsThisWeek !== null && s.leadsLastWeek !== null) {
+    const leadsWeekDiff = s.leadsThisWeek - s.leadsLastWeek
+    leadsWeekTrend = leadsWeekDiff > 0 ? 'up' : leadsWeekDiff < 0 ? 'down' : 'neutral'
+    leadsWeekLabel =
+      leadsWeekDiff === 0
+        ? 'Igual à semana passada'
+        : `${leadsWeekDiff > 0 ? '+' : ''}${leadsWeekDiff} em relação à semana passada`
   }
-
-  const s = stats!
-  const leadsWeekTrend: 'up' | 'down' | 'neutral' =
-    s.leadsThisWeek > s.leadsLastWeek ? 'up' : s.leadsThisWeek < s.leadsLastWeek ? 'down' : 'neutral'
-
-  const leadsWeekDiff = s.leadsThisWeek - s.leadsLastWeek
-  const leadsWeekLabel =
-    leadsWeekDiff === 0
-      ? 'Igual à semana passada'
-      : `${leadsWeekDiff > 0 ? '+' : ''}${leadsWeekDiff} em relação à semana passada`
 
   return (
     <div className="space-y-8">
@@ -429,12 +476,22 @@ export function AdminDashboardPage() {
         <p className="mt-1 text-sm text-muted-foreground">Visão geral em tempo real do Doutor Imigrante</p>
       </div>
 
+      {somethingMissing && (
+        <p
+          role="status"
+          className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"
+        >
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+          Alguns números não puderam ser carregados e aparecem como “—”. Os demais estão atualizados.
+        </p>
+      )}
+
       {/* KPI Grid */}
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
           label="Total de leads"
-          value={s.totalLeads}
-          sub={`${s.completedQuizzes} com quiz completo`}
+          value={countOrUnavailable(s.totalLeads)}
+          sub={s.completedQuizzes !== null ? `${s.completedQuizzes} com quiz completo` : undefined}
           icon={Users}
           trend={leadsWeekTrend}
           trendLabel={leadsWeekLabel}
@@ -442,27 +499,33 @@ export function AdminDashboardPage() {
         />
         <StatCard
           label="Usuários pagantes"
-          value={s.paidUsers}
-          sub={`${s.oneTimePaidCount} pagamento único · ${s.recurringCount} mensal`}
+          value={countOrUnavailable(s.paidUsers)}
+          sub={
+            s.oneTimePaidCount !== null && s.recurringCount !== null
+              ? `${s.oneTimePaidCount} pagamento único · ${s.recurringCount} mensal`
+              : undefined
+          }
           icon={CreditCard}
           trend="neutral"
-          trendLabel="Total acumulado"
+          trendLabel={s.paidUsers !== null ? 'Total acumulado' : undefined}
           tone="emerald"
         />
         <StatCard
           label="MRR"
-          value={formatEuros(s.mrrCents)}
-          sub={plural(s.recurringCount, 'assinatura ativa', 'assinaturas ativas')}
+          value={s.mrrCents !== null ? formatEuros(s.mrrCents) : <Unavailable />}
+          sub={s.recurringCount !== null ? plural(s.recurringCount, 'assinatura ativa', 'assinaturas ativas') : undefined}
           icon={Euro}
           tone="violet"
         />
         <StatCard
           label="Taxa de conversão"
-          value={`${s.conversionRate.toLocaleString('pt-BR')}%`}
+          value={s.conversionRate !== null ? `${s.conversionRate.toLocaleString('pt-BR')}%` : <Unavailable />}
           sub="Leads → pagamento"
           icon={Target}
-          trend={s.conversionRate > 5 ? 'up' : 'neutral'}
-          trendLabel={s.conversionRate > 5 ? 'Acima de 5%' : 'Em acompanhamento'}
+          trend={s.conversionRate !== null && s.conversionRate > 5 ? 'up' : 'neutral'}
+          trendLabel={
+            s.conversionRate === null ? undefined : s.conversionRate > 5 ? 'Acima de 5%' : 'Em acompanhamento'
+          }
           tone="amber"
         />
       </div>
@@ -483,13 +546,20 @@ export function AdminDashboardPage() {
               { label: 'Quiz completo', value: s.completedQuizzes, max: s.totalLeads, color: 'bg-brand-700' },
               { label: 'Usuários pagantes', value: s.paidUsers, max: s.totalLeads, color: 'bg-emerald-600' },
             ].map(({ label, value, max, color }) => {
-              const pct = max > 0 ? Math.round((value / max) * 100) : 0
+              const known = value !== null && max !== null
+              const pct = known && max > 0 ? Math.round((value / max) * 100) : 0
               return (
                 <div key={label}>
                   <div className="mb-1.5 flex items-center justify-between text-sm">
                     <span className="text-muted-foreground">{label}</span>
                     <span className="font-bold text-foreground">
-                      {value} <span className="font-normal text-muted-foreground">({pct}%)</span>
+                      {known ? (
+                        <>
+                          {value} <span className="font-normal text-muted-foreground">({pct}%)</span>
+                        </>
+                      ) : (
+                        <Unavailable />
+                      )}
                     </span>
                   </div>
                   <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
@@ -510,7 +580,11 @@ export function AdminDashboardPage() {
             </h2>
           </div>
 
-          {payments.length === 0 ? (
+          {payments === null ? (
+            <p className="py-10 text-center text-sm text-muted-foreground">
+              Não foi possível carregar os pagamentos.
+            </p>
+          ) : payments.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-10 text-center">
               <CreditCard className="mb-3 h-8 w-8 text-muted-foreground" aria-hidden="true" />
               <p className="text-sm text-muted-foreground">Nenhum pagamento ainda</p>

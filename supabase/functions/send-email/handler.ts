@@ -170,9 +170,11 @@ export function createSendEmailHandler(deps: SendEmailDeps) {
           provider: 'resend',
           provider_message_id: typeof providerJson.id === 'string' ? providerJson.id : null,
           status: sent ? 'sent' : 'failed',
+          // trigger_key também aqui: o admin lê o modelo do erro sem depender do
+          // embed em email_templates (RLS sem policy de leitura para o cliente).
           error_message: sent
             ? null
-            : JSON.stringify({ code, status: providerStatus || null, message: providerMessage }),
+            : JSON.stringify({ code, status: providerStatus || null, message: providerMessage, trigger_key: triggerKey }),
           variables_used: mergedVars,
           sent_at: sent ? new Date(deps.now()).toISOString() : null,
         })

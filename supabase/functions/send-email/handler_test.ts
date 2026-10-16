@@ -82,6 +82,9 @@ Deno.test('falha do Resend → log JSON com trigger_key, linha failed e 502 com 
   assertEquals(world.logRows[0].status, 'failed')
   assertEquals(world.logRows[0].sent_at, null)
   assertNotIncludes(world.logRows[0].error_message ?? '', 'pessoa@example.com')
+  // O admin lê o modelo pelo error_message: o embed email_templates(trigger_key)
+  // volta null para o cliente (email_templates tem RLS sem policy de leitura).
+  assertEquals(JSON.parse(world.logRows[0].error_message ?? '{}').trigger_key, 'welcome_free')
 })
 
 Deno.test('sucesso → 200, linha sent e HTML com variáveis escapadas', async () => {

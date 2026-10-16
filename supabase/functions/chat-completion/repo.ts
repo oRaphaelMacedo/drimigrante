@@ -84,7 +84,13 @@ export function createChatRepo(db: SupabaseClient): ChatRepo {
     },
 
     async insertMessage(row) {
-      const { error } = await db.from('messages').insert(row)
+      const { data, error } = await db.from('messages').insert(row).select('id').single()
+      if (error) throw error
+      return (data as { id: string }).id
+    },
+
+    async deleteMessage(id) {
+      const { error } = await db.from('messages').delete().eq('id', id)
       if (error) throw error
     },
 

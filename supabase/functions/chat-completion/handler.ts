@@ -4,6 +4,8 @@
 // caracteres, limites de 30/hora e 200/dia por usuário (429), histórico com as 20
 // mensagens mais recentes em ordem cronológica (só user/assistant), inserts feitos
 // pelo servidor, resposta vazia não é gravada e max_tokens do banco com teto de 1000.
+// Se a OpenAI falhar (rede, HTTP, stream interrompido ou resposta vazia), a pergunta
+// do usuário é apagada: não fica sem resposta no histórico nem conta nos limites.
 //
 // Protocolo de saída (inalterado para o front): `data: {"delta":"..."}` por pedaço e
 // `event: done\ndata: [DONE]` no fim.
@@ -37,7 +39,9 @@ export interface ChatRepo {
   countUserMessagesSince(userId: string, sinceIso: string): Promise<number>
   /** As mensagens mais recentes primeiro (o handler reordena). */
   getRecentMessages(assessmentId: string, userId: string, limit: number): Promise<StoredMessage[]>
-  insertMessage(row: { assessment_id: string; user_id: string; role: 'user' | 'assistant'; content: string }): Promise<void>
+  /** Devolve o id da mensagem gravada. */
+  insertMessage(row: { assessment_id: string; user_id: string; role: 'user' | 'assistant'; content: string }): Promise<string>
+  deleteMessage(id: string): Promise<void>
   getAiConfig(useCase: 'chat'): Promise<RawAiConfig | null>
 }
 
@@ -119,29 +123,52 @@ export function createChatHandler(deps: ChatDeps) {
         buildAnalysisContext(assessment.answers, resultSummary),
       )
 
-      await repo.insertMessage({ assessment_id: assessmentId, user_id: userId, role: 'user', content: message })
-
-      const openAIResponse = await deps.fetch(OPENAI_CHAT_URL, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${deps.env.openaiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: config.model,
-          stream: true,
-          temperature: config.temperature,
-          max_tokens: config.maxTokens,
-          messages: [
-            { role: 'system', content: systemPrompt },
-            ...history,
-            { role: 'user', content: message },
-          ],
-        }),
+      // Grava a pergunta ANTES da OpenAI para os limites valerem também em rajadas
+      // paralelas; se não houver resposta, ela é apagada (discardUserMessage).
+      const userMessageId = await repo.insertMessage({
+        assessment_id: assessmentId,
+        user_id: userId,
+        role: 'user',
+        content: message,
       })
+      const discardUserMessage = async (reason: string) => {
+        try {
+          await repo.deleteMessage(userMessageId)
+          log('warn', 'chat_user_message_discarded', { reason })
+        } catch (err) {
+          log('error', 'chat_user_message_discard_failed', { reason, code: errorCode(err) })
+        }
+      }
+
+      let openAIResponse: Response
+      try {
+        openAIResponse = await deps.fetch(OPENAI_CHAT_URL, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${deps.env.openaiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: config.model,
+            stream: true,
+            temperature: config.temperature,
+            max_tokens: config.maxTokens,
+            messages: [
+              { role: 'system', content: systemPrompt },
+              ...history,
+              { role: 'user', content: message },
+            ],
+          }),
+        })
+      } catch (fetchErr) {
+        log('error', 'openai_failed', { code: errorCode(fetchErr) })
+        await discardUserMessage('openai_network')
+        return jsonResponse(502, { error: 'ai_unavailable' })
+      }
 
       if (!openAIResponse.ok || !openAIResponse.body) {
         log('error', 'openai_failed', { status: openAIResponse.status })
+        await discardUserMessage('openai_http')
         return jsonResponse(502, { error: 'ai_unavailable' })
       }
 
@@ -164,6 +191,7 @@ export function createChatHandler(deps: ChatDeps) {
           const reader = upstream.getReader()
           let buffer = ''
           let fullText = ''
+          let answerSaved = false
           try {
             while (true) {
               const { done, value } = await reader.read()
@@ -195,13 +223,16 @@ export function createChatHandler(deps: ChatDeps) {
                 role: 'assistant',
                 content: fullText,
               })
+              answerSaved = true
             } else {
               log('warn', 'chat_empty_completion', {})
+              await discardUserMessage('empty_completion')
             }
             send('event: done\ndata: [DONE]\n\n')
             if (!clientGone) controller.close()
           } catch (err) {
             log('error', 'chat_stream_failed', { code: errorCode(err) })
+            if (!answerSaved) await discardUserMessage('stream_failed')
             if (!clientGone) {
               try {
                 controller.error(err)
