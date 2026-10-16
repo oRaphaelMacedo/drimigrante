@@ -50,7 +50,7 @@ export function ErrorScreen({ variant, details }: ErrorScreenProps) {
       <div className="mx-auto flex h-16 w-full max-w-6xl items-center px-4 sm:px-6">
         <a
           href="/"
-          className="rounded-md text-lg font-bold text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          className="inline-flex min-h-11 items-center rounded-md text-lg font-bold text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
         >
           Doutor Imigrante
         </a>

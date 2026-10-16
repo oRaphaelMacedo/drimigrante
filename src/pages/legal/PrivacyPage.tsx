@@ -3,6 +3,7 @@ import { LegalLayout } from './LegalLayout'
 import { useSEO } from '@/hooks/useSEO'
 import { isMetaPixelConfigured } from '@/lib/analytics'
 
+// TODO(integração com o W1-01): importar PRIVACY_EMAIL de '@/config/contact'.
 const PRIVACY_EMAIL = 'privacidade@drimigrante.com'
 
 export function PrivacyPage() {
@@ -56,7 +57,7 @@ export function PrivacyPage() {
       <h2>4. Compartilhamento com terceiros</h2>
       <ul>
         <li>
-          <strong>Supabase</strong> — hospedagem de dados (UE/Brasil).
+          <strong>Supabase</strong> — hospedagem de dados (servidores no Brasil, em São Paulo).
         </li>
         <li>
           <strong>Stripe</strong> — processamento de pagamentos.
@@ -102,8 +103,9 @@ export function PrivacyPage() {
         </li>
         {metaPixel && (
           <li>
-            Se você aceitar todos os cookies, o Pixel da Meta registra as visitas às páginas e os eventos de
-            cadastro, início de pagamento e compra, para medir campanhas de anúncios.
+            Se você aceitar também os cookies de marketing (opção “Aceitar estatísticas e marketing” na Política de
+            Cookies), o Pixel da Meta registra as visitas às páginas e os eventos de cadastro, início de pagamento e
+            compra, para medir campanhas de anúncios. O botão “Aceitar” do aviso de cookies não inclui marketing.
           </li>
         )}
         <li>
@@ -136,7 +138,8 @@ export function PrivacyPage() {
 
       <h2>9. Transferências internacionais</h2>
       <p>
-        Quando ocorrem (por exemplo, OpenAI nos EUA), são protegidas por Cláusulas Contratuais Padrão da UE.
+        Quando ocorrem (por exemplo, Supabase no Brasil; OpenAI, PostHog e Google Analytics nos EUA), são protegidas
+        por Cláusulas Contratuais Padrão da UE.
       </p>
     </LegalLayout>
   )

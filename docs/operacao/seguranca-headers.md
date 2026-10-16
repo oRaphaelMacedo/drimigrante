@@ -68,7 +68,7 @@ Depois, com o DevTools aberto (aba Console), percorrer: landing → quiz → res
 ## Passar para modo bloqueante
 
 1. Rodar Report-Only em produção por pelo menos 2 semanas com `report-uri` configurado.
-2. Zerar as violações legítimas (incluir origens que faltam).
+2. Zerar as violações legítimas (incluir origens que faltam). Atenção ao GA4: `region1.google-analytics.com` já está coberto por `*.google-analytics.com`, mas, dependendo da configuração da propriedade, o GA4 pode chamar também `www.google.com` e `stats.g.doubleclick.net` (por exemplo, se os Google Signals forem ligados). Hoje o app envia `allow_google_signals: false`; se esses hosts aparecerem nos relatórios, inclua-os em `connect-src` e `img-src` antes de bloquear.
 3. Renomear o cabeçalho para `Content-Security-Policy` (mantendo o `report-uri`).
 
 ## Rewrite da SPA

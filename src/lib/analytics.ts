@@ -2,9 +2,10 @@
  * Analytics de produto: PostHog + GA4 (+ Meta Pixel opcional).
  *
  * Garantias:
- *  - Nada é carregado nem enviado sem consentimento ('granted'/'analytics').
- *    O Meta Pixel exige consentimento de marketing ('granted') e
- *    VITE_META_PIXEL_ID definido; sem o ID, é no-op.
+ *  - Nada é carregado nem enviado sem consentimento de estatísticas
+ *    ('all'/'granted'/'analytics', ver consent.ts). O Meta Pixel exige
+ *    consentimento de marketing — só o valor 'all' — e VITE_META_PIXEL_ID
+ *    definido; sem o ID, é no-op.
  *  - Nada é enviado fora de produção: build de dev, localhost, *.vercel.app,
  *    navegador automatizado (Playwright) ou VITE_APP_ENV ≠ production fora do
  *    domínio oficial (ver runtime-env.ts). Em dev/E2E os eventos vão para
@@ -25,6 +26,7 @@ import {
   type AnalyticsPropsArg,
 } from './analytics-events'
 import {
+  choiceAllows,
   getConsent,
   getConsentChoice,
   hasConsent,
@@ -90,7 +92,13 @@ const pixelPending: Array<() => void> = []
 let lastPageviewKey: string | null = null
 let lastPageLocation: string | null = null
 let pageviewTimer: number | undefined
-let lastIdentifiedUserId: string | null = null
+interface Identity {
+  userId: string
+  traits?: Record<string, unknown>
+}
+let lastIdentity: Identity | null = null
+/** identify() chamado sem consentimento: reaplicado quando as estatísticas forem ligadas. */
+let pendingIdentity: Identity | null = null
 
 function envAllowed(): boolean {
   if (envAllowedCache === null) envAllowedCache = isAnalyticsEnvironment(getRuntimeEnv())
@@ -166,6 +174,23 @@ function deleteCookies(match: (name: string) => boolean): void {
   }
 }
 
+/** Apaga chaves `ph_*` (persistência do PostHog) do localStorage e do sessionStorage. */
+function deleteStorageKeys(prefix: string): void {
+  for (const getStorage of [() => window.localStorage, () => window.sessionStorage]) {
+    try {
+      const storage = getStorage()
+      const keys: string[] = []
+      for (let i = 0; i < storage.length; i++) {
+        const key = storage.key(i)
+        if (key && key.startsWith(prefix)) keys.push(key)
+      }
+      for (const key of keys) storage.removeItem(key)
+    } catch {
+      // storage bloqueado
+    }
+  }
+}
+
 // ── PostHog ────────────────────────────────────────────────────────────────
 function withPosthog(call: (ph: PostHog) => void): void {
   if (!POSTHOG_KEY) return
@@ -200,9 +225,19 @@ function initPosthog(ph: PostHog): void {
     person_profiles: 'identified_only',
     // gravação de sessão desligada: a política de privacidade não a prevê
     disable_session_recording: true,
+    // ao retirar o consentimento (opt-out), o PostHog apaga e desliga a
+    // própria persistência (cookie e localStorage ph_*)
+    opt_out_persistence_by_default: true,
     before_send: (capture) => sanitizeCapture(capture),
   }
   ph.init(POSTHOG_KEY, config)
+  // Só chegamos aqui com consentimento de estatísticas. Um opt-out gravado
+  // numa visita anterior (pessoa recusou e depois voltou a aceitar) é desfeito.
+  try {
+    if (ph.has_opted_out_capturing()) ph.opt_in_capturing({ captureEventName: false })
+  } catch {
+    // ignora
+  }
   posthog = ph
   posthogPending = null
   const pending = posthogQueue.splice(0, posthogQueue.length)
@@ -229,7 +264,7 @@ function maybeInitPosthog(): void {
 function loadPosthog(): void {
   if (!POSTHOG_KEY) return
   if (posthog) {
-    posthog.opt_in_capturing()
+    posthog.opt_in_capturing({ captureEventName: false })
     return
   }
   if (posthogPending) {
@@ -356,8 +391,9 @@ function pixelSend(kind: 'track', eventName: string, params?: Record<string, unk
 
 // ── Consentimento ──────────────────────────────────────────────────────────
 function applyConsent(choice: ConsentChoice | null): void {
-  const wantsAnalytics = choice === 'granted' || choice === 'analytics'
-  const wantsMarketing = choice === 'granted'
+  const wantsAnalytics = choiceAllows(choice, 'analytics')
+  // 'granted' (banner/aceitações antigas) NÃO inclui marketing: só 'all'
+  const wantsMarketing = choiceAllows(choice, 'marketing')
   const allowed = envAllowed()
   const analyticsWasEnabled = analyticsEnabled
 
@@ -369,17 +405,29 @@ function applyConsent(choice: ConsentChoice | null): void {
     }
     // pageview da página em que a pessoa aceitou
     trackPageview()
+    // login feito antes do consentimento: associa agora
+    const identity = pendingIdentity
+    pendingIdentity = null
+    if (identity) identify(identity.userId, identity.traits)
   } else if (!wantsAnalytics && analyticsEnabled) {
     analyticsEnabled = false
     posthogQueue.length = 0
     try {
+      // reset() desassocia o usuário e limpa a persistência antes do opt-out
+      posthog?.reset()
       posthog?.opt_out_capturing()
     } catch {
       // ignora
     }
     gaDisableFlag(true)
-    deleteCookies((name) => name === '_ga' || name.startsWith('_ga_') || name === '_gid')
+    deleteCookies(
+      (name) => name === '_ga' || name.startsWith('_ga_') || name === '_gid' || name.startsWith('ph_'),
+    )
+    deleteStorageKeys('ph_')
     lastPageviewKey = null
+    // se a pessoa voltar a aceitar na mesma página, associa de novo
+    if (lastIdentity) pendingIdentity = lastIdentity
+    lastIdentity = null
   }
 
   if (wantsMarketing && !marketingEnabled) {
@@ -412,8 +460,9 @@ export function initAnalytics(): void {
 }
 
 /**
- * Grava a escolha de cookies. 'granted' = estatísticas + marketing,
- * 'analytics' = só estatísticas, 'denied' = só o essencial.
+ * Grava a escolha de cookies. 'all' = estatísticas + marketing;
+ * 'granted' (banner) e 'analytics' = só estatísticas; 'denied' = só o
+ * essencial. Ver o contrato em consent.ts.
  */
 export function setConsent(choice: ConsentChoice): void {
   writeConsent(choice)
@@ -593,9 +642,14 @@ export function startPageviewTracking(router: RouterLike): () => void {
  * Chamado pelo AuthContext ao entrar.
  */
 export function identify(userId: string, traits?: Record<string, unknown>): void {
-  if (!userId || !hasConsent('analytics')) return
-  if (userId === lastIdentifiedUserId) return
-  lastIdentifiedUserId = userId
+  if (!userId) return
+  if (!hasConsent('analytics')) {
+    // reaplicado em applyConsent se a pessoa aceitar depois
+    pendingIdentity = { userId, traits }
+    return
+  }
+  if (userId === lastIdentity?.userId) return
+  lastIdentity = { userId, traits }
   const primitiveTraits: AnalyticsProps = {}
   for (const [key, value] of Object.entries(traits ?? {})) {
     if (value === null || ['string', 'number', 'boolean'].includes(typeof value)) {
@@ -618,7 +672,8 @@ export function identify(userId: string, traits?: Record<string, unknown>): void
 
 /** Ao sair da conta: desassocia o dispositivo do usuário. */
 export function resetAnalytics(): void {
-  lastIdentifiedUserId = null
+  lastIdentity = null
+  pendingIdentity = null
   if (!envAllowed()) return
   try {
     posthog?.reset()

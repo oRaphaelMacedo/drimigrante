@@ -2,21 +2,46 @@
  * Consentimento de cookies e rastreamento (RGPD/LGPD).
  *
  * Valor guardado em localStorage['di_cookie_consent']:
- *  - 'granted'   → estatísticas + marketing ("Aceitar" no banner)
- *  - 'analytics' → só estatísticas (opção da página /cookies)
- *  - 'denied'    → só o essencial
- *  - ausente     → ainda não escolheu (banner visível)
+ *  - 'all'       → estatísticas + marketing. Só pode ser gravado por um botão
+ *                  cujo texto mencione marketing/anúncios ("Aceitar estatísticas
+ *                  e marketing" em /cookies, visível só com o Pixel configurado).
+ *  - 'granted'   → só estatísticas. É o valor do "Aceitar" do banner e de todas
+ *                  as aceitações anteriores a este contrato, quando o banner só
+ *                  falava de estatísticas. NUNCA conta como marketing.
+ *  - 'analytics' → só estatísticas ("Aceitar estatísticas"/"Só estatísticas" em
+ *                  /cookies).
+ *  - 'denied'    → só o essencial.
+ *  - ausente     → ainda não escolheu (banner visível).
+ *
+ * Contrato com o CookieBanner (W1-08/W3-02): ele continua gravando
+ * setConsent('granted') ou setConsent('denied'). O banner só pode passar a
+ * gravar 'all' quando o próprio texto do botão mencionar marketing/anúncios.
  *
  * Toda mudança dispara `consent-changed` em window (detail = ConsentChoice),
  * que o analytics e o Sentry escutam.
  */
 
 export type ConsentState = 'granted' | 'denied' | 'pending'
-export type ConsentChoice = 'granted' | 'analytics' | 'denied'
+export type ConsentChoice = 'all' | 'granted' | 'analytics' | 'denied'
 export type ConsentCategory = 'analytics' | 'marketing'
 
 export const CONSENT_STORAGE_KEY = 'di_cookie_consent'
 export const CONSENT_EVENT = 'consent-changed'
+
+const CHOICES: readonly ConsentChoice[] = ['all', 'granted', 'analytics', 'denied']
+
+export function isConsentChoice(value: unknown): value is ConsentChoice {
+  return typeof value === 'string' && (CHOICES as readonly string[]).includes(value)
+}
+
+/**
+ * O que uma escolha permite. Marketing exige 'all'; 'granted' (banner e
+ * aceitações antigas) vale só para estatísticas.
+ */
+export function choiceAllows(choice: ConsentChoice | null, category: ConsentCategory): boolean {
+  if (category === 'marketing') return choice === 'all'
+  return choice === 'all' || choice === 'granted' || choice === 'analytics'
+}
 
 /** Cópia em memória para quando o localStorage está bloqueado. */
 let memoryChoice: ConsentChoice | null = null
@@ -25,7 +50,7 @@ function readChoice(): ConsentChoice | null {
   try {
     if (typeof window === 'undefined') return memoryChoice
     const value = window.localStorage.getItem(CONSENT_STORAGE_KEY)
-    if (value === 'granted' || value === 'analytics' || value === 'denied') return value
+    if (isConsentChoice(value)) return value
     return memoryChoice
   } catch {
     return memoryChoice
@@ -48,9 +73,7 @@ export function getConsent(): ConsentState {
 }
 
 export function hasConsent(category: ConsentCategory): boolean {
-  const choice = readChoice()
-  if (category === 'analytics') return choice === 'granted' || choice === 'analytics'
-  return choice === 'granted'
+  return choiceAllows(readChoice(), category)
 }
 
 export function setConsent(choice: ConsentChoice): void {
@@ -70,8 +93,8 @@ export function setConsent(choice: ConsentChoice): void {
 /** Inscreve um ouvinte para mudanças de consentimento. Devolve o "unsubscribe". */
 export function onConsentChange(listener: (choice: ConsentChoice) => void): () => void {
   const handler = (event: Event) => {
-    const detail = (event as CustomEvent<ConsentChoice>).detail
-    if (detail === 'granted' || detail === 'analytics' || detail === 'denied') listener(detail)
+    const detail = (event as CustomEvent<unknown>).detail
+    if (isConsentChoice(detail)) listener(detail)
   }
   window.addEventListener(CONSENT_EVENT, handler)
   return () => window.removeEventListener(CONSENT_EVENT, handler)

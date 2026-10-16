@@ -16,7 +16,7 @@ import {
 } from '@sentry/react'
 import type { Breadcrumb, Event } from '@sentry/react'
 import { trackBackgroundImport } from './chunk-reload'
-import { sanitizeUrl, scrubDeep } from './url-sanitize'
+import { sanitizeUrl, scrubDeep, scrubText } from './url-sanitize'
 
 export { addBreadcrumb, captureException, captureMessage, setTag, setUser }
 
@@ -56,10 +56,18 @@ export function scrubEvent<T extends Event>(event: T): T {
   return event
 }
 
+const URL_ONLY_RE = /^(?:[a-z][a-z0-9+.-]*:\/\/|\/)\S*$/i
+
 export function scrubBreadcrumb(breadcrumb: Breadcrumb): Breadcrumb | null {
   // Logs de console podem conter qualquer coisa (inclusive respostas de API)
   if (breadcrumb.category === 'console' && breadcrumb.level !== 'error') return null
-  if (breadcrumb.message) breadcrumb.message = sanitizeUrl(breadcrumb.message)
+  if (breadcrumb.message) {
+    // Mensagem que é só uma URL: remove params/fragmento. Texto livre (que pode
+    // conter uma URL no meio): só mascara valores, sem reescrever o texto.
+    breadcrumb.message = URL_ONLY_RE.test(breadcrumb.message)
+      ? sanitizeUrl(breadcrumb.message)
+      : scrubText(breadcrumb.message)
+  }
   if (breadcrumb.data) scrubDeep(breadcrumb.data)
   return breadcrumb
 }

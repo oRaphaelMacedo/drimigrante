@@ -7,6 +7,8 @@
  *  - ?token_hash / ?code / ?token do fluxo de autenticação
  *  - ?session_id=cs_… do retorno do Stripe (hoje gera login no claim-session)
  *  - ?r=<token> do link de retomada do resultado
+ *  - os mesmos parâmetros dentro de outra URL codificada, por exemplo
+ *    `/login?redirect=%2Fresults%3Fr%3DTOKEN` (uma ou duas vezes codificada)
  *
  * O módulo é puro (sem dependências nem acesso a window) para poder ser
  * testado isoladamente e reaproveitado no Sentry, no analytics e no Pixel.
@@ -49,6 +51,15 @@ const PARAM_NAMES =
 
 // `[?&#]chave=valor` em qualquer texto (mensagens de erro, breadcrumbs, spans…)
 const PARAM_IN_TEXT_RE = new RegExp(`([?&#;](?:${PARAM_NAMES})=)[^&#\\s"'<>]*`, 'gi')
+// O mesmo dentro de um valor codificado (ex.: ?redirect=%2Fresults%3Fr%3DTOKEN).
+// Separadores `?&#;` como %3F/%26/%23/%3B e `=` como %3D, também com duplo
+// encoding (%253F…). O valor vai até o próximo separador codificado ou literal.
+const ENC_SEP = '%(?:25)?(?:3F|26|23|3B)'
+const ENC_EQ = '%(?:25)?3D'
+const ENCODED_PARAM_IN_TEXT_RE = new RegExp(
+  `(${ENC_SEP}(?:${PARAM_NAMES})${ENC_EQ})(?:(?!${ENC_SEP})[^&#\\s"'<>])*`,
+  'gi',
+)
 // e-mails, inclusive codificados em URL (%40)
 const EMAIL_RE = /[A-Za-z0-9._%+-]+(?:@|%40)[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/g
 // JWTs (access tokens do Supabase, tokens de magic link)
@@ -57,7 +68,10 @@ const JWT_RE = /\beyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}/g
 const STRIPE_SESSION_RE = /\bcs_(?:test|live)_[A-Za-z0-9]+/g
 
 // Teste barato antes de rodar todas as substituições
-const QUICK_CHECK_RE = new RegExp(`[?&#;](?:${PARAM_NAMES})=|@|%40|eyJ|cs_(?:test|live)_`, 'i')
+const QUICK_CHECK_RE = new RegExp(
+  `[?&#;](?:${PARAM_NAMES})=|${ENC_SEP}(?:${PARAM_NAMES})${ENC_EQ}|@|%40|eyJ|cs_(?:test|live)_`,
+  'i',
+)
 
 function fragmentIsSensitive(hash: string): boolean {
   if (!hash || hash === '#') return false
@@ -121,6 +135,7 @@ export function scrubText(input: string): string {
   if (!input || !QUICK_CHECK_RE.test(input)) return input
   return input
     .replace(PARAM_IN_TEXT_RE, (_match, prefix: string) => `${prefix}[filtrado]`)
+    .replace(ENCODED_PARAM_IN_TEXT_RE, (_match, prefix: string) => `${prefix}[filtrado]`)
     .replace(JWT_RE, '[jwt]')
     .replace(STRIPE_SESSION_RE, '[stripe_session]')
     .replace(EMAIL_RE, '[email]')

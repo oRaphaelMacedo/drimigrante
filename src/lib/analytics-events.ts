@@ -49,8 +49,12 @@ export interface AnalyticsEventMap {
   checkout_cancelled: { plan?: string }
   /** @deprecated legado da SuccessPage — usar `purchase` (DI-026). */
   checkout_completed: NoProps
-  /** Uma vez por compra (use trackOnce). GA4: purchase · Meta: Purchase */
-  purchase: { value: number; currency: string; plan?: string }
+  /**
+   * Uma vez por compra (use trackOnce). GA4: purchase · Meta: Purchase.
+   * `transaction_id`: id INTERNO da compra (ex.: UUID do registro no banco),
+   * usado pelo GA4 para deduplicar. Nunca o `session_id` `cs_…` do Stripe.
+   */
+  purchase: { value: number; currency: string; plan?: string; transaction_id?: string }
 
   // ── Área logada e acesso ──────────────────────────────────────────────────
   dashboard_viewed: { plan_status?: string; days_left?: number | null }

@@ -24,7 +24,7 @@ import { track, trackOnce } from '@/lib/analytics'
 
 track('paywall_cta_clicked', { position: 'sticky' })
 trackOnce('results_viewed', assessmentId, { category: 'alta' })
-trackOnce('purchase', checkoutRef, { value: OFFER.price, currency: OFFER.currency })
+trackOnce('purchase', purchaseId, { value: OFFER.price, currency: OFFER.currency, transaction_id: purchaseId })
 ```
 
 ## Quando nada é enviado
@@ -32,8 +32,8 @@ trackOnce('purchase', checkoutRef, { value: OFFER.price, currency: OFFER.currenc
 | Situação | PostHog / GA4 | Meta Pixel | Sentry (erros) | Sentry Replay |
 |---|---|---|---|---|
 | Consentimento pendente ou recusado | não carrega | não carrega | ativo | desligado |
-| Aceitou "Só estatísticas" (`analytics`) | ativo | não carrega | ativo | buffer mascarado |
-| Aceitou "Aceitar"/"Aceitar todos" (`granted`) | ativo | ativo se `VITE_META_PIXEL_ID` existir | ativo | buffer mascarado |
+| Aceitou só estatísticas (`granted` ou `analytics`) | ativo | não carrega | ativo | buffer mascarado |
+| Aceitou "Aceitar estatísticas e marketing" (`all`) | ativo | ativo se `VITE_META_PIXEL_ID` existir | ativo | buffer mascarado |
 | `npm run dev`, localhost, `*.vercel.app` | **nunca** | **nunca** | dev/localhost: não; preview: sim | idem |
 | Playwright / `navigator.webdriver` | **nunca** | **nunca** | não | não |
 | `VITE_APP_ENV` ≠ `production` fora do domínio oficial | **nunca** | **nunca** | sim (`environment` = valor da variável) | idem |
@@ -45,17 +45,24 @@ trackOnce('purchase', checkoutRef, { value: OFFER.price, currency: OFFER.currenc
 
 `localStorage['di_cookie_consent']`:
 
-| Valor | Significado | Quem grava |
-|---|---|---|
-| `granted` | estatísticas + marketing | botão "Aceitar" do banner; "Aceitar todos" em `/cookies` |
-| `analytics` | só estatísticas | "Só estatísticas" em `/cookies` (aparece só com o Pixel configurado) |
-| `denied` | só essenciais | "Rejeitar" do banner; "Recusar não essenciais" em `/cookies` |
+| Valor | Estatísticas | Marketing (Meta Pixel) | Quem grava |
+|---|---|---|---|
+| `all` | sim | sim | "Aceitar estatísticas e marketing" em `/cookies` (aparece só com o Pixel configurado) |
+| `granted` | sim | **não** | "Aceitar" do banner e todas as aceitações anteriores a este contrato (o banner só falava de estatísticas) |
+| `analytics` | sim | não | "Aceitar estatísticas" (sem Pixel) ou "Só estatísticas" (com Pixel) em `/cookies` |
+| `denied` | não | não | "Rejeitar" do banner; "Recusar não essenciais" em `/cookies` |
 
-Ao retirar o consentimento: PostHog faz `opt_out_capturing`, o GA recebe `ga-disable-<ID>`, o Pixel recebe `consent revoke`, os cookies `_ga*`, `_gid`, `_fbp` e `_fbc` são apagados e o Replay do Sentry para.
+- `hasConsent('marketing')` é verdadeiro **só** com `all`; `hasConsent('analytics')` com `all`, `granted` ou `analytics`. A regra está em `choiceAllows()` (`src/lib/consent.ts`).
+- `getConsent()` continua devolvendo `'granted' | 'denied' | 'pending'` e `setConsent('granted' | 'denied')` continua válido para o banner.
+- **Contrato com o banner (W1-08/W3-02):** o `CookieBanner` só pode gravar `all` quando o texto do botão mencionar marketing/anúncios de forma explícita (ex.: "Aceitar estatísticas e marketing"). Um "Aceitar" genérico grava `granted` (só estatísticas).
+
+Ao retirar o consentimento: PostHog faz `reset()` e `opt_out_capturing`, o GA recebe `ga-disable-<ID>`, o Pixel recebe `consent revoke`, os cookies `_ga*`, `_gid`, `ph_*`, `_fbp` e `_fbc` e as chaves `ph_*` do localStorage/sessionStorage são apagados e o Replay do Sentry para. Ao retirar só o marketing (`all` → `analytics`), só o Pixel é desligado.
+
+`identify()` chamado antes do consentimento (login sem ter aceitado) não se perde: é reaplicado quando a pessoa aceitar as estatísticas.
 
 ## Privacidade da URL
 
-O magic link do Supabase volta como `/auth/callback#access_token=…&refresh_token=…`; o Stripe volta com `?session_id=cs_…`; a retomada usa `?r=<token>`. Nada disso pode chegar a terceiros:
+O magic link do Supabase volta como `/auth/callback#access_token=…&refresh_token=…`; o Stripe volta com `?session_id=cs_…`; a retomada usa `?r=<token>`. Nada disso pode chegar a terceiros, nem quando vem codificado dentro de outro parâmetro (ex.: `/login?redirect=%2Fresults%3Fr%3DTOKEN`, uma ou duas vezes codificado):
 
 - **Pageview manual** (`capture_pageview: false` no PostHog, `send_page_view: false` no GA4). O `$pageview`/`page_view` é enviado ~300 ms após cada navegação do React Router, com a URL sanitizada.
 - **PostHog `before_send`** sanitiza todas as propriedades (`$current_url`, `$referrer`, `$initial_*`, texto de elementos do autocapture).
@@ -78,7 +85,7 @@ O magic link do Supabase volta como `/auth/callback#access_token=…&refresh_tok
 |---|---|---|
 | `lead_submitted` | `generate_lead` | `Lead` |
 | `checkout_started` | `begin_checkout` | `InitiateCheckout` |
-| `purchase` | `purchase` (`value`, `currency`) | `Purchase` (`value`, `currency`) |
+| `purchase` | `purchase` (`value`, `currency`, `transaction_id`) | `Purchase` (`value`, `currency`) |
 | pageview | `page_view` | `PageView` |
 | demais | mesmo nome | — |
 
@@ -109,7 +116,7 @@ Propriedades marcadas com `*` são obrigatórias (o `tsc` exige).
 | `checkout_failed` | Erro ao criar a sessão de checkout | `reason`, `plan`, `status` | DI-033 |
 | `checkout_cancelled` | Volta do Stripe com `?checkout=cancelled` | `plan` | DI-033 |
 | `checkout_completed` | **Legado** (SuccessPage atual) — substituir por `purchase` | — | — |
-| `purchase` | Compra confirmada (`trackOnce` por compra) | `value*`, `currency*`, `plan` | DI-026 |
+| `purchase` | Compra confirmada (`trackOnce` por compra) | `value*`, `currency*`, `plan`, `transaction_id` (id interno da compra, nunca o `cs_…` do Stripe) | DI-026 |
 | `dashboard_viewed` | Home do painel | `plan_status`, `days_left` | DI-072 |
 | `access_expiring_viewed` | Aviso de acesso perto de expirar exibido | `days_left` | DI-072 |
 | `access_expired_viewed` | Aviso de acesso expirado exibido | — | DI-072 |
@@ -155,6 +162,6 @@ Propriedades marcadas com `*` são obrigatórias (o `tsc` exige).
 - GA4: marcar `purchase` e `generate_lead` como conversões (Administrador → Eventos).
 - GA4: em Fluxo de dados → Medição otimizada, desligar "Mudanças de página com base em eventos do histórico do navegador" (o app já envia `page_view` manual; ligado, conta em dobro e sem sanitizar a URL).
 - Vercel: `VITE_APP_ENV=production` só no ambiente Production; Preview com outro valor (ex.: `preview`).
-- Meta (opcional): criar o Pixel e definir `VITE_META_PIXEL_ID` na Vercel. Sem a variável, nada da Meta é carregado.
+- Meta (opcional): criar o Pixel e definir `VITE_META_PIXEL_ID` na Vercel. Sem a variável, nada da Meta é carregado. Com ela, o Pixel só carrega para quem escolher "Aceitar estatísticas e marketing" em `/cookies` (valor `all`); o "Aceitar" do banner não liga o Pixel.
 - Sentry: apagar os replays gravados antes desta mudança (eram sem máscara) e, em Settings → Security & Privacy, ligar "Prevent Storing of IP Addresses".
 - PostHog: procurar eventos com `$current_url` contendo `access_token` ou `session_id=cs_` e apagá-los.

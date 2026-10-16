@@ -4,18 +4,34 @@ import { Check } from 'lucide-react'
 import { LegalLayout } from './LegalLayout'
 import { useSEO } from '@/hooks/useSEO'
 import { getConsentChoice, isMetaPixelConfigured, setConsent, type ConsentChoice } from '@/lib/analytics'
-import { onConsentChange } from '@/lib/consent'
+import { choiceAllows, onConsentChange } from '@/lib/consent'
 import { cn } from '@/lib/utils'
 
+/**
+ * 'granted' é o "Aceitar" do banner (e das aceitações antigas): vale só para
+ * estatísticas. Marketing só com 'all', gravado pelo botão que diz marketing.
+ */
 const CHOICE_LABEL: Record<ConsentChoice, string> = {
-  granted: 'todos os cookies aceitos',
-  analytics: 'só cookies essenciais e de estatística',
+  all: 'cookies essenciais, de estatística e de marketing',
+  granted: 'cookies essenciais e de estatística',
+  analytics: 'cookies essenciais e de estatística',
   denied: 'só cookies essenciais',
 }
 
+type OptionChoice = Extract<ConsentChoice, 'all' | 'analytics' | 'denied'>
+
 interface Option {
-  choice: ConsentChoice
+  choice: OptionChoice
   label: string
+}
+
+/** Qual botão aparece marcado para a escolha guardada. */
+function selectedOption(choice: ConsentChoice | null, metaPixel: boolean): OptionChoice | null {
+  if (choice === null) return null
+  if (choice === 'denied') return 'denied'
+  // Sem Pixel, não há ferramenta de marketing: 'all' tem o mesmo efeito de estatísticas.
+  if (choice === 'all' && metaPixel) return 'all'
+  return 'analytics'
 }
 
 export function CookiesPage() {
@@ -28,20 +44,24 @@ export function CookiesPage() {
 
   const options: Option[] = metaPixel
     ? [
-        { choice: 'granted', label: 'Aceitar todos' },
+        { choice: 'all', label: 'Aceitar estatísticas e marketing' },
         { choice: 'analytics', label: 'Só estatísticas' },
         { choice: 'denied', label: 'Recusar não essenciais' },
       ]
     : [
-        { choice: 'granted', label: 'Aceitar estatísticas' },
+        { choice: 'analytics', label: 'Aceitar estatísticas' },
         { choice: 'denied', label: 'Recusar não essenciais' },
       ]
 
-  // Sem Pixel configurado, 'granted' e 'analytics' têm o mesmo efeito.
-  const isSelected = (option: ConsentChoice) =>
-    choice === option || (!metaPixel && option === 'granted' && choice === 'analytics')
+  const current = selectedOption(choice, metaPixel)
+  const currentLabel =
+    choice === null
+      ? 'você ainda não escolheu'
+      : metaPixel || !choiceAllows(choice, 'marketing')
+        ? CHOICE_LABEL[choice]
+        : CHOICE_LABEL.analytics
 
-  const choose = (next: ConsentChoice) => {
+  const choose = (next: OptionChoice) => {
     setConsent(next)
     setChoice(next)
     setSaved(true)
@@ -102,19 +122,25 @@ export function CookiesPage() {
         acesso removidos. Veja a <Link to="/privacidade">Política de Privacidade</Link>.
       </p>
 
-      <h2>Gerir consentimento</h2>
+      <h2>Gerenciar consentimento</h2>
       <p>
         Você pode mudar a sua preferência a qualquer momento. Se recusar, as ferramentas de estatística
         {metaPixel ? ' e de marketing' : ''} não são carregadas; se você tinha aceitado antes, paramos o envio e
-        apagamos os cookies do Google Analytics{metaPixel ? ' e da Meta' : ''} deste site.
+        apagamos os cookies do PostHog e do Google Analytics{metaPixel ? ' e da Meta' : ''} deste site.
       </p>
+      {metaPixel && (
+        <p>
+          O botão “Aceitar” do aviso de cookies vale só para estatísticas. Os cookies de marketing só são usados se
+          você escolher “Aceitar estatísticas e marketing” abaixo.
+        </p>
+      )}
       <p data-testid="cookie-current-choice">
-        <strong>Sua escolha atual:</strong> {choice ? CHOICE_LABEL[choice] : 'você ainda não escolheu'}.
+        <strong>Sua escolha atual:</strong> {currentLabel}.
       </p>
 
       <div className="flex flex-col gap-3 sm:flex-row" role="group" aria-label="Preferência de cookies">
         {options.map((option) => {
-          const selected = isSelected(option.choice)
+          const selected = current === option.choice
           return (
             <button
               key={option.choice}
