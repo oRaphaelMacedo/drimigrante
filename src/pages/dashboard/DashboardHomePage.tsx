@@ -314,7 +314,9 @@ export function DashboardHomePage() {
         completedAt={parseDate(result?.completedAt)}
         hasPaid={access.hasPaidOnce || paidAccess}
         paidAt={parseDate(authUser?.subscription?.one_time_paid_at)}
-        analysisReady={!!result?.iaExplanationFull}
+        // DI-016: o hook não lê mais ia_explanation_full (sempre null); quem diz se a
+        // análise existe é analysisReady. O fallback só cobre objetos montados à mão.
+        analysisReady={result?.analysisReady ?? !!result?.iaExplanationFull}
         canAnalysis={canAnalysis}
         accessEndedAt={access.state === 'expired' ? access.expiresAt : null}
         canDocuments={canDocuments}

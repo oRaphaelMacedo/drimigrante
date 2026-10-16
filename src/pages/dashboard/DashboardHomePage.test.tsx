@@ -370,6 +370,14 @@ describe('DashboardHomePage — boas-vindas e linha do tempo', () => {
     expect(screen.getByTestId('timeline-analysis')).toHaveAttribute('data-status', 'done')
   })
 
+  it('análise pronta pelo hook real (analysisReady, sem iaExplanationFull): etapa concluída', () => {
+    mocks.result = quizResult({ iaExplanationFull: null, analysisReady: true })
+    setAuth(subscription(20))
+    renderHome()
+    expect(screen.getByTestId('timeline-analysis')).toHaveAttribute('data-status', 'done')
+    expect(screen.getByTestId('timeline-analysis')).toHaveTextContent('Disponível em Minha análise')
+  })
+
   it('expirado: a análise não aparece como disponível', () => {
     setAuth(subscription(-3))
     renderHome()
