@@ -14,6 +14,7 @@ import { useQuizPersistence, type QuizSession } from './useQuizPersistence'
 import { useQuizState, type QuizFlowState } from './useQuizState'
 import { useQuizQuestions } from './useQuizQuestions'
 import { supabase } from '@/lib/supabase'
+import { getAttribution } from '@/lib/attribution'
 import {
   answersKey,
   createSessionId,
@@ -25,17 +26,12 @@ import {
 
 // Atribuição (UTMs) — contrato com o W1-07: src/lib/attribution.ts exporta
 // getAttribution(): { utm_source?, utm_medium?, utm_campaign? } (first-touch).
-// O glob abaixo usa o módulo quando ele existe e cai para a URL atual quando não.
-// TODO(W1-07): depois do merge, trocar por `import { getAttribution } from '@/lib/attribution'`.
+// Se ele não trouxer nada, cai para as UTMs da URL atual.
 interface Attribution {
   utm_source?: string | null
   utm_medium?: string | null
   utm_campaign?: string | null
 }
-const attributionModules = import.meta.glob<{ getAttribution?: () => Attribution }>(
-  '../lib/attribution.ts',
-  { eager: true },
-)
 
 function readAttribution(): Attribution {
   const params = new URLSearchParams(window.location.search)
@@ -46,7 +42,7 @@ function readAttribution(): Attribution {
   }
   let stored: Attribution = {}
   try {
-    stored = Object.values(attributionModules)[0]?.getAttribution?.() ?? {}
+    stored = getAttribution()
   } catch {
     stored = {}
   }

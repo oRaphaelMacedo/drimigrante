@@ -41,7 +41,8 @@ export function UiDemo() {
   const [submitted, setSubmitted] = useState(false)
 
   useEffect(() => {
-    ;(window as unknown as { __uiDemoReady?: boolean }).__uiDemoReady = true
+    const demoWindow = window as unknown as { __uiDemoReady?: boolean }
+    demoWindow.__uiDemoReady = true
   }, [])
 
   const emailError = submitted && !email.includes('@') ? 'Informe um e-mail válido.' : undefined
