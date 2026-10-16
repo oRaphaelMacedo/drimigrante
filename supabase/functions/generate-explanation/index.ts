@@ -7,15 +7,19 @@
 //            404 not_found · 409 eligibility_not_computed · 502 ai_unavailable.
 // A análise completa NUNCA volta na resposta: o front lê de assessment_results (RLS).
 //
+// CORS: allowlist de _shared/cors.ts (chamada pelo navegador, no fim do quiz).
+// Observabilidade: _shared/observability.ts (logs JSON e Sentry com SENTRY_DSN_BACKEND).
 // Env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, OPENAI_API_KEY, INTERNAL_SECRET, APP_URL,
-//      AI_HOURLY_CAP (opcional; padrão 60 gerações/hora em toda a plataforma).
+//      AI_HOURLY_CAP (opcional; padrão 60 gerações/hora em toda a plataforma);
+//      opcionais CORS_ALLOWED_ORIGINS, SENTRY_DSN_BACKEND, SENTRY_ENVIRONMENT, SENTRY_RELEASE.
 
-import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { createLogger } from '../_shared/http.ts'
+import { createClient } from 'npm:@supabase/supabase-js@2.105.4'
+import { withCors } from '../_shared/cors.ts'
+import { createObservability } from '../_shared/observability.ts'
 import { createGenerateExplanationHandler, parseHourlyCap } from './handler.ts'
 import { createExplanationRepo } from './repo.ts'
 
+const obs = createObservability('generate-explanation')
 const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
 const supabase = createClient(Deno.env.get('SUPABASE_URL') ?? '', serviceRoleKey, {
   auth: { persistSession: false, autoRefreshToken: false },
@@ -32,7 +36,7 @@ const handler = createGenerateExplanationHandler({
     })
     return { error: error ?? null }
   },
-  log: createLogger('generate-explanation'),
+  log: obs.log,
   now: () => Date.now(),
   env: {
     openaiKey: Deno.env.get('OPENAI_API_KEY') ?? undefined,
@@ -42,4 +46,9 @@ const handler = createGenerateExplanationHandler({
   },
 })
 
-serve(handler)
+// Os erros 5xx do handler já saem pelo logger observado (explanation_failed...).
+Deno.serve(
+  withCors(obs.wrap(handler, { reportServerErrors: false }), {
+    onRejected: (origin, method) => obs.log('warn', 'cors_rejected', { origin, method }),
+  }),
+)

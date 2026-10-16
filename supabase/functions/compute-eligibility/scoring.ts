@@ -1,6 +1,7 @@
-// compute-eligibility/scoring.ts — avaliador JSON-Logic mínimo e cálculo de score.
-// Lógica movida sem alteração de comportamento do index.ts original (a revisão do
-// score fica com o DI-006/_shared/quiz-engine.ts).
+// compute-eligibility/scoring.ts — avaliador JSON-Logic mínimo das regras de visto
+// (rule_versions.rules). O score do quiz NÃO é calculado aqui: ele vem de
+// _shared/quiz-engine.ts (DI-006), igual ao do front. O cálculo antigo (soma de todas
+// as perguntas com denominador fixo de 428 pontos e limiar 65) foi removido.
 
 // Minimal JSON-Logic evaluator for MVP
 // Phase 2: use full json-logic-js library
@@ -42,44 +43,4 @@ export function resolveValue(v: unknown, data: Record<string, unknown>): unknown
     return data[key]
   }
   return v
-}
-
-export interface ScoringOption {
-  question_key: string
-  option_key: string
-  score: number
-}
-
-export function calculateScore(answers: Record<string, unknown>, options: ScoringOption[]): number {
-  let total = 0
-  let maxPossible = 0
-
-  const scoresByQuestion: Record<string, number> = {}
-  const maxByQuestion: Record<string, number> = {}
-
-  for (const opt of options) {
-    if (!maxByQuestion[opt.question_key] || opt.score > maxByQuestion[opt.question_key]) {
-      maxByQuestion[opt.question_key] = opt.score
-    }
-  }
-
-  for (const opt of options) {
-    const answer = answers[opt.question_key]
-    if (answer === opt.option_key || (Array.isArray(answer) && (answer as string[]).includes(opt.option_key))) {
-      if (!scoresByQuestion[opt.question_key] || opt.score > scoresByQuestion[opt.question_key]) {
-        scoresByQuestion[opt.question_key] = opt.score
-      }
-    }
-  }
-
-  for (const [key, max] of Object.entries(maxByQuestion)) {
-    maxPossible += max
-    total += scoresByQuestion[key] ?? 0
-  }
-
-  return maxPossible > 0 ? Math.round((total / maxPossible) * 100) : 0
-}
-
-export function scoreCategoryFor(scoreNumeric: number): 'alta' | 'media' | 'baixa' {
-  return scoreNumeric >= 65 ? 'alta' : scoreNumeric >= 35 ? 'media' : 'baixa'
 }

@@ -1,7 +1,11 @@
 // _shared/http.ts — utilitários HTTP e de log das Edge Functions de IA/e-mail.
 
+/**
+ * Cabeçalhos CORS de base dos handlers. Access-Control-Allow-Origin NÃO fica aqui
+ * (era '*'): o index.ts de cada function aplica a allowlist de _shared/cors.ts, que
+ * decide a origem por requisição e substitui qualquer Access-Control-* do handler.
+ */
 export const corsHeaders: Record<string, string> = {
-  'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 }

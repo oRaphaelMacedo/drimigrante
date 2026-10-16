@@ -1,6 +1,8 @@
 // compute-eligibility/repo.ts — acesso ao banco (service role) usado pelo handler.
+// Toda query checa `error` e lança: o handler responde 500 sem gravar nada (DI-006).
 
-import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import type { SupabaseClient } from 'npm:@supabase/supabase-js@2.105.4'
+import { type DbScoringQuestionRow, QUIZ_SCORING_SELECT } from '../_shared/quiz-engine.ts'
 import type { EligibilityRepo, SafeResult, VisaRule } from './handler.ts'
 
 /** Só colunas de score: a resposta nunca carrega as análises de IA. */
@@ -36,26 +38,23 @@ export function createEligibilityRepo(db: SupabaseClient): EligibilityRepo {
       return { result, hasAnalysis: !!(ia_explanation_short ?? '').trim() }
     },
 
-    async getScoringOptions() {
+    async getScoringQuestions() {
+      // Hint da FK obrigatória: form_question_options tem 3 FKs para form_questions e o
+      // embed sem hint devolve PGRST201 (era o que zerava o score de todo mundo).
       const { data, error } = await db
-        .from('form_question_options')
-        .select('option_key, score, form_questions!inner(question_key)')
+        .from('form_questions')
+        .select(QUIZ_SCORING_SELECT)
         .eq('is_active', true)
+        .eq('form_question_options.is_active', true)
+        .order('sort_order')
       if (error) throw error
-      return (data ?? []).map((o: Record<string, unknown>) => {
-        const fq = o.form_questions as { question_key: string } | Array<{ question_key: string }>
-        return {
-          question_key: Array.isArray(fq) ? fq[0]?.question_key : fq.question_key,
-          option_key: o.option_key as string,
-          score: o.score as number,
-        }
-      })
+      return (data ?? []) as unknown as DbScoringQuestionRow[]
     },
 
     async getActiveVisaRules() {
       const { data, error } = await db
         .from('visa_types')
-        .select('id, code, name_pt, rule_versions!inner(id, rules, is_active)')
+        .select('id, code, name_pt, rule_versions!rule_versions_visa_type_id_fkey!inner(id, rules, is_active)')
         .eq('is_active', true)
         .eq('rule_versions.is_active', true)
       if (error) throw error
