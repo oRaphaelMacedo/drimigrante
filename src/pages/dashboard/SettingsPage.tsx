@@ -1,6 +1,7 @@
 // SettingsPage.tsx — Day 7
 import { useState, useEffect } from 'react'
 import { User, Bell, Shield, Key, Loader2, Check } from 'lucide-react'
+import { SignOutButton } from '@/components/dashboard/SignOutButton'
 import { useAuth } from '@/hooks/useAuth'
 import { supabase } from '@/lib/supabase'
 import { toast } from 'sonner'
@@ -262,6 +263,20 @@ export function SettingsPage() {
           )}
         </div>
       </div>
+
+      {/* Sair da conta (DI-045): no celular é o único lugar com "Sair", sempre com confirmação. */}
+      <section
+        aria-labelledby="settings-sign-out-title"
+        className="rounded-lg border bg-card p-5 shadow-[var(--shadow-sm)] sm:p-6"
+      >
+        <h2 id="settings-sign-out-title" className="text-lg font-semibold text-foreground">
+          Sair da conta
+        </h2>
+        <p className="mt-1 text-base text-muted-foreground [text-wrap:pretty]">
+          Para entrar de novo, você vai receber um link de acesso no seu e-mail.
+        </p>
+        <SignOutButton className="mt-4" />
+      </section>
     </div>
   )
 }
