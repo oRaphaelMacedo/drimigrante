@@ -4,6 +4,31 @@
   "framework": "vite",
   "headers": [
     {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "strict-origin-when-cross-origin"
+        },
+        {
+          "key": "X-Frame-Options",
+          "value": "DENY"
+        },
+        {
+          "key": "Permissions-Policy",
+          "value": "camera=(), microphone=(), geolocation=(), payment=(), usb=(), browsing-topics=()"
+        },
+        {
+          "key": "Content-Security-Policy-Report-Only",
+          "value": "default-src 'self'; script-src 'self' https://www.googletagmanager.com https://*.posthog.com https://connect.facebook.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://krjirhlmdnxqqrpzmowz.supabase.co https://*.google-analytics.com https://*.googletagmanager.com https://www.facebook.com; font-src 'self' data:; connect-src 'self' https://krjirhlmdnxqqrpzmowz.supabase.co wss://krjirhlmdnxqqrpzmowz.supabase.co https://*.posthog.com https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com https://*.sentry.io https://www.facebook.com https://connect.facebook.net; worker-src 'self' blob:; manifest-src 'self'; frame-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'"
+        }
+      ]
+    },
+    {
       "source": "/index.html",
       "headers": [
         {
@@ -24,7 +49,7 @@
   ],
   "rewrites": [
     {
-      "source": "/(.*)",
+      "source": "/((?!assets/)[^.]*)",
       "destination": "/index.html"
     }
   ]
