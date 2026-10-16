@@ -39,6 +39,14 @@ describe('PrivacyPage (DI-083)', () => {
     expect(text).toMatch(/registros de pagamento/i)
   })
 
+  it('exportação: a análise completa só com acesso ativo; diagnósticos sem conta pelo e-mail (DI-016)', () => {
+    const { container } = renderPrivacy()
+    const text = container.textContent ?? ''
+    expect(text).not.toMatch(/diagnósticos e análise/)
+    expect(text).toContain('A análise completa vai no arquivo enquanto o seu acesso estiver ativo.')
+    expect(text).toMatch(/Diagnósticos feitos sem entrar na conta não vão no arquivo/)
+  })
+
   it('usa o contato de privacidade central e cita ANPD e CNPD', () => {
     renderPrivacy()
     const mail = screen.getAllByRole('link', { name: PRIVACY_EMAIL })

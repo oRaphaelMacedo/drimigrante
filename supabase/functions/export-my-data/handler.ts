@@ -1,9 +1,9 @@
 // export-my-data/handler.ts — exportação dos dados do titular (DI-083, LGPD art. 18 / RGPD art. 15 e 20)
 //
 // O usuário logado baixa um JSON com os dados da PRÓPRIA conta:
-//   conta (Auth), perfil, plano, diagnósticos (+ resultado e análise), mensagens
-//   do chat, documentos enviados (só a lista; os arquivos ficam na página
-//   Documentos), pagamentos e e-mails enviados (sem o corpo).
+//   conta (Auth), perfil, plano, diagnósticos (+ resultado), mensagens do chat,
+//   documentos enviados (só a lista; os arquivos ficam na página Documentos),
+//   pagamentos e e-mails enviados (sem o corpo).
 //
 // Regras:
 //  - JWT obrigatório; o usuário vem SEMPRE do token (o corpo é ignorado).
@@ -12,6 +12,14 @@
 //  - Colunas por allowlist: segredos e campos internos ficam de fora
 //    (session_id, resume_token, ia_model_used, ids do provedor de e-mail, corpo
 //    dos e-mails com links de acesso, storage_path...).
+//  - Análise completa (assessment_results.ia_explanation_full) é o conteúdo
+//    pago (DI-016): só vai no arquivo quando public.has_active_access(user,
+//    'full_analysis') responde true (€30 no prazo, €4,90 ativo ou equipe).
+//    Quem nunca pagou ou está com o acesso expirado recebe o resultado sem a
+//    análise e uma observação explicando onde ela fica. Falha na checagem →
+//    a análise fica de fora (fail closed); o resto do arquivo sai normalmente.
+//  - Diagnósticos anônimos com o mesmo e-mail NÃO são exportados (podem ter
+//    sido feitos por outra pessoa); o arquivo explica como pedir.
 //  - Resposta com Cache-Control: no-store e Content-Disposition de anexo.
 //
 // Respostas:
@@ -35,6 +43,8 @@ export interface ExportRepo {
   subscription(userId: string): Promise<Row | null>
   assessments(userId: string, limit: number): Promise<Row[]>
   results(assessmentIds: string[]): Promise<Row[]>
+  /** public.has_active_access(userId, 'full_analysis') — migration 20261020000000. */
+  hasFullAnalysisAccess(userId: string): Promise<boolean>
   messages(userId: string, limit: number): Promise<Row[]>
   documents(userId: string, limit: number): Promise<Row[]>
   payments(userId: string, limit: number): Promise<Row[]>
@@ -118,12 +128,12 @@ export const COLUMNS = {
     'created_at',
     'updated_at',
   ],
+  // Sem ia_explanation_full: ela só entra com acesso vigente (FULL_ANALYSIS_COLUMN).
   result: [
     'score_numeric',
     'score_category',
     'suggested_visa_types',
     'ia_explanation_short',
-    'ia_explanation_full',
     'computed_at',
   ],
   message: ['assessment_id', 'role', 'content', 'created_at'],
@@ -141,6 +151,18 @@ export const COLUMNS = {
   ],
   payment: ['assessment_id', 'product', 'amount_cents', 'currency', 'status', 'paid_at', 'refunded_at', 'created_at'],
   email: ['recipient_email', 'subject', 'status', 'sent_at', 'created_at'],
+} as const
+
+/** Coluna da análise completa paga (DI-016): exportada só com acesso vigente. */
+export const FULL_ANALYSIS_COLUMN = 'ia_explanation_full'
+
+/** Observações do arquivo (texto para a pessoa ler). */
+export const NOTES = {
+  analysisNotIncluded: 'A análise completa não está neste arquivo. Ela fica na página Análise do painel enquanto ' +
+    'o seu acesso estiver ativo.',
+  anonymousNotIncluded: 'Diagnósticos feitos sem entrar na conta não estão neste arquivo, mesmo que usem o seu ' +
+    'e-mail, porque podem ter sido feitos por outra pessoa. Para pedir esses dados, escreva para o e-mail de ' +
+    'privacidade indicado na Política de Privacidade.',
 } as const
 
 const corsHeaders = {
@@ -243,6 +265,20 @@ export function createExportHandler(deps: ExportDeps): (req: Request) => Promise
         if (typeof id === 'string' && assessmentIds.includes(id)) resultsByAssessment.set(id, row)
       }
 
+      // Análise completa só com acesso vigente (paywall do servidor, DI-016).
+      let fullAnalysisAllowed = false
+      if (resultsByAssessment.size > 0) {
+        try {
+          fullAnalysisAllowed = (await deps.repo.hasFullAnalysisAccess(userId)) === true
+        } catch (err) {
+          log('warn', 'access_check_failed', { kind: errorKind(err) })
+          fullAnalysisAllowed = false
+        }
+      }
+      const resultColumns: readonly string[] = fullAnalysisAllowed
+        ? [...COLUMNS.result, FULL_ANALYSIS_COLUMN]
+        : COLUMNS.result
+
       const messages = ownRows(messageRows, userId)
       const documents = ownRows(documentRows, userId)
       const payments = ownRows(paymentRows, userId)
@@ -255,6 +291,10 @@ export function createExportHandler(deps: ExportDeps): (req: Request) => Promise
         paymentRows.length >= LIMITS.payments && 'pagamentos',
         emailRows.length >= LIMITS.emails && 'emails_enviados',
       ].filter((value): value is string => typeof value === 'string')
+
+      const notes: string[] = []
+      if (resultsByAssessment.size > 0 && !fullAnalysisAllowed) notes.push(NOTES.analysisNotIncluded)
+      notes.push(NOTES.anonymousNotIncluded)
 
       const generatedAt = now()
       const payload = {
@@ -269,6 +309,7 @@ export function createExportHandler(deps: ExportDeps): (req: Request) => Promise
             }. Peça o restante pelo e-mail de privacidade.`,
           }
           : {}),
+        observacoes: notes,
         conta: {
           id: userId,
           email: user.email ?? null,
@@ -280,7 +321,7 @@ export function createExportHandler(deps: ExportDeps): (req: Request) => Promise
         plano: subscription ? pick(subscription, COLUMNS.subscription) : null,
         diagnosticos: assessments.map((row) => {
           const result = resultsByAssessment.get(row.id as string)
-          return { ...pick(row, COLUMNS.assessment), resultado: result ? pick(result, COLUMNS.result) : null }
+          return { ...pick(row, COLUMNS.assessment), resultado: result ? pick(result, resultColumns) : null }
         }),
         mensagens_chat: messages.map((row) => pick(row, COLUMNS.message)),
         documentos: documents.map((row) => pick(row, COLUMNS.document)),
@@ -290,6 +331,7 @@ export function createExportHandler(deps: ExportDeps): (req: Request) => Promise
 
       log('info', 'export_ok', {
         assessments: assessments.length,
+        full_analysis: fullAnalysisAllowed,
         messages: messages.length,
         documents: documents.length,
         payments: payments.length,

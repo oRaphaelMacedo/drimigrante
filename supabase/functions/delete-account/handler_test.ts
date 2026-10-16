@@ -19,6 +19,7 @@ const EMAIL = 'ana@example.com'
 
 class FakeRepo implements DeleteAccountRepo {
   staff = false
+  openCase = false
   subscriptionId: string | null = null
   files = new Map<string, string[]>([[USER_DOCUMENTS_BUCKET, []], [CASE_DOCUMENTS_BUCKET, []]])
   erase: EraseResult = { paymentsRetained: 1, caseDocumentPaths: [] }
@@ -33,6 +34,10 @@ class FakeRepo implements DeleteAccountRepo {
   hasStaffRole(userId: string) {
     this.calls.push(`hasStaffRole:${userId}`)
     return Promise.resolve(this.staff)
+  }
+  hasOpenCase(userId: string) {
+    this.calls.push(`hasOpenCase:${userId}`)
+    return Promise.resolve(this.openCase)
   }
   getBilling(userId: string) {
     this.calls.push(`getBilling:${userId}`)
@@ -168,7 +173,15 @@ Deno.test('cliente sem assinatura: arquivos, banco e login apagados, nessa ordem
     paths: [`${USER_ID}/general/passaporte/1.pdf`, `${USER_ID}/a1/nif/2.png`],
   }])
   const order = repo.calls.map((c) => c.split(':')[0])
-  assertEquals(order, ['hasStaffRole', 'getBilling', 'listUserFiles', 'removeFiles', 'eraseUser', 'deleteAuthUser'])
+  assertEquals(order, [
+    'hasStaffRole',
+    'hasOpenCase',
+    'getBilling',
+    'listUserFiles',
+    'removeFiles',
+    'eraseUser',
+    'deleteAuthUser',
+  ])
 })
 
 Deno.test('só remove arquivos dentro da pasta da própria conta', async () => {
@@ -241,13 +254,39 @@ Deno.test('Storage falha → 502 antes de mexer no banco', async () => {
   assertEquals(repo.erasedUserIds.length, 0)
 })
 
-Deno.test('processo em andamento → 409 open_case e o login continua', async () => {
+Deno.test('processo em andamento → 409 open_case ANTES do Stripe e do Storage (nada é tocado)', async () => {
+  const { call, repo, stripe } = setup()
+  repo.openCase = true
+  repo.subscriptionId = 'sub_ABC123def'
+  repo.files.set(USER_DOCUMENTS_BUCKET, [`${USER_ID}/general/passaporte/1.pdf`])
+  const res = await call()
+  assertEquals(res.status, 409)
+  assertEquals(res.body, { error: 'open_case' })
+  assertEquals(stripe!.cancelled.length, 0)
+  assertEquals(repo.removed.length, 0)
+  assertEquals(repo.erasedUserIds.length, 0)
+  assertEquals(repo.deletedAuthIds.length, 0)
+  assertEquals(repo.calls.map((c) => c.split(':')[0]), ['hasStaffRole', 'hasOpenCase'])
+})
+
+Deno.test('processo aberto no meio do caminho: a RPC recusa → 409 open_case e o login continua', async () => {
   const { call, repo } = setup()
   repo.eraseError = new EraseRefusedError('open_case')
   const res = await call()
   assertEquals(res.status, 409)
   assertEquals(res.body, { error: 'open_case' })
   assertEquals(repo.deletedAuthIds.length, 0)
+})
+
+Deno.test('falha ao checar processos → 500 e nada é tocado', async () => {
+  const { call, repo, stripe } = setup()
+  repo.subscriptionId = 'sub_ABC123def'
+  repo.hasOpenCase = () => Promise.reject(Object.assign(new Error('boom'), { code: 'XX000' }))
+  const res = await call()
+  assertEquals(res.status, 500)
+  assertEquals(res.body, { error: 'internal_error' })
+  assertEquals(stripe!.cancelled.length, 0)
+  assertEquals(repo.removed.length, 0)
 })
 
 Deno.test('anexos de processo encerrado são removidos do bucket de casos (falha não bloqueia)', async () => {

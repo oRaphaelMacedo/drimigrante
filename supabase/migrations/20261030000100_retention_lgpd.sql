@@ -20,7 +20,11 @@
 --      bloqueando UPDATE/DELETE, exceto a pseudonimização feita por
 --      lgpd_erase_user (GUC app.lgpd_erasure = 'on', local à transação) que
 --      só pode ZERAR actor_user_id (e ip_address/user_agent no audit_log);
---      qualquer outra coluna alterada continua sendo recusada.
+--      qualquer outra coluna alterada continua sendo recusada. A exceção nunca
+--      vale para os papéis de cliente (anon, authenticated, authenticator),
+--      mesmo com a GUC ligada: dentro de lgpd_erase_user (SECURITY DEFINER) o
+--      current_user é o dono da função. Além disso, nenhuma policy de
+--      UPDATE/DELETE existe nessas tabelas (conferido no teste pgTAP).
 --   3. public.lgpd_erase_user(p_user_id, p_source) — SECURITY DEFINER, só
 --      service_role (chamada pela Edge Function delete-account). Numa única
 --      transação:
@@ -120,7 +124,9 @@ GRANT SELECT ON TABLE public.account_deletion_log TO service_role;
 
 -- ─── 2. Append-only com exceção de pseudonimização ──────────────────────────
 -- Mesmo comportamento de antes (UPDATE e DELETE recusados), exceto um UPDATE
--- que só zera o vínculo com a pessoa, dentro de lgpd_erase_user.
+-- que só zera o vínculo com a pessoa, dentro de lgpd_erase_user. Defesa extra:
+-- papéis de cliente nunca usam a exceção (a GUC é de sessão e qualquer papel
+-- consegue ligá-la; o current_user não).
 
 CREATE OR REPLACE FUNCTION public.prevent_audit_modification()
 RETURNS TRIGGER
@@ -130,6 +136,7 @@ AS $$
 BEGIN
   IF TG_OP = 'UPDATE'
      AND current_setting('app.lgpd_erasure', true) = 'on'
+     AND current_user NOT IN ('anon', 'authenticated', 'authenticator')
      AND NEW.actor_user_id IS NULL
      AND NEW.ip_address IS NULL
      AND NEW.user_agent IS NULL
@@ -150,6 +157,7 @@ AS $$
 BEGIN
   IF TG_OP = 'UPDATE'
      AND current_setting('app.lgpd_erasure', true) = 'on'
+     AND current_user NOT IN ('anon', 'authenticated', 'authenticator')
      AND NEW.actor_user_id IS NULL
      AND (to_jsonb(NEW) - 'actor_user_id') = (to_jsonb(OLD) - 'actor_user_id')
   THEN

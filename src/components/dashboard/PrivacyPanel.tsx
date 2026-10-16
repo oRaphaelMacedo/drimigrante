@@ -1,7 +1,9 @@
 /**
  * Aba "Privacidade" da Conta (DI-083, LGPD/RGPD).
  *
- * - Baixar meus dados: JSON gerado pela Edge Function export-my-data.
+ * - Baixar meus dados: JSON gerado pela Edge Function export-my-data. A análise
+ *   completa (conteúdo pago, DI-016) só vai no arquivo com acesso vigente: o
+ *   servidor confere has_active_access e a copy avisa.
  * - Outros direitos (corrigir, limitar, se opor): pelo e-mail de privacidade.
  * - Apagar minha conta: abre o DeleteAccountSheet (confirmação digitando o
  *   e-mail). Contas da equipe não aparecem com o botão: são removidas pelo
@@ -49,11 +51,14 @@ export function PrivacyPanel() {
             <FileJson className="h-5 w-5" />
           </span>
           <p className="text-base text-foreground [text-wrap:pretty]">
-            Um arquivo (JSON) com seu perfil, seu plano, seus diagnósticos e a análise, as conversas do chat IA, a
-            lista dos documentos enviados, seus pagamentos e os e-mails que enviamos para você.
+            Um arquivo (JSON) com seu perfil, seu plano, seus diagnósticos e os resultados, as conversas do chat IA,
+            a lista dos documentos enviados, seus pagamentos e os e-mails que enviamos para você.
           </p>
         </div>
-        <p className="mt-3 text-sm text-muted-foreground [text-wrap:pretty]">
+        <p className="mt-3 text-sm text-muted-foreground [text-wrap:pretty]" data-testid="privacy-export-analysis-note">
+          A análise completa vai no arquivo enquanto o seu acesso estiver ativo.
+        </p>
+        <p className="mt-2 text-sm text-muted-foreground [text-wrap:pretty]">
           Os arquivos dos documentos você baixa na página{' '}
           <Link
             to="/dashboard/documents"

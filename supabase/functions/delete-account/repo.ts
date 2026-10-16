@@ -11,6 +11,8 @@ const MAX_DEPTH = 6
 const MAX_FILES = 10_000
 /** Caminhos por chamada de remove(). */
 const REMOVE_BATCH = 100
+/** Processos encerrados (public.case_status); os demais contam como em andamento. */
+export const CLOSED_CASE_STATUSES = ['concluded', 'cancelled'] as const
 
 interface StorageItem {
   name: string
@@ -25,6 +27,18 @@ export function createDeleteAccountRepo(db: SupabaseClient): DeleteAccountRepo {
         .select('role')
         .eq('user_id', userId)
         .neq('role', 'client')
+        .limit(1)
+      if (error) throw error
+      return (data?.length ?? 0) > 0
+    },
+
+    async hasOpenCase(userId) {
+      // Mesmo critério de lgpd_erase_user: status fora de concluded/cancelled.
+      const { data, error } = await db
+        .from('cases')
+        .select('id')
+        .eq('primary_user_id', userId)
+        .not('status', 'in', `(${CLOSED_CASE_STATUSES.join(',')})`)
         .limit(1)
       if (error) throw error
       return (data?.length ?? 0) > 0

@@ -16,7 +16,7 @@ BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
 SET LOCAL search_path = public, extensions;
 
-SELECT plan(38);
+SELECT plan(41);
 
 -- ─── Dados de teste ─────────────────────────────────────────────────────────
 -- A = cliente que pede a exclusão; B = outro cliente (não pode ser afetado);
@@ -183,6 +183,41 @@ SELECT set_config('app.lgpd_erasure', 'on', true);
 SELECT throws_ok($$ UPDATE public.audit_log SET action = 'x', actor_user_id = NULL $$,
   'P0001', 'audit_log is append-only', 'com a GUC ligada, só zerar o ator é permitido');
 SELECT set_config('app.lgpd_erasure', 'off', true);
+
+-- Clientes não alcançam a exceção: nenhuma policy de UPDATE/DELETE nos logs e,
+-- mesmo com uma policy e o privilégio dados de propósito (desfeitos no ROLLBACK)
+-- e a GUC ligada, o papel authenticated é recusado pelo trigger.
+SELECT is((SELECT count(*)::int FROM pg_policies
+            WHERE schemaname = 'public' AND tablename IN ('audit_log', 'crm_activity_log')
+              AND cmd IN ('UPDATE', 'DELETE', 'ALL')),
+          0, 'audit_log/crm_activity_log sem policy de UPDATE/DELETE para clientes');
+CREATE POLICY lgpd_test_tmp_update ON public.audit_log FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY lgpd_test_tmp_update ON public.crm_activity_log FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
+GRANT UPDATE ON public.audit_log, public.crm_activity_log TO authenticated;
+SET LOCAL ROLE authenticated;
+SELECT set_config('app.lgpd_erasure', 'on', true);
+DO $$
+BEGIN
+  UPDATE public.audit_log SET actor_user_id = NULL, ip_address = NULL, user_agent = NULL;
+  PERFORM set_config('lgpd_test.client_audit', 'permitido', true);
+EXCEPTION WHEN OTHERS THEN
+  PERFORM set_config('lgpd_test.client_audit', SQLERRM, true);
+END $$;
+DO $$
+BEGIN
+  UPDATE public.crm_activity_log SET actor_user_id = NULL;
+  PERFORM set_config('lgpd_test.client_activity', 'permitido', true);
+EXCEPTION WHEN OTHERS THEN
+  PERFORM set_config('lgpd_test.client_activity', SQLERRM, true);
+END $$;
+RESET ROLE;
+SELECT set_config('app.lgpd_erasure', 'off', true);
+SELECT is(current_setting('lgpd_test.client_audit', true), 'audit_log is append-only',
+          'authenticated com a GUC ligada não pseudonimiza audit_log');
+SELECT is(current_setting('lgpd_test.client_activity', true), 'crm_activity_log is append-only',
+          'authenticated com a GUC ligada não pseudonimiza crm_activity_log');
+DROP POLICY lgpd_test_tmp_update ON public.audit_log;
+DROP POLICY lgpd_test_tmp_update ON public.crm_activity_log;
 
 -- ─── Retenção ───────────────────────────────────────────────────────────────
 

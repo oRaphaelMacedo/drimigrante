@@ -37,7 +37,10 @@ export const DELETE_ACCOUNT_CODE_MESSAGES: Readonly<Record<string, string>> = {
   open_case: `Há um processo em andamento nesta conta. Para apagar os dados, escreva para ${PRIVACY_EMAIL}.`,
   subscription_cancel_failed:
     'Não conseguimos cancelar sua assinatura agora, então nada foi apagado. Tente de novo em alguns minutos.',
-  storage_cleanup_failed: 'Não conseguimos apagar seus documentos agora, então nada foi apagado. Tente de novo.',
+  // Pode acontecer depois do cancelamento da assinatura e com parte dos arquivos já removida:
+  // não dizer que "nada foi apagado".
+  storage_cleanup_failed:
+    'A exclusão não foi concluída: não conseguimos apagar todos os seus documentos agora. Tente de novo para terminar.',
   auth_delete_failed:
     'Seus dados foram apagados, mas o acesso ainda não foi encerrado. Tente de novo para concluir.',
 }

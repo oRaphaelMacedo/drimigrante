@@ -1,6 +1,6 @@
 // Testes do export-my-data (DI-083): handler + repo reais sobre um banco falso
-// em memória (PostgREST mínimo: select/eq/in/order/limit/maybeSingle).
-// Nenhuma chamada de rede. Rodar: deno test --no-config supabase/functions
+// em memória (PostgREST mínimo: select/eq/in/order/limit/maybeSingle + rpc
+// has_active_access). Nenhuma chamada de rede. Rodar: deno test --no-config supabase/functions
 
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2.105.4'
 import { assert, assertEquals, assertNotIncludes, assertStringIncludes } from '../_shared/test-asserts.ts'
@@ -10,7 +10,9 @@ import {
   EXPORT_FORMAT,
   exportFileName,
   type ExportRepo,
+  FULL_ANALYSIS_COLUMN,
   LIMITS,
+  NOTES,
   pick,
   type Row,
 } from './handler.ts'
@@ -19,6 +21,23 @@ import { createExportRepo } from './repo.ts'
 const ANA = 'a0000000-0000-4000-8000-00000000000a'
 const BRUNO = 'b0000000-0000-4000-8000-00000000000b'
 const NOW = new Date('2026-10-30T12:00:00.000Z')
+const FUTURE = '2026-11-20T00:00:00.000Z'
+const PAST = '2026-10-20T00:00:00.000Z'
+
+/**
+ * Espelho (só para o teste) de public.has_active_access(_, 'full_analysis')
+ * da migration 20261020000000, sem o caso da equipe.
+ */
+function mirrorFullAnalysisAccess(sub: Row | undefined, now: Date): boolean {
+  if (!sub) return false
+  if (sub.recurring_active === true) return true
+  const grants = sub.has_dashboard_access === true || sub.has_full_analysis === true
+  if (sub.one_time_paid !== true && !grants) return false
+  const expires = typeof sub.one_time_access_expires_at === 'string' ? new Date(sub.one_time_access_expires_at) : null
+  if (expires && now > expires) return false
+  if (!grants) return false
+  return sub.has_full_analysis === true
+}
 
 type Filter = (row: Row) => boolean
 
@@ -77,9 +96,21 @@ class MiniQuery implements PromiseLike<{ data: unknown; error: unknown }> {
 class MiniDb {
   tables: Record<string, Row[]> = {}
   queries: string[] = []
+  rpcCalls: Array<{ name: string; args: Record<string, unknown> }> = []
   failOn: string | null = null
   from(table: string) {
     return new MiniQuery(this, table)
+  }
+  rpc(name: string, args: Record<string, unknown>) {
+    this.rpcCalls.push({ name, args })
+    if (this.failOn === `rpc:${name}`) {
+      return Promise.resolve({ data: null, error: { message: 'function does not exist', code: '42883' } })
+    }
+    if (name !== 'has_active_access' || args._feature !== 'full_analysis') {
+      return Promise.resolve({ data: false, error: null })
+    }
+    const sub = (this.tables.subscriptions ?? []).find((row) => row.user_id === args._user_id)
+    return Promise.resolve({ data: mirrorFullAnalysisAccess(sub, NOW), error: null })
   }
   get client() {
     return this as unknown as SupabaseClient
@@ -112,6 +143,11 @@ function seed(db: MiniDb) {
       user_id: ANA,
       tier: 'one_time',
       one_time_paid: true,
+      one_time_access_expires_at: FUTURE,
+      has_dashboard_access: true,
+      has_full_analysis: true,
+      has_chat_access: true,
+      recurring_active: false,
       stripe_customer_id: 'cus_ANA123',
       stripe_payment_intent_id: 'pi_ANA',
       created_at: '2026-10-01',
@@ -297,6 +333,62 @@ function setup(opts: { repo?: ExportRepo } = {}) {
   return { db, call, logs }
 }
 
+/** Troca a assinatura da Ana (estado de acesso) antes da chamada. */
+function setAnaSubscription(db: MiniDb, patch: Row | null) {
+  const others = db.tables.subscriptions.filter((row) => row.user_id !== ANA)
+  db.tables.subscriptions = patch === null ? others : [...others, { id: 'sub-row-a', user_id: ANA, ...patch }]
+}
+
+const ACCESS_STATES: Array<{ state: string; sub: Row | null; included: boolean }> = [
+  { state: 'none (sem linha em subscriptions)', sub: null, included: false },
+  { state: 'none (nunca pagou)', sub: { tier: 'free', one_time_paid: false }, included: false },
+  {
+    state: 'expired (€30 vencido)',
+    sub: {
+      tier: 'one_time',
+      one_time_paid: true,
+      one_time_access_expires_at: PAST,
+      has_dashboard_access: true,
+      has_full_analysis: true,
+    },
+    included: false,
+  },
+  {
+    state: 'reembolso dentro do prazo (flags revogadas)',
+    sub: {
+      tier: 'one_time',
+      one_time_paid: true,
+      one_time_access_expires_at: FUTURE,
+      has_dashboard_access: false,
+      has_full_analysis: false,
+    },
+    included: false,
+  },
+  {
+    state: 'active (€30 no prazo)',
+    sub: {
+      tier: 'one_time',
+      one_time_paid: true,
+      one_time_access_expires_at: FUTURE,
+      has_dashboard_access: true,
+      has_full_analysis: true,
+    },
+    included: true,
+  },
+  {
+    state: 'recurring (€4,90 ativo depois dos 30 dias)',
+    sub: {
+      tier: 'recurring',
+      one_time_paid: true,
+      one_time_access_expires_at: PAST,
+      recurring_active: true,
+      has_dashboard_access: true,
+      has_full_analysis: true,
+    },
+    included: true,
+  },
+]
+
 Deno.test('sem token ou token inválido → 401 e nenhuma leitura', async () => {
   const { call, db } = setup()
   assertEquals((await call({})).status, 401)
@@ -317,6 +409,7 @@ Deno.test('exporta só os dados da própria conta (nada do Bruno nem do anônimo
   const diagnosticos = body.diagnosticos as Row[]
   assertEquals(diagnosticos.length, 1)
   assertEquals(diagnosticos[0].id, 'as-ana-1')
+  // Ana está no prazo do €30 (seed): a análise completa vai junto.
   assertEquals((diagnosticos[0].resultado as Row).ia_explanation_full, '## Análise da Ana')
   assertEquals((body.mensagens_chat as Row[]).map((m) => m.content), ['Pergunta da Ana'])
   assertEquals((body.documentos as Row[]).map((d) => d.file_name), ['passaporte.pdf'])
@@ -326,6 +419,49 @@ Deno.test('exporta só os dados da própria conta (nada do Bruno nem do anônimo
   for (const foreign of ['Bruno', 'bruno@example.com', BRUNO, 'cus_BRUNO9', 'nif-bruno', 'Alguém', 'as-anon']) {
     assertNotIncludes(res.text, foreign, `não pode conter ${foreign}`)
   }
+})
+
+for (const { state, sub, included } of ACCESS_STATES) {
+  Deno.test(`análise completa (paywall DI-016): ${state} → ${included ? 'vai no arquivo' : 'fica de fora'}`, async () => {
+    const { call, db } = setup()
+    setAnaSubscription(db, sub)
+    const res = await call()
+    assertEquals(res.status, 200)
+    const diagnostico = (res.body!.diagnosticos as Row[])[0]
+    const resultado = diagnostico.resultado as Row
+    // O resultado gratuito sai sempre.
+    assertEquals(resultado.score_category, 'Média')
+    assertEquals(Object.prototype.hasOwnProperty.call(resultado, FULL_ANALYSIS_COLUMN), included)
+    const notes = res.body!.observacoes as string[]
+    assertEquals(notes.includes(NOTES.analysisNotIncluded), !included)
+    assert(notes.includes(NOTES.anonymousNotIncluded))
+    if (!included) {
+      assertNotIncludes(res.text, '## Análise da Ana')
+      assertNotIncludes(res.text, FULL_ANALYSIS_COLUMN)
+    } else {
+      assertEquals(resultado.ia_explanation_full, '## Análise da Ana')
+    }
+    // A checagem é feita para o usuário do token, uma vez, com a feature certa.
+    assertEquals(db.rpcCalls, [{ name: 'has_active_access', args: { _user_id: ANA, _feature: 'full_analysis' } }])
+  })
+}
+
+Deno.test('checagem de acesso falha (ex.: RPC ausente) → 200 sem a análise completa (fail closed)', async () => {
+  const db = new MiniDb()
+  seed(db)
+  db.failOn = 'rpc:has_active_access'
+  const { call, logs } = setup({ repo: createExportRepo(db.client) })
+  const res = await call()
+  assertEquals(res.status, 200)
+  assertNotIncludes(res.text, '## Análise da Ana')
+  assertNotIncludes(res.text, FULL_ANALYSIS_COLUMN)
+  assert((res.body!.observacoes as string[]).includes(NOTES.analysisNotIncluded))
+  assertEquals(((res.body!.diagnosticos as Row[])[0].resultado as Row).score_numeric, 72)
+  assert(logs.some((l) => l.event === 'access_check_failed' && l.level === 'warn'))
+})
+
+Deno.test('a allowlist de resultados não traz a análise completa por padrão', () => {
+  assert(!(COLUMNS.result as readonly string[]).includes(FULL_ANALYSIS_COLUMN))
 })
 
 Deno.test('segredos e campos internos ficam de fora', async () => {
@@ -381,7 +517,7 @@ Deno.test('defesa extra: linhas de outro user_id vindas do repo são descartadas
   assertNotIncludes(res.text, 'Pergunta do Bruno')
 })
 
-Deno.test('conta sem dados: seções vazias, sem erro', async () => {
+Deno.test('conta sem dados: seções vazias, sem erro e sem checagem de acesso', async () => {
   const db = new MiniDb()
   const { call } = setup({ repo: createExportRepo(db.client) })
   const res = await call()
@@ -389,6 +525,8 @@ Deno.test('conta sem dados: seções vazias, sem erro', async () => {
   assertEquals(res.body!.perfil, null)
   assertEquals(res.body!.diagnosticos, [])
   assertEquals(res.body!.aviso_limite, undefined)
+  assertEquals(res.body!.observacoes, [NOTES.anonymousNotIncluded])
+  assertEquals(db.rpcCalls.length, 0)
 })
 
 Deno.test('falha de leitura → 500 internal_error, sem detalhes', async () => {

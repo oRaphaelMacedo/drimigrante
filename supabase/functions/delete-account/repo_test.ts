@@ -15,10 +15,12 @@ function fakeDb(opts: {
   rpc?: { data?: unknown; error?: { message: string; code?: string } | null }
   deleteUserError?: { message: string; status?: number } | null
   roles?: string[]
+  cases?: Array<{ primary_user_id: string; status: string | null }>
 } = {}) {
   const listCalls: string[] = []
   const removeCalls: Array<{ bucket: string; paths: string[] }> = []
   const rpcCalls: Array<{ name: string; args: unknown }> = []
+  const fromCalls: Array<{ table: string; ops: string[] }> = []
   const db = {
     storage: {
       from: (bucket: string) => ({
@@ -42,7 +44,35 @@ function fakeDb(opts: {
         deleteUser: (_id: string) => Promise.resolve({ data: null, error: opts.deleteUserError ?? null }),
       },
     },
-    from: (_table: string) => {
+    from: (table: string) => {
+      const record = { table, ops: [] as string[] }
+      fromCalls.push(record)
+      if (table === 'cases') {
+        let rows = opts.cases ?? []
+        const casesChain = {
+          select: (columns: string) => {
+            record.ops.push(`select:${columns}`)
+            return casesChain
+          },
+          eq: (column: string, value: string) => {
+            record.ops.push(`eq:${column}`)
+            rows = rows.filter((row) => (row as Record<string, unknown>)[column] === value)
+            return casesChain
+          },
+          not: (column: string, op: string, value: string) => {
+            record.ops.push(`not:${column}:${op}:${value}`)
+            const values = value.replace(/^\(|\)$/g, '').split(',')
+            // PostgREST: NOT (status IN (...)) — status NULL não conta (igual ao SQL da RPC).
+            rows = rows.filter((row) => {
+              const v = (row as Record<string, unknown>)[column]
+              return v !== null && v !== undefined && !values.includes(String(v))
+            })
+            return casesChain
+          },
+          limit: (n: number) => Promise.resolve({ data: rows.slice(0, n).map(() => ({ id: 'c' })), error: null }),
+        }
+        return casesChain
+      }
       const chain = {
         select: () => chain,
         eq: () => chain,
@@ -58,7 +88,7 @@ function fakeDb(opts: {
       return chain
     },
   }
-  return { client: db as unknown as SupabaseClient, listCalls, removeCalls, rpcCalls }
+  return { client: db as unknown as SupabaseClient, listCalls, removeCalls, rpcCalls, fromCalls }
 }
 
 Deno.test('listUserFiles percorre as subpastas de {user_id}/ e ignora placeholders', async () => {
@@ -141,4 +171,21 @@ Deno.test('hasStaffRole ignora o papel client', async () => {
     await createDeleteAccountRepo(fakeDb({ roles: ['client', 'hub_admin'] }).client).hasStaffRole(USER),
     true,
   )
+})
+
+Deno.test('hasOpenCase: só processos da pessoa fora de concluded/cancelled', async () => {
+  const cases = [
+    { primary_user_id: 'outra', status: 'intake' },
+    { primary_user_id: USER, status: 'concluded' },
+    { primary_user_id: USER, status: 'cancelled' },
+  ]
+  const closed = fakeDb({ cases })
+  assertEquals(await createDeleteAccountRepo(closed.client).hasOpenCase(USER), false)
+  assertEquals(closed.fromCalls[0], {
+    table: 'cases',
+    ops: ['select:id', 'eq:primary_user_id', 'not:status:in:(concluded,cancelled)'],
+  })
+
+  const open = fakeDb({ cases: [...cases, { primary_user_id: USER, status: 'documentation' }] })
+  assertEquals(await createDeleteAccountRepo(open.client).hasOpenCase(USER), true)
 })

@@ -6,11 +6,17 @@
 //  2. Confirmação: o corpo traz { confirm_email } e ele precisa ser o e-mail da
 //     conta (sem diferenciar maiúsculas). A tela pede para digitar o e-mail.
 //  3. Conta da equipe (qualquer papel além de 'client') → 403 staff_account.
+//     Processo (case) em andamento → 409 open_case. As duas recusas vêm ANTES
+//     de mexer no Stripe e no Storage: quem tem processo em andamento não perde
+//     assinatura nem documentos numa exclusão que seria recusada no passo 6 (a
+//     RPC confere de novo, para o caso de um processo aberto no meio do caminho).
 //  4. Assinatura de €4,90/mês: cancelada na hora no Stripe. Se o Stripe falhar,
 //     NADA é apagado (502) — apagar a conta com a cobrança ainda ativa seria pior.
 //     O customer e as faturas ficam no Stripe (dados fiscais).
 //  5. Arquivos do bucket user-documents na pasta {user_id}/ — removidos. Falhou →
-//     502, nada do banco foi apagado ainda (dá para tentar de novo).
+//     502, nada do banco foi apagado ainda (dá para tentar de novo). A assinatura
+//     já pode ter sido cancelada no passo 4 e parte dos arquivos já pode ter
+//     saído (remoção em lotes): a mensagem da tela não diz que "nada foi apagado".
 //  6. public.lgpd_erase_user (migration 20261030000100): apaga/anonimiza tudo no
 //     banco numa transação; pagamentos ficam sem o vínculo com a conta.
 //  7. Anexos de processos encerrados (bucket case-documents) devolvidos pela RPC
@@ -60,6 +66,8 @@ export class EraseRefusedError extends Error {
 export interface DeleteAccountRepo {
   /** true se a conta tem papel de equipe (qualquer papel além de 'client'). */
   hasStaffRole(userId: string): Promise<boolean>
+  /** true se há processo (case) da pessoa fora de concluded/cancelled — mesmo critério da RPC. */
+  hasOpenCase(userId: string): Promise<boolean>
   getBilling(userId: string): Promise<BillingInfo | null>
   /** Caminhos de todos os arquivos do bucket sob `${userId}/`. */
   listUserFiles(userId: string): Promise<string[]>
@@ -173,10 +181,14 @@ export function createDeleteAccountHandler(deps: DeleteAccountDeps): (req: Reque
     if (!confirmEmail) return json({ error: 'confirmation_required' }, 400)
     if (!accountEmail || confirmEmail !== accountEmail) return json({ error: 'confirmation_mismatch' }, 400)
 
-    // ── 3. Conta da equipe ────────────────────────────────────────────────────
+    // ── 3. Conta da equipe e processo em andamento ────────────────────────────
     let billing: BillingInfo | null
     try {
       if (await deps.repo.hasStaffRole(user.id)) return json({ error: 'staff_account' }, 403)
+      if (await deps.repo.hasOpenCase(user.id)) {
+        log('warn', 'erase_refused', { reason: 'open_case' })
+        return json({ error: 'open_case' }, 409)
+      }
       billing = await deps.repo.getBilling(user.id)
     } catch (err) {
       log('error', 'read_failed', { kind: errorKind(err) })

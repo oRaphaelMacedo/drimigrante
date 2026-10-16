@@ -5,7 +5,10 @@
 // em ./handler.ts (testados em ./handler_test.ts com um banco falso, incluindo o
 // isolamento entre contas); as leituras ficam em ./repo.ts.
 //
-// Não depende de migration nova (só lê tabelas que já existem).
+// Depende de 20261020000000_full_analysis_paywall.sql (public.has_active_access,
+// que o generate-explanation também usa): a análise completa paga só vai no
+// arquivo com acesso vigente. Sem a RPC, a checagem falha e a análise fica de
+// fora (fail closed); o resto da exportação funciona. Não depende da 20261030000100.
 // CORS: allowlist de _shared/cors.ts. Observabilidade: _shared/observability.ts.
 // JWT: verify_jwt fica no padrão (true) — não precisa de entrada no config.toml.
 //

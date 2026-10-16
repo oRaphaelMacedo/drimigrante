@@ -172,8 +172,10 @@ export function PrivacyPage() {
       <ul>
         <li>
           <strong>Baixar seus dados:</strong> em <Link to={PRIVACY_SETTINGS_PATH}>Conta → Privacidade</Link>, o botão
-          “Baixar meus dados” gera um arquivo com o seu perfil, plano, diagnósticos e análise, conversas do chat IA,
-          lista de documentos, pagamentos e e-mails enviados.
+          “Baixar meus dados” gera um arquivo com o seu perfil, plano, diagnósticos e resultados, conversas do chat
+          IA, lista de documentos, pagamentos e e-mails enviados. A análise completa vai no arquivo enquanto o seu
+          acesso estiver ativo. Diagnósticos feitos sem entrar na conta não vão no arquivo: peça-os pelo e-mail de
+          privacidade.
         </li>
         <li>
           <strong>Apagar a conta:</strong> na mesma página, “Apagar minha conta” remove o perfil, os diagnósticos

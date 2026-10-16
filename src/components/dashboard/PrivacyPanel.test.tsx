@@ -89,6 +89,16 @@ describe('PrivacyPanel — baixar meus dados', () => {
     await waitFor(() => expect(mocks.toast.error).toHaveBeenCalled())
     expect(String(mocks.toast.error.mock.calls[0][0])).toMatch(/Não foi possível|Algo deu errado|servidor/)
   })
+
+  it('não promete a análise completa no arquivo para quem não tem acesso (paywall DI-016)', () => {
+    setAuth(null)
+    renderPanel()
+    const card = screen.getByTestId('settings-privacy')
+    expect(card.textContent).not.toMatch(/diagnósticos e a análise/)
+    expect(screen.getByTestId('privacy-export-analysis-note')).toHaveTextContent(
+      'A análise completa vai no arquivo enquanto o seu acesso estiver ativo.',
+    )
+  })
 })
 
 describe('PrivacyPanel — apagar a conta', () => {

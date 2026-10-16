@@ -87,6 +87,11 @@ describe('deleteMyAccount', () => {
     expect(DELETE_ACCOUNT_CODE_MESSAGES.staff_account).toContain(PRIVACY_EMAIL)
   })
 
+  it('falha no Storage não afirma que nada foi apagado (assinatura e parte dos arquivos podem já ter saído)', () => {
+    expect(DELETE_ACCOUNT_CODE_MESSAGES.storage_cleanup_failed).not.toMatch(/nada foi apagado/i)
+    expect(DELETE_ACCOUNT_CODE_MESSAGES.storage_cleanup_failed).toMatch(/não foi concluída/)
+  })
+
   it('resposta sem deleted:true não é tratada como sucesso', async () => {
     mocks.invoke.mockResolvedValue({ data: {}, error: null })
     await expect(deleteMyAccount('ana@example.com')).rejects.toBeInstanceOf(AccountPrivacyError)

@@ -1,7 +1,8 @@
 // export-my-data/repo.ts — leituras com a service role, SEMPRE filtradas pelo
 // user_id do token. `select('*')` + allowlist no handler: a exportação não quebra
 // se uma coluna ainda não existir em produção (migration pendente) e nenhuma
-// coluna nova vaza sem passar pela allowlist.
+// coluna nova vaza sem passar pela allowlist. A análise completa paga depende de
+// hasFullAnalysisAccess (has_active_access), decidida no handler.
 
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2.105.4'
 import type { ExportRepo, Row } from './handler.ts'
@@ -39,6 +40,14 @@ export function createExportRepo(db: SupabaseClient): ExportRepo {
     documents: (userId, limit) => many('user_documents', userId, limit),
     payments: (userId, limit) => many('payments', userId, limit),
     emails: (userId, limit) => many('email_send_log', userId, limit),
+
+    // Mesma checagem do generate-explanation (DI-016/DI-018): só a service role
+    // executa public.has_active_access (migration 20261020000000).
+    async hasFullAnalysisAccess(userId) {
+      const { data, error } = await db.rpc('has_active_access', { _user_id: userId, _feature: 'full_analysis' })
+      if (error) throw error
+      return data === true
+    },
 
     async results(assessmentIds) {
       const out: Row[] = []
