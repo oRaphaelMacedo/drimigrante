@@ -1,4 +1,5 @@
-import { Link } from 'react-router-dom'
+import { useEffect } from 'react'
+import { Link, useLocation, useNavigationType } from 'react-router-dom'
 import { ArrowRight, CheckCircle, Star, Shield } from 'lucide-react'
 
 const steps = [
@@ -14,7 +15,38 @@ const features = [
   'Acompanhamento contínuo por €4,90/mês',
 ]
 
+/**
+ * Âncoras da landing (/#como-funciona, /#precos) — DI-038.
+ *
+ * O <ScrollRestoration/> do Layout já rola até o hash no commit da navegação;
+ * este efeito repete a rolagem depois da pintura, para o caso de a seção ainda
+ * não existir ou mudar de lugar (chunk lazy, fontes). Voltar/avançar (POP) fica
+ * com a posição salva, exceto na entrada sem estado do router (`key` 'default':
+ * link externo ou URL digitada), em que vale o hash.
+ */
+function useScrollToHash() {
+  const { hash, key } = useLocation()
+  const navigationType = useNavigationType()
+
+  useEffect(() => {
+    if (!hash) return
+    if (navigationType === 'POP' && key !== 'default') return
+    let id: string
+    try {
+      id = decodeURIComponent(hash.slice(1))
+    } catch {
+      return
+    }
+    const frame = window.requestAnimationFrame(() => {
+      document.getElementById(id)?.scrollIntoView({ block: 'start' })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [hash, key, navigationType])
+}
+
 export function LandingPage() {
+  useScrollToHash()
+
   return (
     <div>
       {/* Hero */}
@@ -40,12 +72,13 @@ export function LandingPage() {
                 Fazer Quiz Gratuito
                 <ArrowRight className="h-4 w-4" />
               </Link>
-              <a
-                href="#como-funciona"
+              {/* Link do router (e não <a href="#">): a rolagem passa pelo ScrollRestoration. */}
+              <Link
+                to="/#como-funciona"
                 className="px-6 py-3.5 text-base font-medium text-white/80 hover:text-white transition"
               >
                 Como funciona →
-              </a>
+              </Link>
             </div>
           </div>
         </div>
@@ -55,7 +88,7 @@ export function LandingPage() {
       </section>
 
       {/* How it works */}
-      <section id="como-funciona" className="py-20">
+      <section id="como-funciona" className="scroll-mt-16 py-20">
         <div className="container">
           <h2 className="mb-12 text-center text-3xl font-bold text-gray-900">Como Funciona</h2>
           <div className="grid gap-8 md:grid-cols-3">
@@ -93,7 +126,7 @@ export function LandingPage() {
       </section>
 
       {/* Pricing */}
-      <section id="precos" className="py-20">
+      <section id="precos" className="scroll-mt-16 py-20">
         <div className="container">
           <h2 className="mb-12 text-center text-3xl font-bold text-gray-900">Preços Simples e Transparentes</h2>
           <div className="mx-auto grid max-w-3xl gap-6 md:grid-cols-2">
