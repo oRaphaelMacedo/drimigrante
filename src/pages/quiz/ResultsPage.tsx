@@ -25,7 +25,7 @@ import type { QuizResult } from '@/hooks/useQuiz'
 import { pruneAnswers, suggestVisas, type VisaSuggestion } from '@/data/quiz-questions'
 import { track, trackOnce } from '@/lib/analytics'
 import { useAuth } from '@/hooks/useAuth'
-import { readStoredCheckoutData, useStartCheckout } from '@/hooks/useStartCheckout'
+import { readStoredCheckoutData, useStartCheckout, type CheckoutError } from '@/hooks/useStartCheckout'
 import { QUIZ_RESULT_STORAGE_KEY } from '@/lib/stored-quiz-result'
 import { categoryForPercentage, getCategoryPresentation, isScoreCategory, CATEGORY_THRESHOLDS } from '@/lib/category'
 import { updateAccessEmail } from '@/lib/access-email'
@@ -72,6 +72,31 @@ function prefersReducedMotion(): boolean {
 function scrollToElement(el: Element | null | undefined, block: ScrollLogicalPosition): void {
   if (!el || typeof el.scrollIntoView !== 'function') return
   el.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block })
+}
+
+/**
+ * O navegador deixa este site gravar no localStorage? Com cookies bloqueados (ou
+ * em navegadores que travam o armazenamento), o resultado aparece pela memória,
+ * mas o useStartCheckout não encontra o diagnóstico para comprar.
+ */
+function canUseStorage(): boolean {
+  try {
+    const probe = '__di_storage_probe__'
+    window.localStorage.setItem(probe, '1')
+    window.localStorage.removeItem(probe)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** Compra impossível porque o navegador não guarda dados: diz o porquê e o que fazer. */
+const STORAGE_BLOCKED_ERROR: CheckoutError = {
+  message:
+    'Este navegador não deixa o site guardar dados (janela anônima ou cookies bloqueados), e sem isso não conseguimos abrir o pagamento. Abra o site no navegador padrão do celular, fora da janela anônima, e refaça o quiz grátis por lá ou abra de novo o link do seu resultado.',
+  action: 'quiz',
+  reason: 'storage_unavailable',
+  status: null,
 }
 
 /** Tira parâmetros da barra de endereço na hora (antes do pageview agendado). */
@@ -204,9 +229,10 @@ function ResultsContent({ loaded, notice }: { loaded: LoadedResult; notice: Reac
   const onceKey = loaded.key ?? `${category}:${score.percentage}`
 
   const scoreRef = useRef<HTMLDivElement>(null)
-  const buyBlockRef = useRef<HTMLDivElement>(null)
+  // Botão de compra da oferta: a barra fixa some enquanto ELE está na tela.
   const ctaRef = useRef<HTMLButtonElement>(null)
   const buySourceRef = useRef<'paywall' | 'sticky' | null>(null)
+  const [storageBlocked, setStorageBlocked] = useState(false)
   const [editedEmail, setEditedEmail] = useState<string | null>(null)
   const [resumeToken, setResumeToken] = useState<string | null>(loaded.resumeToken)
 
@@ -234,8 +260,19 @@ function ResultsContent({ loaded, notice }: { loaded: LoadedResult; notice: Reac
   }, [resumeToken, paid, assessmentId, sessionId])
 
   const buy = (source: 'paywall' | 'sticky') => {
+    const position = source === 'sticky' ? 'results_sticky' : 'results_paywall'
+    // O resultado está na tela, mas o navegador não guardou o diagnóstico: o
+    // checkout diria "não encontramos seu diagnóstico". Explica o motivo real.
+    if (checkout.mode === 'empty' && !canUseStorage()) {
+      setStorageBlocked(true)
+      track('paywall_cta_clicked', { position })
+      track('checkout_failed', { reason: STORAGE_BLOCKED_ERROR.reason, plan: 'one_time' })
+      if (source === 'sticky') scrollToElement(ctaRef.current, 'center')
+      return
+    }
+    setStorageBlocked(false)
     buySourceRef.current = source
-    void checkout.start({ position: source === 'sticky' ? 'results_sticky' : 'results_paywall' })
+    void checkout.start({ position })
   }
 
   // Compra iniciada pela barra fixa que voltou com erro ou aviso: leva a pessoa
@@ -277,7 +314,6 @@ function ResultsContent({ loaded, notice }: { loaded: LoadedResult; notice: Reac
 
         <PaywallCard
           ctaRef={ctaRef}
-          buyBlockRef={buyBlockRef}
           firstName={firstName}
           category={category}
           strongestPath={pathways[0] ?? null}
@@ -286,9 +322,9 @@ function ResultsContent({ loaded, notice }: { loaded: LoadedResult; notice: Reac
           email={email}
           emailEditable={anonymous}
           onEmailSave={handleEmailSave}
-          phase={checkout.phase}
+          phase={storageBlocked ? 'error' : checkout.phase}
           isPending={checkout.isPending}
-          error={checkout.error}
+          error={storageBlocked ? STORAGE_BLOCKED_ERROR : checkout.error}
           onBuy={() => buy('paywall')}
         />
 
@@ -310,7 +346,7 @@ function ResultsContent({ loaded, notice }: { loaded: LoadedResult; notice: Reac
       {!paid && (
         <StickyBuyBar
           anchorRef={scoreRef}
-          offerRef={buyBlockRef}
+          inlineCtaRef={ctaRef}
           isPending={checkout.isPending}
           onBuy={() => buy('sticky')}
         />

@@ -61,11 +61,17 @@ export function firstNameOf(fullName: string | null | undefined): string | null 
 }
 
 /**
- * Título da oferta com o caminho mais forte (DI-030). Sem caminho conhecido
- * (ex.: análise individual), um título neutro.
+ * Título da oferta com o caminho mais forte (DI-030). Título neutro quando não
+ * há caminho conhecido (ex.: análise individual) ou quando o mais forte ainda é
+ * só "a explorar" (weak): prometer "o passo a passo para a naturalização" a quem
+ * não cumpre os requisitos hoje seria enganoso.
  */
-export function offerTitle(firstName: string | null, strongest: { code: string } | null | undefined): string {
-  const phrase = strongest ? OFFER_PATH_PHRASE[strongest.code] : undefined
+export function offerTitle(
+  firstName: string | null,
+  strongest: { code: string; match?: string } | null | undefined,
+): string {
+  const usable = strongest && strongest.match !== 'weak' ? strongest : null
+  const phrase = usable ? OFFER_PATH_PHRASE[usable.code] : undefined
   const lead = firstName ? `${firstName}, veja` : 'Veja'
   return phrase ? `${lead} o passo a passo para ${phrase}` : `${lead} a análise completa do seu caso`
 }

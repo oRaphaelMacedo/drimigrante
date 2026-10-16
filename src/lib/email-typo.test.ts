@@ -52,6 +52,48 @@ describe('suggestEmailCorrection', () => {
     expect(suggestEmailCorrection('ana@outlook.pt')).toBeNull()
   })
 
+  it('provedores reais parecidos com os comuns nunca são "corrigidos"', () => {
+    for (const domain of ['ymail.com', 'aol.com', 'mac.com', 'me.com', 'msn.com', 'gmx.com', 'gmx.net', 'aim.com']) {
+      expect(suggestEmailCorrection(`ana@${domain}`)).toBeNull()
+    }
+    expect(suggestEmailCorrection('ana@googlemail.com')).toBeNull()
+    expect(suggestEmailCorrection('ana@protonmail.ch')).toBeNull()
+    expect(suggestEmailCorrection('ana@oi.com.br')).toBeNull()
+  })
+
+  it('não troca o país de um provedor com domínios regionais', () => {
+    for (const domain of [
+      'yahoo.com.ar',
+      'hotmail.com.ar',
+      'yahoo.com.mx',
+      'yahoo.com.pt',
+      'outlook.com.pt',
+      'live.com.pt',
+      'hotmail.co.uk',
+      'hotmail.ca',
+      'live.ca',
+      'yahoo.ca',
+      'outlook.pt',
+      'yahoo.com.co',
+    ]) {
+      expect(suggestEmailDomain(domain)).toBeNull()
+    }
+  })
+
+  it('em provedor regional, corrige o nome e mantém o país digitado', () => {
+    expect(suggestEmailDomain('hotmial.com.ar')).toBe('hotmail.com.ar')
+    expect(suggestEmailDomain('yaho.com.mx')).toBe('yahoo.com.mx')
+    expect(suggestEmailDomain('hotmal.co.uk')).toBe('hotmail.co.uk')
+    // Sufixo cortado ou país implausível continuam sendo erro de digitação.
+    expect(suggestEmailDomain('hotmail.co')).toBe('hotmail.com')
+    expect(suggestEmailDomain('hotmail.com.bt')).toBe('hotmail.com.br')
+  })
+
+  it('sem o ".br", UOL e BOL não viram aol.com', () => {
+    expect(suggestEmailDomain('uol.com')).toBe('uol.com.br')
+    expect(suggestEmailDomain('bol.com')).toBe('bol.com.br')
+  })
+
   it('domínio curto aceita só 1 letra de diferença', () => {
     expect(suggestEmailDomain('sapo.pt')).toBeNull()
     expect(suggestEmailDomain('sapo.p')).toBe('sapo.pt')

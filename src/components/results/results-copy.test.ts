@@ -52,6 +52,15 @@ describe('título da oferta (DI-030)', () => {
     expect(offerTitle(null, null)).toBe('Veja a análise completa do seu caso')
   })
 
+  it('caminho mais forte só "a explorar" (weak): título neutro, sem prometer o passo a passo', () => {
+    expect(offerTitle('Ana', { code: 'naturalizacao_residencia', match: 'weak' })).toBe(
+      'Ana, veja a análise completa do seu caso',
+    )
+    expect(offerTitle('Ana', { code: 'naturalizacao_residencia', match: 'possible' })).toBe(
+      'Ana, veja o passo a passo para a naturalização por residência',
+    )
+  })
+
   it('nome do caminho em sentence case vindo do catálogo', () => {
     expect(
       pathwayTitle({ code: 'nacionalidade_descendencia_1', name: 'Nacionalidade por Descendência (1.º grau)' }),

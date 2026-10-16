@@ -27,8 +27,8 @@ export const PAYWALL_TITLE_ID = 'results-offer-title'
 export interface PaywallCardProps {
   firstName: string | null
   category: string
-  /** Caminho mais forte (para o título). */
-  strongestPath: { code: string } | null
+  /** Caminho mais forte (para o título; "a explorar" usa o título neutro). */
+  strongestPath: { code: string; match: string } | null
   /** Já tem acesso: mostra o atalho para o painel em vez da oferta. */
   paid: boolean
   /** Chave do diagnóstico para o paywall_viewed (uma vez por diagnóstico). */
@@ -42,14 +42,11 @@ export interface PaywallCardProps {
   isPending: boolean
   error: CheckoutError | null
   onBuy: () => void
-  /** Botão de compra (para a página levar a pessoa até ele, ex.: erro vindo da barra fixa). */
-  ctaRef?: Ref<HTMLButtonElement>
   /**
-   * Bloco de compra (preço, e-mail de acesso, botão e retorno do pagamento).
-   * Enquanto ele está visível, a barra fixa some: nunca há dois CTAs na tela nem
-   * a barra cobrindo o e-mail ou o botão.
+   * Botão de compra. A página observa ele para esconder a barra fixa enquanto
+   * está na tela e rola até ele quando a compra pela barra volta com erro.
    */
-  buyBlockRef?: Ref<HTMLDivElement>
+  ctaRef?: Ref<HTMLButtonElement>
 }
 
 export const PaywallCard = forwardRef<HTMLDivElement, PaywallCardProps>(function PaywallCard(
@@ -67,7 +64,6 @@ export const PaywallCard = forwardRef<HTMLDivElement, PaywallCardProps>(function
     error,
     onBuy,
     ctaRef,
-    buyBlockRef,
   },
   ref,
 ) {
@@ -160,7 +156,7 @@ export const PaywallCard = forwardRef<HTMLDivElement, PaywallCardProps>(function
           </>
         )}
 
-        <div ref={buyBlockRef} data-testid="results-buy-block">
+        <div data-testid="results-buy-block">
           <div className="mb-4 flex flex-wrap items-baseline gap-x-2 gap-y-1">
             <span className="text-4xl font-bold leading-none text-foreground">{OFFER.priceLabel}</span>
             <span className="text-sm text-muted-foreground">

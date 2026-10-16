@@ -5,7 +5,7 @@
  * de acesso editável (DI-031) e link de retomada ?r= (DI-024).
  * Supabase, auth, analytics e Sentry mockados: nenhuma chamada de rede.
  */
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -274,6 +274,77 @@ describe('CTA fixo (DI-028)', () => {
     }
   })
 
+  it('a barra observa o próprio botão da oferta: some quando ele entra na tela e volta quando sai', async () => {
+    // IntersectionObserver controlado pelo teste (o jsdom não tem layout).
+    class FakeObserver {
+      static all: FakeObserver[] = []
+      targets: Element[] = []
+      constructor(private readonly callback: IntersectionObserverCallback) {
+        FakeObserver.all.push(this)
+      }
+      observe(el: Element) {
+        this.targets.push(el)
+      }
+      unobserve() {}
+      disconnect() {
+        this.targets = []
+      }
+      takeRecords() {
+        return []
+      }
+      fire(el: Element, isIntersecting: boolean, bottom: number) {
+        if (!this.targets.includes(el)) return
+        const entry = { target: el, isIntersecting, boundingClientRect: { bottom } } as unknown as IntersectionObserverEntry
+        this.callback([entry], this as unknown as IntersectionObserver)
+      }
+    }
+    const fire = (el: Element, isIntersecting: boolean, bottom = isIntersecting ? 100 : -10) =>
+      act(() => {
+        for (const observer of FakeObserver.all) observer.fire(el, isIntersecting, bottom)
+      })
+    vi.stubGlobal('IntersectionObserver', FakeObserver)
+    try {
+      seedQuiz()
+      renderAt('/results')
+      const button = await screen.findByTestId('results-cta-paywall')
+      const bar = screen.getByTestId('sticky-cta')
+      const observed = () => FakeObserver.all.flatMap((observer) => observer.targets)
+
+      // O alvo do "CTA inline" é o botão, não o bloco de compra inteiro.
+      expect(observed()).toContain(button)
+      expect(observed()).not.toContain(screen.getByTestId('results-buy-block'))
+
+      expect(bar).toHaveAttribute('data-state', 'hidden')
+      fire(screen.getByTestId('results-score'), false) // resultado saiu da tela por cima
+      expect(bar).toHaveAttribute('data-state', 'visible')
+      fire(button, true) // o botão da oferta entrou na tela
+      expect(bar).toHaveAttribute('data-state', 'hidden')
+      fire(button, false) // rolou para além dele
+      expect(bar).toHaveAttribute('data-state', 'visible')
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('navegador sem armazenamento: explica por que não dá para pagar daqui', async () => {
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('bloqueado', 'SecurityError')
+    })
+    renderAt('/results', {
+      result: {
+        score: { ...computeScore(ANSWERS), percentage: 80, category: 'alta' as const },
+        visas: suggestVisas(ANSWERS),
+        leadInfo: { fullName: 'Maria Souza', email: 'maria.souza@gmail.com' },
+      },
+    })
+    await userEvent.click(await screen.findByTestId('results-cta-paywall'))
+    const alert = await screen.findByTestId('checkout-error')
+    expect(alert).toHaveTextContent(/não deixa o site guardar dados/)
+    expect(alert).not.toHaveTextContent(/Não encontramos seu diagnóstico/)
+    expect(mocks.invoke).not.toHaveBeenCalled()
+    expect(mocks.track).toHaveBeenCalledWith('checkout_failed', { reason: 'storage_unavailable', plan: 'one_time' })
+  })
+
   it('quem já pagou não vê a barra nem a oferta', async () => {
     seedQuiz()
     mocks.paid = true
@@ -392,6 +463,37 @@ describe('link de retomada (DI-024)', () => {
     )
     // Nada do token em eventos.
     expect(JSON.stringify([...mocks.track.mock.calls, ...mocks.trackOnce.mock.calls])).not.toContain(TOKEN)
+  })
+
+  it('aberto pelo link, corrigir o e-mail não cria diagnóstico antes da compra', async () => {
+    mocks.rpc.mockImplementation(async (fn: string) =>
+      fn === 'get_assessment_by_resume_token' ? { data: [ROW], error: null } : { data: [], error: null },
+    )
+    mocks.persist.mockResolvedValue({ assessment: { id: '00000000-0000-0000-0000-0000000000bb' }, error: null })
+    mocks.invoke.mockImplementation(async (fn: string) =>
+      fn === 'create-checkout-session' ? { data: { status: 'email_sent' }, error: null } : { data: {}, error: null },
+    )
+    renderAt(`/results?r=${TOKEN}`)
+
+    await userEvent.click(await screen.findByTestId('results-access-email-edit'))
+    const input = screen.getByTestId('results-access-email-input')
+    await userEvent.clear(input)
+    await userEvent.type(input, 'maria.nova@gmail.com')
+    await userEvent.click(screen.getByRole('button', { name: 'Salvar e-mail' }))
+    expect(await screen.findByText('maria.nova@gmail.com')).toBeInTheDocument()
+    expect(storedRecord().leadInfo.email).toBe('maria.nova@gmail.com')
+    expect(mocks.persist).not.toHaveBeenCalled()
+
+    // Só a compra salva o diagnóstico (uma vez), já com o e-mail corrigido.
+    await userEvent.click(screen.getByTestId('results-cta-paywall'))
+    await waitFor(() =>
+      expect(mocks.invoke).toHaveBeenCalledWith(
+        'create-checkout-session',
+        expect.objectContaining({ body: expect.objectContaining({ email: 'maria.nova@gmail.com' }) }),
+      ),
+    )
+    expect(mocks.persist).toHaveBeenCalledTimes(1)
+    expect(mocks.persist).toHaveBeenCalledWith(expect.objectContaining({ email: 'maria.nova@gmail.com' }))
   })
 
   it('token inválido: estado com CTA para refazer o quiz e URL sem r', async () => {

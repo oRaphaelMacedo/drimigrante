@@ -106,6 +106,14 @@ describe('updateAccessEmail (DI-031)', () => {
     expect(stored().leadInfo.email).toBe('maria@gmail.com')
   })
 
+  it('resultado aberto pelo link (sem assessmentId): troca só no aparelho, sem criar diagnóstico', async () => {
+    seed({ assessmentId: null, resumedAt: '2026-10-16T10:00:00.000Z' })
+    await expect(updateAccessEmail('maria@gmail.com')).resolves.toBe('saved_locally')
+    expect(mocks.persist).not.toHaveBeenCalled()
+    expect(stored().leadInfo.email).toBe('maria@gmail.com')
+    expect(stored().assessmentId).toBeNull()
+  })
+
   it('sem resultado no aparelho: unavailable', async () => {
     await expect(updateAccessEmail('maria@gmail.com')).resolves.toBe('unavailable')
   })

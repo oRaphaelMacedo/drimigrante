@@ -1,11 +1,13 @@
 // StickyBuyBar.tsx — CTA de compra fixo no celular do /results (DI-028).
 //
 // Construído sobre o StickyCTA de src/components/ui: aparece quando o cartão do
-// resultado sai da tela e some enquanto o bloco de compra da oferta (preço,
-// e-mail de acesso e botão do PaywallCard) está visível ou um campo está focado
-// (teclado aberto). Assim há sempre um CTA na tela depois do resultado, nunca
-// dois, e a barra não cobre o e-mail nem o botão. Fica acima do banner de
-// cookies (--cookie-banner-h). A compra usa o mesmo useStartCheckout da oferta.
+// resultado sai da tela e some enquanto o PRÓPRIO botão de compra da oferta
+// (results-cta-paywall) está na tela ou um campo está focado (teclado aberto).
+// Observar o botão, e não o bloco de compra inteiro, é o que garante um CTA
+// visível o tempo todo depois do resultado: a barra só sai quando o botão
+// inline entra na tela (por baixo dela) e volta assim que ele sai. Nunca há
+// dois CTAs visíveis. Fica acima do banner de cookies (--cookie-banner-h). A
+// compra usa o mesmo useStartCheckout da oferta.
 import { useId, type RefObject } from 'react'
 import { OFFER } from '@/lib/offer'
 import { Button, StickyCTA } from '@/components/ui'
@@ -13,16 +15,16 @@ import { Button, StickyCTA } from '@/components/ui'
 export interface StickyBuyBarProps {
   /** Cartão do resultado: a barra aparece depois que ele sai da tela por cima. */
   anchorRef: RefObject<Element>
-  /** Bloco de compra da oferta: enquanto qualquer parte dele estiver visível, a barra some. */
-  offerRef: RefObject<Element>
+  /** Botão de compra da oferta (results-cta-paywall): enquanto ele estiver na tela, a barra some. */
+  inlineCtaRef: RefObject<Element>
   isPending: boolean
   onBuy: () => void
 }
 
-export function StickyBuyBar({ anchorRef, offerRef, isPending, onBuy }: StickyBuyBarProps) {
+export function StickyBuyBar({ anchorRef, inlineCtaRef, isPending, onBuy }: StickyBuyBarProps) {
   const priceId = useId()
   return (
-    <StickyCTA anchorRef={anchorRef} inlineCtaRef={offerRef} label="Comprar a análise completa">
+    <StickyCTA anchorRef={anchorRef} inlineCtaRef={inlineCtaRef} label="Comprar a análise completa">
       {/* Em telas estreitas (360px) o rótulo cabe numa linha com 15px e menos respiro. */}
       <div className="flex items-center gap-3 max-[374px]:gap-2">
         <p id={priceId} className="shrink-0 leading-tight">

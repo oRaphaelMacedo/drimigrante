@@ -11,6 +11,11 @@
  *
  * Se o diagnóstico já está ligado a uma conta, nada muda (a pessoa entra com o
  * e-mail usado no quiz). Falha de rede no passo 2 não desfaz o passo 1.
+ *
+ * Resultado aberto pelo link de retomada (DI-024, sem assessmentId neste
+ * aparelho): só o passo 1. Salvar agora criaria um diagnóstico novo (lead
+ * duplicado) antes de qualquer compra; o useStartCheckout já salva o
+ * diagnóstico, com o e-mail corrigido, quando a pessoa clica em pagar.
  */
 import { z } from 'zod'
 import { persistAssessment } from '@/hooks/useAssessment'
@@ -51,6 +56,8 @@ export const PERSIST_EMAIL_TIMEOUT_MS = 8_000
 type StoredRecord = Record<string, unknown> & {
   sessionId?: unknown
   assessmentId?: unknown
+  /** Presente quando o resultado veio do link de retomada (src/lib/resume-token.ts). */
+  resumedAt?: unknown
   answers?: unknown
   leadInfo?: { fullName?: unknown; email?: unknown; phone?: unknown } | null
 }
@@ -121,6 +128,8 @@ export async function updateAccessEmail(
   const sessionId = record.sessionId
   const answers = stringAnswers(record.answers)
   if (!usableSessionId(sessionId) || !answers) return 'saved_locally'
+  // Aberto pelo link e ainda sem diagnóstico neste aparelho: salva só na compra.
+  if (!record.assessmentId && record.resumedAt) return 'saved_locally'
 
   // 2. Depois o diagnóstico salvo (mesmo session_id → mesmo assessment).
   let attribution: ReturnType<typeof getAttribution> = {}

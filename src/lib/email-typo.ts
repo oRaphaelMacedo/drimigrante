@@ -10,6 +10,11 @@
  *    Portugal (distância de edição com transposição, até 1 em domínios curtos e
  *    até 2 nos demais);
  *  - domínio já conhecido, vazio ou sem candidato próximo → `null`;
+ *  - provedores reais parecidos com os mais comuns (`ymail.com`, `aol.com`,
+ *    `mac.com`…) também estão na lista, para nunca serem "corrigidos";
+ *  - nunca troca o país de um provedor com domínios regionais
+ *    (`hotmail.com.ar`, `yahoo.ca`, `outlook.pt` são reais): quem clicasse em
+ *    "Usar este" perderia o acesso, justamente o que o DI-031 quer evitar;
  *  - alguns erros frequentes que a distância não pega têm correção fixa
  *    (ex.: `gmail.com.br` → `gmail.com`, que não existe).
  *
@@ -35,10 +40,41 @@ export const COMMON_EMAIL_DOMAINS: readonly string[] = [
   'sapo.pt',
   'protonmail.com',
   'proton.me',
-  // Provedores reais parecidos com gmail.com: listados para nunca serem "corrigidos".
+  // Provedores reais parecidos com os de cima: listados para nunca serem "corrigidos"
+  // (ymail.com → gmail.com, aol.com/mac.com → mail.com etc.).
   'mail.com',
   'email.com',
+  'googlemail.com',
+  'ymail.com',
+  'aol.com',
+  'aim.com',
+  'mac.com',
+  'me.com',
+  'msn.com',
+  'gmx.com',
+  'gmx.net',
+  'protonmail.ch',
+  'oi.com.br',
 ]
+
+/**
+ * Provedores com domínios por país (hotmail.com.ar, yahoo.ca, outlook.pt…).
+ * Para eles, a sugestão nunca troca o país digitado por outro.
+ */
+const REGIONAL_PROVIDERS: ReadonlySet<string> = new Set(['hotmail', 'outlook', 'live', 'yahoo', 'msn'])
+
+/**
+ * Códigos de país plausíveis para quem usa o site (Portugal, América Latina,
+ * Europa e América do Norte). Um código fora desta lista ("com.bt") é tratado
+ * como erro de digitação e pode ser corrigido ("com.br").
+ */
+const REGIONAL_COUNTRY_CODES: ReadonlySet<string> = new Set([
+  'pt', 'ao', 'mz', 'cv',
+  'ar', 'bo', 'cl', 'co', 'cr', 'ec', 'mx', 'pe', 'py', 'uy', 've',
+  'ca', 'us',
+  'at', 'be', 'ch', 'de', 'dk', 'es', 'fi', 'fr', 'gr', 'ie', 'it', 'lu', 'nl', 'no', 'pl', 'se', 'uk',
+  'au', 'in', 'jp', 'nz', 'za',
+])
 
 /** Erros frequentes com correção fixa (o domínio digitado não existe como e-mail). */
 const KNOWN_TYPOS: Readonly<Record<string, string>> = {
@@ -46,6 +82,9 @@ const KNOWN_TYPOS: Readonly<Record<string, string>> = {
   'gmail.br': 'gmail.com',
   'gmail.pt': 'gmail.com',
   'icloud.com.br': 'icloud.com',
+  // Sem o ".br" ficariam a 1 letra de aol.com, um provedor de outro país.
+  'uol.com': 'uol.com.br',
+  'bol.com': 'bol.com.br',
 }
 
 const KNOWN = new Set(COMMON_EMAIL_DOMAINS)
@@ -75,6 +114,28 @@ export function editDistance(a: string, b: string): number {
   return d[a.length][b.length]
 }
 
+/**
+ * O domínio digitado é uma versão de outro país do mesmo provedor regional
+ * (ex.: `yahoo.com.ar` diante de `yahoo.com.br`, `live.ca` diante de `live.com`)?
+ * Um sufixo truncado (`hotmail.co` → `hotmail.com`) continua sendo erro.
+ */
+function isOtherCountryOf(typed: string, candidate: string): boolean {
+  const [candidateProvider, ...candidateRest] = candidate.split('.')
+  if (!REGIONAL_PROVIDERS.has(candidateProvider)) return false
+  const typedLabels = typed.split('.')
+  if (typedLabels.length < 2) return false
+  const country = typedLabels[typedLabels.length - 1]
+  if (!REGIONAL_COUNTRY_CODES.has(country)) return false
+  const typedSuffix = typedLabels.slice(1).join('.')
+  const candidateSuffix = candidateRest.join('.')
+  return typedSuffix !== candidateSuffix && !candidateSuffix.startsWith(typedSuffix)
+}
+
+/** O candidato com o país digitado: `yahoo.com.br` + `yaho.com.ar` → `yahoo.com.ar`. */
+function withTypedCountry(typed: string, candidate: string): string {
+  return `${candidate.split('.')[0]}.${typed.split('.').slice(1).join('.')}`
+}
+
 /** Distância máxima aceita para sugerir: domínios curtos erram menos letras. */
 function maxDistanceFor(domain: string): number {
   return domain.length <= 7 ? 1 : 2
@@ -92,7 +153,9 @@ export function suggestEmailDomain(domain: string): string | null {
 
   let best: string | null = null
   let bestDistance = Number.POSITIVE_INFINITY
-  for (const candidate of COMMON_EMAIL_DOMAINS) {
+  for (const known of COMMON_EMAIL_DOMAINS) {
+    // Provedor regional: corrige só o nome do provedor e mantém o país digitado.
+    const candidate = isOtherCountryOf(typed, known) ? withTypedCountry(typed, known) : known
     const distance = editDistance(typed, candidate)
     if (distance < bestDistance) {
       best = candidate
