@@ -176,7 +176,10 @@ done
 
 ## 5. Checklist pós-deploy
 
-Rode logo depois do passo 4. Nenhum item gasta dinheiro.
+Rode logo depois do passo 4. Quase nada gasta dinheiro: só o quiz anônimo de
+teste chama a `generate-explanation` em modo *short* (texto curto do
+pré-resultado, ~600 tokens do gpt-4o-mini, menos de US$ 0,001). No release
+v2026.10.16 o teste usou o e-mail `release-check-20261016@drimigrante.com`.
 
 - [ ] `supabase functions list --project-ref krjirhlmdnxqqrpzmowz`: as 12 com a
       versão nova e sem `e2e-login`.
