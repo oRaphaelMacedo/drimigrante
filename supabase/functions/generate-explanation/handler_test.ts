@@ -1,5 +1,6 @@
-// Testes Deno do generate-explanation (DI-004 / DI-008 / DI-014 / DI-018).
+// Testes Deno do generate-explanation (DI-004 / DI-008 / DI-018 / DI-077).
 // O fetch da OpenAI é SEMPRE mockado: nenhum teste chama api.openai.com de verdade.
+// DI-077: esta function não envia mais e-mail (o welcome_free saiu para o compute-eligibility).
 
 import { assert, assertEquals, assertNotIncludes, assertStringIncludes } from '../_shared/test-asserts.ts'
 import type { LogLevel } from '../_shared/http.ts'
@@ -40,15 +41,12 @@ interface World {
   claimResult: boolean
   claims: ExplanationMode[]
   cleared: ExplanationMode[]
-  welcomeLogged: boolean
   saved: Array<{ mode: ExplanationMode; text: string; model: string; tokens: number }>
   released: Array<{ lock: string; restore: string | null }>
   recorded: Array<{ model: string; mode: ExplanationMode }>
   openaiBodies: Array<Record<string, unknown>>
   openaiStatus: number
   openaiThrows: unknown
-  emails: Array<Record<string, unknown>>
-  emailError: unknown | null
   logs: Array<{ level: LogLevel; event: string; data?: Record<string, unknown> }>
   aiConfig: Record<string, unknown> | null
 }
@@ -59,8 +57,6 @@ function makeWorld(overrides: Partial<World> = {}): World {
       id: ASSESSMENT_ID,
       user_id: null,
       session_id: SESSION_ID,
-      email: 'pessoa@example.com',
-      full_name: 'Pessoa Teste',
       answers: {
         processo_tipo: 'nacionalidade',
         caso_tipo: 'A',
@@ -83,15 +79,12 @@ function makeWorld(overrides: Partial<World> = {}): World {
     claimResult: true,
     claims: [],
     cleared: [],
-    welcomeLogged: false,
     saved: [],
     released: [],
     recorded: [],
     openaiBodies: [],
     openaiStatus: 200,
     openaiThrows: null,
-    emails: [],
-    emailError: null,
     logs: [],
     aiConfig: { model: 'gpt-4o-mini', temperature: 0.3, max_tokens: 2000, system_prompt: 'Tom acolhedor.' },
     ...overrides,
@@ -138,7 +131,6 @@ function makeHandler(world: World, env: Partial<{ openaiKey: string; hourlyCap: 
       world.saved.push({ mode, ...data })
       return Promise.resolve(true)
     },
-    hasWelcomeEmail: () => Promise.resolve(world.welcomeLogged),
   }
   const fetchMock = (input: string | URL | Request, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
@@ -161,17 +153,12 @@ function makeHandler(world: World, env: Partial<{ openaiKey: string; hourlyCap: 
   return createGenerateExplanationHandler({
     repo,
     fetch: fetchMock as typeof fetch,
-    sendWelcomeEmail: (body) => {
-      world.emails.push(body)
-      return Promise.resolve({ error: world.emailError })
-    },
     log: (level, event, data) => world.logs.push({ level, event, data }),
     now: () => NOW,
     env: {
       openaiKey: env.openaiKey ?? 'sk-test-nao-usada',
       serviceRoleKey: SERVICE_ROLE,
       hourlyCap: env.hourlyCap ?? 60,
-      appUrl: 'https://app.test',
     },
   })
 }
@@ -193,7 +180,6 @@ Deno.test('sem session_id nem JWT do dono → 404 e nenhuma chamada à OpenAI', 
   const res = await makeHandler(world)(post({ assessment_id: ASSESSMENT_ID }, fakeJwt('anon')))
   assertEquals(res.status, 404)
   assertEquals(world.openaiBodies.length, 0)
-  assertEquals(world.emails.length, 0)
 })
 
 Deno.test('session_id errado ou assessment já vinculado a outra conta → 404', async () => {
@@ -270,7 +256,6 @@ Deno.test('segunda chamada (resumo já existe) não chama OpenAI nem envia e-mai
   const json = await res.json()
   assertEquals(json, { status: 'ready', short: 'Resumo salvo.', cached: true })
   assertEquals(world.openaiBodies.length, 0)
-  assertEquals(world.emails.length, 0)
   assertEquals(world.recorded.length, 0)
 })
 
@@ -306,7 +291,6 @@ Deno.test('erro da OpenAI → 502, trava liberada e nada salvo', async () => {
   assertEquals(await res.json(), { error: 'ai_unavailable' })
   assertEquals(world.saved.length, 0)
   assertEquals(world.released, [{ lock: lockTokenAt(NOW), restore: null }])
-  assertEquals(world.emails.length, 0)
 })
 
 Deno.test('OpenAI sem resposta (timeout/rede) → 502 ai_unavailable, não 500', async () => {
@@ -317,26 +301,15 @@ Deno.test('OpenAI sem resposta (timeout/rede) → 502 ai_unavailable, não 500',
   assertEquals(world.released.length, 1)
 })
 
-Deno.test('welcome_free: no máximo um por assessment', async () => {
-  const first = makeWorld()
-  await makeHandler(first)(post({ assessment_id: ASSESSMENT_ID, session_id: SESSION_ID }))
-  assertEquals(first.emails.length, 1)
-  assertEquals((first.emails[0].variables as Record<string, string>).assessment_id, ASSESSMENT_ID)
-
-  const already = makeWorld({ welcomeLogged: true })
-  await makeHandler(already)(post({ assessment_id: ASSESSMENT_ID, session_id: SESSION_ID }))
-  assertEquals(already.emails.length, 0)
-})
-
-Deno.test('falha no envio do welcome_free é lida do { error } e registrada sem derrubar a resposta', async () => {
-  const world = makeWorld({ emailError: { name: 'FunctionsHttpError' } })
+Deno.test('DI-077: gerar o resumo não envia e-mail nem lê e-mail/nome (welcome_free saiu daqui)', async () => {
+  const world = makeWorld()
+  const logs: string[] = []
   const res = await makeHandler(world)(post({ assessment_id: ASSESSMENT_ID, session_id: SESSION_ID }))
   assertEquals(res.status, 200)
-  const log = world.logs.find((l) => l.event === 'welcome_email_failed')
-  assert(log, JSON.stringify(world.logs))
-  assertEquals(log.data?.trigger_key, 'welcome_free')
-  assertEquals(log.data?.code, 'FunctionsHttpError')
-  assertNotIncludes(JSON.stringify(world.logs), 'pessoa@example.com')
+  for (const l of world.logs) logs.push(l.event)
+  assert(!logs.some((e) => e.startsWith('welcome_email')), logs.join(','))
+  // O contrato do repositório não tem mais e-mail nem nome do assessment.
+  assert(!('email' in world.assessment!) && !('full_name' in world.assessment!))
 })
 
 Deno.test('modelo do banco fora da allowlist e max_tokens alto são corrigidos', async () => {
@@ -370,7 +343,6 @@ Deno.test('DI-018: pagante sem análise → gera só a completa, resposta sem o 
   assertEquals(world.saved, [{ mode: 'full', text: '## Avaliação geral\nTexto completo.', model: 'gpt-4o-mini', tokens: 980 }])
   assertEquals(world.claims, ['full'])
   assertEquals(world.recorded, [{ model: 'gpt-4o-mini', mode: 'full' }])
-  assertEquals(world.emails.length, 0)
 })
 
 Deno.test('DI-018: sem acesso (nunca pagou ou expirou) → 403 payment_required, sem OpenAI', async () => {

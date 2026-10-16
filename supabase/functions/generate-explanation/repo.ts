@@ -42,7 +42,8 @@ export function createExplanationRepo(db: SupabaseClient): ExplanationRepo {
       const { data, error } = await db
         .from('assessments')
         .select(
-          'id, user_id, session_id, email, full_name, answers, ' +
+          // Sem e-mail nem nome: esta function não manda e-mail (DI-077) e o contexto da IA não leva PII.
+          'id, user_id, session_id, answers, ' +
             'assessment_results(score_numeric, score_category, ia_explanation_short, ia_explanation_full, ' +
             'ia_model_used, ia_tokens_used)',
         )
@@ -70,8 +71,6 @@ export function createExplanationRepo(db: SupabaseClient): ExplanationRepo {
         id: row.id,
         user_id: row.user_id,
         session_id: row.session_id,
-        email: row.email,
-        full_name: row.full_name,
         answers: row.answers,
         result,
       }
@@ -168,17 +167,6 @@ export function createExplanationRepo(db: SupabaseClient): ExplanationRepo {
         .eq('assessment_id', assessmentId)
         .eq('ia_model_used', lockToken)
         .select('id')
-      if (error) throw error
-      return (data?.length ?? 0) > 0
-    },
-
-    async hasWelcomeEmail(assessmentId) {
-      const { data, error } = await db
-        .from('email_send_log')
-        .select('id, email_templates!inner(trigger_key)')
-        .eq('email_templates.trigger_key', 'welcome_free')
-        .eq('variables_used->>assessment_id', assessmentId)
-        .limit(1)
       if (error) throw error
       return (data?.length ?? 0) > 0
     },

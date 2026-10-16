@@ -52,7 +52,7 @@ function anonSession(overrides: Row = {}): Row {
   }
 }
 
-function setup() {
+function setup(opts: { emailDryRun?: boolean } = {}) {
   const db = new FakeSupabase({ now: () => NOW })
   db.tables.assessments = [{ id: ASSESSMENT_ID, session_id: 'anon-session-123', user_id: null }]
   const stripe = new FakeStripe()
@@ -62,6 +62,7 @@ function setup() {
     webhookSecret: SECRET,
     appUrl: 'https://app.test',
     internalSecret: 'internal-secret',
+    emailDryRun: opts.emailDryRun,
     now: () => NOW,
   })
   const send = (event: StripeEvent, signature = stripe.signatureFor(SECRET)) =>
@@ -556,6 +557,80 @@ Deno.test('customer.subscription.deleted mantém o chat só se o €30 estiver v
   assertEquals(sub.recurring_active, false)
   assertEquals(sub.has_chat_access, false)
   assertEquals(sub.recurring_cancelled_at, new Date((NOW_S - 10) * 1000).toISOString())
+})
+
+// ── subscription_cancelled (DI-077) ──────────────────────────────────────────
+
+function seedRecurringBuyer(db: FakeSupabase) {
+  return seedOneTimeBuyer(db, new Date(NOW.getTime() + 10 * DAY_MS).toISOString(), {
+    tier: 'recurring',
+    recurring_active: true,
+    stripe_subscription_id: 'sub_9',
+  })
+}
+
+function deletedEvent() {
+  return makeEvent('customer.subscription.deleted', {
+    id: 'sub_9',
+    status: 'canceled',
+    cancel_at: null,
+    canceled_at: NOW_S - 10,
+    ended_at: NOW_S - 10,
+    start_date: NOW_S - 90 * 86400,
+  })
+}
+
+const cancelledInvocations = (db: FakeSupabase) =>
+  db.invocations.filter((i) => (i.body as Row | undefined)?.trigger_key === 'subscription_cancelled')
+
+Deno.test('DI-077: subscription_cancelled não sai em dry-run (padrão)', async () => {
+  const { db, send } = setup()
+  seedRecurringBuyer(db)
+  assertEquals((await send(deletedEvent())).status, 200)
+  assertEquals(cancelledInvocations(db).length, 0)
+})
+
+Deno.test('DI-077: com o envio ligado, customer.subscription.deleted manda um subscription_cancelled', async () => {
+  const { db, send } = setup({ emailDryRun: false })
+  const user = seedRecurringBuyer(db)
+  assertEquals((await send(deletedEvent())).status, 200)
+  const calls = cancelledInvocations(db)
+  assertEquals(calls.length, 1)
+  assertEquals(calls[0].name, 'send-email')
+  assertEquals(calls[0].headers?.['x-internal-secret'], 'internal-secret')
+  assertEquals(calls[0].body, {
+    trigger_key: 'subscription_cancelled',
+    user_id: user.id,
+    variables: { dashboard_link: 'https://app.test/dashboard', dedupe_key: 'subscription_cancelled:sub_9' },
+  })
+  assertEquals(subscriptionOf(db, user.id).recurring_active, false)
+})
+
+Deno.test('DI-077: subscription_cancelled já registrado não é reenviado; falha no e-mail não reenvia o evento', async () => {
+  const already = setup({ emailDryRun: false })
+  seedRecurringBuyer(already.db)
+  already.db.tables.email_send_log = [
+    { id: 'log-1', status: 'sent', variables_used: { dedupe_key: 'subscription_cancelled:sub_9' } },
+  ]
+  assertEquals((await already.send(deletedEvent())).status, 200)
+  assertEquals(cancelledInvocations(already.db).length, 0)
+
+  const failing = setup({ emailDryRun: false })
+  const user = seedRecurringBuyer(failing.db)
+  failing.db.invokeError = { message: 'Edge Function returned a non-2xx status code' }
+  const res = await failing.send(deletedEvent())
+  // 200: o acesso já foi atualizado; o aviso por e-mail não justifica reprocessar.
+  assertEquals(res.status, 200)
+  assertEquals(subscriptionOf(failing.db, user.id).recurring_active, false)
+  assertEquals(failing.db.rows('payment_events')[0].status, 'processed')
+})
+
+Deno.test('payment_confirmed leva o valor no formato pt-BR (€30,00)', async () => {
+  const { db, send } = setup()
+  await send(makeEvent('checkout.session.completed', anonSession()))
+  const body = db.invocations[0].body as { trigger_key: string; variables: Record<string, string> }
+  assertEquals(body.trigger_key, 'payment_confirmed')
+  assertEquals(body.variables.amount, '€30,00')
 })
 
 Deno.test('computeSubscriptionCap usa a âncora de cobrança + 12 meses de calendário', () => {

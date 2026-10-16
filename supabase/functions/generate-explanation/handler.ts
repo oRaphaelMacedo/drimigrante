@@ -5,9 +5,10 @@
 //         resposta NUNCA contém a análise completa; contexto sem PII;
 //         disjuntor por hora (AI_HOURLY_CAP) → 202.
 // DI-008: contexto com as chaves reais do quiz e as vias de _shared/pathways.ts; prompts pt-BR sem persona.
-// DI-014: lê { error } do envio do welcome_free e registra log estruturado.
+// DI-077: NÃO envia e-mail. O welcome_free saiu daqui para o compute-eligibility, que
+//         não depende da OpenAI (antes, com a IA fora do ar, ninguém recebia o resultado).
 // DI-018: dois modos, cada um gera SÓ a sua parte.
-//   · mode 'short' (padrão, fim do quiz): só o resumo grátis + welcome_free. Nunca gera a análise paga.
+//   · mode 'short' (padrão, fim do quiz): só o resumo grátis. Nunca gera a análise paga.
 //   · mode 'full' (AnalysisPage, sob demanda): exige JWT do dono (ou a service role) e
 //     has_active_access(dono, 'full_analysis') → 401 auth_required / 404 / 403 payment_required.
 //     Idempotente: análise já gravada → 200 sem OpenAI. A trava evita gerações paralelas (202).
@@ -46,8 +47,6 @@ export interface AssessmentWithResult {
   id: string
   user_id: string | null
   session_id: string | null
-  email: string | null
-  full_name: string | null
   answers: unknown
   result: {
     score_numeric: number | string | null
@@ -85,20 +84,17 @@ export interface ExplanationRepo {
     mode: ExplanationMode,
     data: { text: string; model: string; tokens: number },
   ): Promise<boolean>
-  hasWelcomeEmail(assessmentId: string): Promise<boolean>
 }
 
 export interface GenerateExplanationDeps {
   repo: ExplanationRepo
   fetch: typeof fetch
-  sendWelcomeEmail(body: Record<string, unknown>): Promise<{ error: unknown | null }>
   log: Logger
   now(): number
   env: {
     openaiKey?: string
     serviceRoleKey?: string
     hourlyCap: number
-    appUrl: string
   }
 }
 
@@ -295,40 +291,6 @@ export function createGenerateExplanationHandler(deps: GenerateExplanationDeps) 
       })
 
       if (mode === 'full') return jsonResponse(200, { status: 'ready' })
-
-      // welcome_free: no máximo um por assessment (confere email_send_log).
-      if (assessment.email) {
-        try {
-          if (await repo.hasWelcomeEmail(assessmentId)) {
-            log('info', 'welcome_email_skipped', { assessment_id: assessmentId, reason: 'already_logged' })
-          } else {
-            const { error } = await deps.sendWelcomeEmail({
-              trigger_key: 'welcome_free',
-              recipient_email: assessment.email,
-              variables: {
-                name: assessment.full_name ?? 'Cliente',
-                score_category: result.score_category ?? 'média',
-                cta_link: `${deps.env.appUrl}/checkout`,
-                assessment_id: assessmentId,
-              },
-            })
-            if (error) {
-              log('error', 'welcome_email_failed', {
-                trigger_key: 'welcome_free',
-                assessment_id: assessmentId,
-                code: errorCode(error),
-              })
-            }
-          }
-        } catch (emailErr) {
-          log('error', 'welcome_email_failed', {
-            trigger_key: 'welcome_free',
-            assessment_id: assessmentId,
-            code: errorCode(emailErr),
-          })
-        }
-      }
-
       return jsonResponse(200, { status: 'ready', short: completion.text })
     } catch (err) {
       const code = errorCode(err)
