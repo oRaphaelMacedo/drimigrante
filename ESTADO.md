@@ -20,6 +20,7 @@ _Criado em 2026-10-22. Atualizado por claude em 2026-11-05._
 - 2026-11-05 — Mudança de bundle se valida com o E2E mock contra o build real: `vite build` com as env do modo mock (ver `playwright.config.ts`), `vite preview` na 33401 e `E2E_SUPABASE=mock E2E_BASE_URL=http://localhost:33401 npx playwright test`. O E2E padrão usa o dev server e não exercita os chunks.
 - 2026-11-05 — `supabase gen types` não pode ser redirecionado direto para `database.types.ts`: apagaria o bloco manual do fim (ver `docs/operacao/release.md`, seção 7).
 - 2026-11-05 — O nome "PRO" (`OFFER.planLabel`) e "Anamnese" (`OFFER.free.name`) só aparecem na seção de preços da landing; paywall, checkout e Termos seguem com "análise completa" e o CTA segue "diagnóstico". O botão do PRO leva ao quiz porque a compra só existe depois do pré-resultado. Clique no card grátis: `landing_cta_clicked` com `position: pricing_free`; `pricing` agora é só o card PRO.
+- 2026-11-05 — O job de E2E fica em `ubuntu-24.04`: o `ubuntu-latest` virou 26.04, onde o Playwright 1.60 não instala navegadores. Voltar para `latest` ao atualizar o Playwright. Quem abriu branch antes dessa correção entrar na `main` falha igual, como `claude/quiz-sem-duplicatas`.
 
 ## Últimas sessões (máx. 5)
 - 2026-11-05 claude — landing: plano grátis + PRO em "Quanto custa"; a barra fixa aceita mais de um CTA inline.
