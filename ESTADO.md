@@ -5,7 +5,7 @@ _Criado em 2026-10-22. Atualizado por claude em 2026-11-05._
 ## Agora
 - Produção: release v2026.10.16 no ar. Conferido em 2026-11-05: site 200, 28 migrations, 12 functions, sem `e2e-login`.
 - Uso desde o release: 3 diagnósticos (incluindo o teste do release) e nenhum evento de pagamento; 1 pagante com acesso ativo. `email_send_log` sem nenhum envio com sucesso.
-- Branch `claude/pendencias-codigo` (local, sem push): tipos regenerados, `lint:strict` limpo, chunk de entrada de 632 para 154 KB, `TESTING.md` removido e cards revisados (83 feitos, 6 parciais). Só a adoção do padrão e este arquivo têm commit; o resto aguarda a revisão do dono.
+- Branch `claude/pendencias-codigo` (local, sem push): tipos regenerados, `lint:strict` limpo, chunk de entrada de 632 para 154 KB, `TESTING.md` removido e cards revisados (83 feitos, 6 parciais). Tudo com commit; falta abrir o PR e o dono decidir o merge, que publica o front.
 
 ## Próximo
 - Dono, painéis: e-mail do domínio (sem MX, `contacto@` e `privacidade@` não recebem); confirmar o domínio no Resend e o SMTP do Auth; proteção contra senha vazada; proteção da `main`; environment `production` + token; `VITE_STRIPE_*` na Vercel; Stripe (Customer Portal, domínios de pagamento, eventos do webhook); teto da OpenAI; Redirect URLs do Auth; conversões no GA4; Sentry (replays antigos, projeto de backend).
