@@ -76,7 +76,8 @@ os ambientes e o CI.
 
 ## 3. Ordem deste release (ondas 1 a 4)
 
-Produção tem as migrations até `20260630000000`. Tudo abaixo está pendente.
+Aplicado em 16/10/2026 (tag `v2026.10.16`). A ordem abaixo fica como registro e
+como modelo para os próximos releases.
 
 **Passo 1 — functions que vêm ANTES das migrations**
 
@@ -291,9 +292,15 @@ pagamento e os e-mails do período anotados.
    configurações de senha do Auth, em
    [Authentication](https://supabase.com/dashboard/project/krjirhlmdnxqqrpzmowz/auth/providers).
    Referência: <https://supabase.com/docs/guides/auth/password-security>.
-5. **Depois do primeiro release com a DI-081:** regenerar os tipos
-   (`supabase gen types typescript --project-id krjirhlmdnxqqrpzmowz > src/lib/database.types.ts`)
-   para sumirem `is_hub_user` e os outros helpers apagados de `public`.
+5. **Regenerar os tipos depois de um release com migration** (o da DI-081 já foi
+   feito em 05/11/2026). **Não redirecione a saída direto para
+   `src/lib/database.types.ts`:** o fim do arquivo tem um bloco escrito à mão
+   (`// ─── Helper types`) que o gerador apagaria. Gere em um arquivo temporário e
+   troque só o trecho acima do bloco; o `npm run typecheck` acusa se ele sumir.
+
+   ```bash
+   supabase gen types typescript --project-id krjirhlmdnxqqrpzmowz > /tmp/database.types.novo.ts
+   ```
 6. **Customer Portal do Stripe (DI-052).** Ative o portal no modo live em
    [Settings → Billing → Customer portal](https://dashboard.stripe.com/settings/billing/portal).
    Sem isso, a `create-portal-session` responde 502 e a aba "Meu plano"

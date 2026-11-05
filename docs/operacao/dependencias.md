@@ -28,7 +28,7 @@
 | `npm test` | Testes unitários (Vitest, uma execução) |
 | `npm run test:watch` | Vitest em modo observação |
 | `npm run test:coverage` | Vitest com cobertura (v8); relatório HTML em `node_modules/.vitest/coverage/index.html` |
-| `npm run test:e2e*` | Playwright (ver `TESTING.md`) |
+| `npm run test:e2e*` | Playwright (ver [docs/testes.md](../testes.md)) |
 
 Testes unitários ficam ao lado do código (`src/**/*.test.ts(x)`) e em `supabase/functions/_shared/**/*.test.ts` (só módulos puros, sem `Deno.*`). O ambiente padrão é `node`; para testar componentes React, comece o arquivo com `// @vitest-environment jsdom` e use `@testing-library/react` (exemplo: `src/pages/legal/TermsPage.test.tsx`).
 

@@ -10,8 +10,7 @@ Diagnóstico de elegibilidade à nacionalidade portuguesa (quiz grátis → pré
 - `DESIGN.md`
 - `PRODUCT.md`
 - `README.md`
-- `TESTING.md`
-- `docs/`
+- `docs/` (testes e ambiente local em `docs/testes.md`)
 - `.spec/`
 
 ## Comandos (lidos de `package.json`; gerenciador: npm — não executados nesta adoção)

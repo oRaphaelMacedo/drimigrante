@@ -1,8 +1,8 @@
 # Cards — Doutor Imigrante
 
-> Gerado a partir da auditoria multi-agente de 2026-10-15/16 (9 dimensões, 169 achados verificados → 89 cards) e do estado real da implementação na branch `feat/mobile-ux-retencao`. Nada aqui foi aplicado em produção, exceto o hotfix de segurança registado abaixo.
+> Gerado a partir da auditoria multi-agente de 2026-10-15/16 (9 dimensões, 169 achados verificados → 89 cards). O código das 4 ondas foi para produção no release v2026.10.16 (16/10/2026); a coluna Custo/produção registra o que cada card exigia na época. Estado revisado em 05/11/2026 contra o código, o CI, o schema de produção e os painéis acessíveis.
 
-**Estado:** 79 feitos · 10 parciais · 0 não feitos · 0 a fazer — total 89
+**Estado:** 83 feitos · 6 parciais · 0 não feitos · 0 a fazer — total 89
 
 **Legenda de custo/produção:** `—` só código · 👤 exige ação do dono (painel/segredo/decisão) · 🚀 exige aplicar migration/deploy em produção · 💶 gasta dinheiro
 
@@ -31,7 +31,7 @@ Nada aqui gasta dinheiro. O que toca produção (migrations, deploy das function
 | Pacote | Cards | Integrado |
 |---|---|---|
 | **W1-01** Base de engenharia e fontes de verdade | DI-057✅ DI-058✅ DI-085✅ DI-009✅ | sim |
-| **W1-02** Segurança do banco e isolamento de testes | DI-001✅ DI-003✅ DI-023✅ DI-059🟡 | sim |
+| **W1-02** Segurança do banco e isolamento de testes | DI-001✅ DI-003✅ DI-023✅ DI-059✅ | sim |
 | **W1-03** Pagamentos Stripe no servidor | DI-002✅ DI-012✅ DI-019✅ DI-020✅ DI-021✅ DI-022✅ | sim |
 | **W1-04** IA e e-mail no servidor | DI-004✅ DI-008✅ DI-014🟡 DI-017✅ | sim |
 | **W1-05** Motor do quiz | DI-005✅ DI-065✅ DI-066✅ DI-067✅ | sim |
@@ -46,10 +46,10 @@ Nada aqui gasta dinheiro. O que toca produção (migrations, deploy das function
 | **W2-01** Identidade visual Azulejo | DI-062✅ | sim |
 | **W2-02** Functions: motor de elegibilidade e higiene | DI-006✅ DI-082✅ | sim |
 | **W2-03** Quiz mobile: fluxo e navegação | DI-039✅ DI-040✅ DI-041✅ DI-042✅ DI-068✅ | sim |
-| **W2-04** Compra em 1 clique | DI-011✅ DI-010✅ DI-032✅ DI-026✅ DI-033🟡 | sim |
+| **W2-04** Compra em 1 clique | DI-011✅ DI-010✅ DI-032✅ DI-026✅ DI-033✅ | sim |
 | **W2-05** Dashboard: navegação, acesso e upsell | DI-045✅ DI-013✅ DI-046✅ DI-047✅ DI-048✅ | sim |
 | **W2-06** Análise paga de verdade | DI-007✅ DI-016✅ DI-050✅ | sim |
-| **W2-07** CI, documentação e ambiente | DI-060🟡 DI-084🟡 | sim |
+| **W2-07** CI, documentação e ambiente | DI-060✅ DI-084🟡 | sim |
 | **W2-08** Navegação pública e modo foco | DI-038✅ | sim |
 
 ### Onda 3
@@ -72,7 +72,7 @@ Nada aqui gasta dinheiro. O que toca produção (migrations, deploy das function
 | **W4-02** E-mails do ciclo de vida (dry-run) | DI-077✅ | sim |
 | **W4-03** LGPD/RGPD | DI-083✅ | sim |
 | **W4-04** Varredura do funil público: visual e idioma | DI-079✅ DI-074🟡 DI-075✅ | sim |
-| **W4-05** Varredura do dashboard e admin + dívida técnica | DI-080✅ DI-073✅ DI-088🟡 | sim |
+| **W4-05** Varredura do dashboard e admin + dívida técnica | DI-080✅ DI-073✅ DI-088✅ | sim |
 | **W4-06** Stripe Checkout e higiene do repositório | DI-087✅ DI-089🟡 | sim |
 
 ## Todos os cards
@@ -111,7 +111,7 @@ Nada aqui gasta dinheiro. O que toca produção (migrations, deploy das function
 | DI-030 | P1 | M | Resultado: oferta personalizada por categoria e caminho, com o que se recebe e mini-FAQ | ✅ Feito | — | DI-009, DI-010 |
 | DI-031 | P1 | S | Resultado: e-mail de acesso visível e editável antes de pagar | ✅ Feito | — | DI-011 |
 | DI-032 | P1 | M | Erros do botão de compra: português claro, timeout, repersistência e toasts no lugar certo | ✅ Feito | — | — |
-| DI-033 | P1 | S | Eventos da compra: paywall visto, checkout, cancelamento e purchase sem duplicação | 🟡 Parcial | — | DI-054 |
+| DI-033 | P1 | S | Eventos da compra: paywall visto, checkout, cancelamento e purchase sem duplicação | ✅ Feito | — | DI-054 |
 | DI-034 | P1 | M | Landing reposicionada para nacionalidade, com preço único e sem promessas falsas | ✅ Feito | — | DI-009, DI-062 |
 | DI-035 | P1 | M | Landing: CTA fixo no celular, FAQ de objeções e 'quem somos' só com dados reais | ✅ Feito | — | DI-063, DI-009 |
 | DI-036 | P1 | S | Banner de cookies cobre o CTA do hero e tem botões desiguais | ✅ Feito | — | — |
@@ -137,8 +137,8 @@ Nada aqui gasta dinheiro. O que toca produção (migrations, deploy das function
 | DI-056 | P1 | S | Erros de rota e de chunk após deploy: errorElement, preloadError, 404 real e future flags | ✅ Feito | — | — |
 | DI-057 | P1 | S | Restaurar o ESLint (config 8) | ✅ Feito | — | — |
 | DI-058 | P1 | S | Vitest e primeiros testes da lógica pura | ✅ Feito | — | — |
-| DI-059 | P1 | S | supabase/config.toml com verify_jwt por função e seed local | 🟡 Parcial | — | — |
-| DI-060 | P1 | L | CI com gates e E2E fora da produção (Supabase local) | 🟡 Parcial | — | DI-059, DI-057, DI-058, DI-003 |
+| DI-059 | P1 | S | supabase/config.toml com verify_jwt por função e seed local | ✅ Feito | — | — |
+| DI-060 | P1 | L | CI com gates e E2E fora da produção (Supabase local) | ✅ Feito | — | DI-059, DI-057, DI-058, DI-003 |
 | DI-061 | P1 | S | Cabeçalhos de segurança no vercel.json (CSP em Report-Only) | ✅ Feito | — | — |
 | DI-062 | P1 | L | Identidade visual 'Azulejo': tokens, fontes, escala tipográfica e movimento | ✅ Feito | — | DI-063, DI-085 |
 | DI-063 | P1 | M | Componentes base em src/components/ui | ✅ Feito | — | — |
@@ -166,7 +166,7 @@ Nada aqui gasta dinheiro. O que toca produção (migrations, deploy das function
 | DI-085 | P2 | S | Gerenciador de pacotes único, Node fixo, vulnerabilidades e dependências das próximas ondas | ✅ Feito | — | — |
 | DI-086 | P2 | M | Specs E2E do modelo P0 (one_time, expiração, auto-login) e Android | ✅ Feito | — | DI-060, DI-012, DI-046 |
 | DI-087 | P3 | S | Stripe Checkout: locale, código promocional sob flag e texto de reforço | ✅ Feito | 🚀 aplicar em produção | DI-009 |
-| DI-088 | P3 | M | Dívida: casts as any, código morto e lint estrito | 🟡 Parcial | — | DI-057 |
+| DI-088 | P3 | M | Dívida: casts as any, código morto e lint estrito | ✅ Feito | — | DI-057 |
 | DI-089 | P3 | S | Higiene do repositório: branches, worktree, seed script e telemetria versionada | 🟡 Parcial | 👤 ação do dono | DI-060 |
 
 ## Detalhe dos cards
@@ -389,6 +389,7 @@ Nada aqui gasta dinheiro. O que toca produção (migrations, deploy das function
 - **Arquivos:** `supabase/functions/send-email/index.ts`, `src/pages/admin/AdminDashboardPage.tsx`
 - **Nota para o dono:** Verificar o domínio no Resend (DNS no Cloudflare) e conferir o SMTP do Supabase Auth.
 - **Implementação:** 🟡 Parcial no pacote W1-04 (onda 1). Código pronto, com a melhoria da revisão: o send-email passa a gravar trigger_key no error_message JSON da linha 'failed' (teste novo). O card 'Saúde dos e-mails' usa esse valor quando o embed email_templates(trigger_key) volta nulo pela RLS. Conferi em screenshot com o embed nulo: aparece 'payment_confirmed · 15 de out.' em vez de 'modelo desconhecido'. Linhas antigas, gravadas sem trigger_key, continuam como 'modelo desconhecido'. Também a pedido da revisão, o AdminDashboardPage passou a degradar por card: cada contagem e os pagamentos carregam à parte, o que falha aparece como '—' (com 'Indisponível' para leitor de tela) e um aviso diz que alguns números não carregaram. O painel inteiro não vira mais erro. Screenshots em 375 e 360 com subscriptions:count e payments respondendo 500 não mostram overflow horizontal. O critério 3 ('envio de teste fica sent') continua dependendo do dono verificar o domínio no Resend.
+- **Revisão de 05/11/2026:** DNS de `mail.drimigrante.com` presente (DKIM, SPF e MX), mas `email_send_log` tem só 2 linhas, ambas `failed`, e nenhum envio com sucesso. Falta o dono confirmar 'Verified' no Resend e o SMTP do Supabase Auth.
 
 </details>
 
@@ -664,7 +665,7 @@ Nada aqui gasta dinheiro. O que toca produção (migrations, deploy das function
 
 </details>
 
-<details><summary><b>DI-033</b> [P1] Eventos da compra: paywall visto, checkout, cancelamento e purchase sem duplicação — 🟡 Parcial</summary>
+<details><summary><b>DI-033</b> [P1] Eventos da compra: paywall visto, checkout, cancelamento e purchase sem duplicação — ✅ Feito</summary>
 
 - **Área:** analytics · **Tipo:** conversao · **Esforço:** S · **Pacote:** W2-04 · **Mobile:** não
 - **Problema:** quiz_completed e checkout_completed duplicam a cada visita, e não há paywall_viewed, checkout_failed nem checkout_cancelled.
@@ -675,6 +676,7 @@ Nada aqui gasta dinheiro. O que toca produção (migrations, deploy das function
   - Com consentimento negado, nada é enviado
 - **Arquivos:** `src/pages/quiz/ResultsPage.tsx`, `src/pages/checkout/CheckoutPage.tsx`
 - **Implementação:** 🟡 Parcial no pacote W2-04 (onda 2). Feito: quiz_completed e results_viewed com trackOnce por envio do quiz (session_id, que é estável mesmo quando o assessmentId só aparece depois), paywall_viewed por IntersectionObserver (metade do card visível), paywall_cta_clicked {position: results_paywall|checkout}, checkout_started {value, currency}, checkout_failed {reason, status} e checkout_cancelled (uma vez, URL limpa). Com consentimento negado nada é enviado (o analytics só marca o trackOnce quando envia de fato; coberto no E2E). Falta o email_edited: não existe UI de editar o e-mail neste pacote. Ela é do DI-031 (W3-01), que deve disparar track('email_edited', {position}).
+- **Revisão de 05/11/2026:** O único item que faltava existe: `email_edited` é disparado em `src/pages/quiz/ResultsPage.tsx` (entregue no DI-031).
 
 </details>
 
@@ -964,6 +966,7 @@ Nada aqui gasta dinheiro. O que toca produção (migrations, deploy das function
 - **Arquivos:** `src/pages/dashboard/SettingsPage.tsx`, `supabase/functions/create-portal-session/index.ts`
 - **Nota para o dono:** Ativar o Customer Portal no Stripe e fazer o deploy da function.
 - **Implementação:** 🟡 Parcial no pacote W3-04 (onda 3). Código e testes prontos. Aba 'Meu plano' (?aba=plano) via getAccessState: pagamento único (pago em, acesso até, 'não renova sozinho'), expirado (com oferta de €4,90 e de €30), assinatura (próxima cobrança prevista, 12ª e última cobrança, término ou cancelamento agendado, calculados de recurring_started_at e recurring_cancel_at) e não pagante (só €30). Nova function create-portal-session: JWT obrigatório, 401 sem token, 404 sem customer, 502 quando o Stripe recusa; o customer vem do banco e o return_url passa pela allowlist. 10 testes Deno com Stripe e Supabase falsos. O botão do portal chama a function (mock) e redireciona (há teste); se falhar, mostra a mensagem e o e-mail do suporte. signOut({scope:'others'}) entrou no lugar do toast 'Em breve'; refreshUser roda depois de salvar; labels com htmlFor; telefone sem placeholder português; título 'Conta'. Fica parcial porque o portal só funciona em produção depois de o dono ativar o Customer Portal no Stripe e fazer o deploy da function.
+- **Revisão de 05/11/2026:** `create-portal-session` está em produção. Falta ativar o Customer Portal no Stripe (não conferido: Stripe sem acesso na revisão).
 
 </details>
 
@@ -1011,6 +1014,7 @@ Nada aqui gasta dinheiro. O que toca produção (migrations, deploy das function
 - **Arquivos:** `src/lib/sentry.ts`, `src/main.tsx`, `src/pages/legal/PrivacyPage.tsx`, `src/pages/legal/CookiesPage.tsx`
 - **Nota para o dono:** Apagar os replays já gravados no Sentry.
 - **Implementação:** 🟡 Parcial no pacote W1-07 (onda 1). Bloqueante corrigido. O sentry.ts guarda o consentimento de estatísticas anterior (replayConsent) e só chama enableReplay/disableReplay quando ele muda de fato (sem para com, ou com para sem). O listener tem try/catch. No sentry-sdk.ts, enableReplay e disableReplay só agem quando o estado desejado muda (wasWanted). O syncReplay confere se a gravação está ativa via getReplayId antes de chamar startBuffering ou stop, e nunca lança. Um setTimeout depois do addIntegration ajusta o estado após a inicialização que o próprio SDK agenda. Para conferir, usei um build com Pixel falso servido como www.drimigrante.com e todo o tráfego de terceiros interceptado. No build anterior (fa9d456), os 6 cenários de regravação (granted→analytics, analytics→analytics, granted→all, analytics→all, all→analytics, all→all) geraram 'Replay recording is already in progress' e enviaram evento + replay_event. No build novo: 0 eventos, 0 replay_event e 0 pageerror, com o replay ativo antes e depois. As transições reais continuam funcionando: granted→denied→analytics deu replay [ativo, parado, ativo] e denied→analytics deu [parado, ativo]. Um erro real depois de regravar ainda envia 1 evento com o replay. Melhoria: as transações de desempenho agora dependem do consentimento (tracesSampler: 0,2 com estatísticas, 0 sem). Em 32 carregamentos com consentimento pendente ou recusado, 0 transações; em 16 com 'analytics', 4. A Política de Privacidade, a de Cookies e docs/analytics.md citam o tempo de carregamento. Continua parcial pelos mesmos 2 critérios fora do escopo. O chunk de entrada tem 577,27 KB (170,19 KB gzip) e a meta depende de manualChunks no vite.config.ts (W1-08). maskAllText:!1 aparece 1 vez, só no chunk lazy do posthog-js, com a gravação desligada.
+- **Revisão de 05/11/2026:** Chunk de entrada em 154 KB (50 KB gzip) e primeira carga em 560 KB (168,5 KB gzip), medidos no build; critério cumprido. Falta: `maskAllText:!1` ainda aparece 1 vez, só no chunk lazy do posthog-js, com a gravação desligada; e o dono apagar os replays antigos no Sentry (não conferido).
 
 </details>
 
@@ -1057,7 +1061,7 @@ Nada aqui gasta dinheiro. O que toca produção (migrations, deploy das function
 
 </details>
 
-<details><summary><b>DI-059</b> [P1] supabase/config.toml com verify_jwt por função e seed local — 🟡 Parcial</summary>
+<details><summary><b>DI-059</b> [P1] supabase/config.toml com verify_jwt por função e seed local — ✅ Feito</summary>
 
 - **Área:** devops · **Tipo:** devops · **Esforço:** S · **Pacote:** W1-02 · **Mobile:** não
 - **Problema:** verify_jwt=false existe só como flag manual: um redeploy sem a flag quebra o webhook do Stripe e o checkout anônimo. Sem config.toml também não há Supabase local.
@@ -1068,10 +1072,11 @@ Nada aqui gasta dinheiro. O que toca produção (migrations, deploy das function
   - stripe-webhook local aceita POST sem Authorization
 - **Arquivos:** `supabase/config.toml`, `supabase/seed.sql`, `supabase/.gitignore`
 - **Implementação:** 🟡 Parcial no pacote W1-02 (onda 1). Criados supabase/config.toml (project_id drimigrante, Postgres 17, site_url http://localhost:33401 com redirects de /auth/callback, verify_jwt=false para stripe-webhook, create-checkout-session e claim-session; e2e-login com enabled=false, então não é servida nem entra num deploy sem nome), supabase/seed.sql (dev@ com o €30 ativo e um diagnóstico, cliente2@ sem pagamento, admin@ super_admin, só local) e supabase/.gitignore; tudo documentado em docs/testes.md. Verificado no local: stripe-webhook, create-checkout-session e claim-session aceitam POST sem Authorization (a requisição chega à function, que responde com erro de configuração), enquanto chat-completion devolve 401. Ficou parcial porque o critério 'supabase start + db reset aplicam tudo sem erro' falha numa migration antiga que não é deste pacote: 20260509000002_seed_quiz_v1.sql adiciona 'multiselect' ao enum field_type e usa o valor no mesmo arquivo (erro 55P04). Validei numa cópia temporária com 'multiselect' no CREATE TYPE da migration inicial; com isso db reset aplica todas as migrations e o seed sem erro.
+- **Revisão de 05/11/2026:** `npm run supabase:start` e `npm run supabase:reset` aplicam tudo sem erro: `scripts/supabase-local.mjs` contorna a migration antiga, já aplicada em produção. O job `e2e / playwright` do CI confirma isso a cada PR.
 
 </details>
 
-<details><summary><b>DI-060</b> [P1] CI com gates e E2E fora da produção (Supabase local) — 🟡 Parcial</summary>
+<details><summary><b>DI-060</b> [P1] CI com gates e E2E fora da produção (Supabase local) — ✅ Feito</summary>
 
 - **Área:** devops · **Tipo:** devops · **Esforço:** L · **Pacote:** W2-07 · **Mobile:** não
 - **Problema:** O E2E roda contra produção com service role (97 usuários de teste). Não há gate de tsc, lint, test nem build, e o CI não roda desde maio.
@@ -1084,6 +1089,7 @@ Nada aqui gasta dinheiro. O que toca produção (migrations, deploy das function
 - **Arquivos:** `.github/workflows/ci.yml`, `.github/workflows/e2e.yml`, `playwright.config.ts`, `e2e/fixtures/seeded.ts`, `e2e/utils/supabase-admin.ts`, `e2e/global-teardown.ts`, `.env.test.example`
 - **Nota para o dono:** Apagar os segredos de produção do GitHub depois do merge.
 - **Implementação:** 🟡 Parcial no pacote W2-07 (onda 2). Implementado no escopo do pacote. (1) ci.yml roda em PR e push na main, com permissions read e concurrency. Tem os jobs ci (npm ci, check-env, typecheck, typecheck:e2e, lint, Vitest, test:scripts, build), functions (deno test) e e2e. (2) e2e.yml virou workflow reutilizável, sem nenhum secret: supabase start no runner, supabase:env, functions serve com a e2e-login e segredos aleatórios, conferência do alvo, Playwright em Chromium e WebKit, modo mock e contagem das contas de teste no fim. O e2e.yml não cita mais o ref de produção. (3) A trava scripts/lib/test-target-guard.mjs recusa o ref e os domínios de produção e hosts remotos fora de E2E_ALLOWED_REMOTE_HOSTS. Ela é usada no playwright.config.ts, no supabase-admin.ts e no passo de CI; testei o código de saída para produção (1), staging permitido (0) e host remoto não permitido (1). (4) globalTeardown e cleanupE2EData apagam as contas e2e+…@drimigrante.test. Medido no banco local: 3 usuários antes, 6 criados, 3 depois. (5) Os specs já usam page.route como stub de Stripe, OpenAI e Resend; as functions locais sobem sem essas chaves. (6) Revisei o WIP: arrumei a recuperação de arquivos alterados temporariamente (backup com PID em supabase/.temp), o assertIgnored fora de repositório e o regex de e-mail (alinhado ao handler). Criei E2E_PORT e o modo E2E_SUPABASE=mock: os testes de navegador do spec 06 interceptam só *.supabase.co e não funcionam contra o Supabase local. (7) Migration nova 20261016000340, não aplicada, para o bug que impedia o supabase start: o trigger log_ai_config_changes grava NEW.id::text em record_id UUID e a 000350 falhava. Rodei de verdade contra o Supabase local com CI=1: 38 testes passaram; no modo mock, 7 passaram e 1 foi pulado (admin no celular). Faltou: (a) o critério do grep ainda acha o ref em e2e/fixtures/auth.ts, arquivo do W1-02 fora do meu escopo; (b) 'CI verde num PR' não foi verificado no GitHub, porque push e PR são proibidos e o act não está instalado. Repliquei os mesmos passos localmente.
+- **Revisão de 05/11/2026:** CI verde num PR real ([PR 13](https://github.com/oRaphaelMacedo/drimigrante/pull/13): `ci`, `functions` e `e2e / playwright`) e repositório sem secrets. O ref de produção segue em dois lugares de propósito: `e2e/fixtures/auth.ts` (constante do guard que recusa produção) e `deploy-functions.yml` (deploy, não teste).
 
 </details>
 
@@ -1286,6 +1292,7 @@ Nada aqui gasta dinheiro. O que toca produção (migrations, deploy das function
 - **Arquivos:** `index.html`, `src/lib/copy.ts`, `src/hooks/useSEO.ts`
 - **Nota para o dono:** O dono confirma pt-BR. Os textos no banco (form_questions e templates) exigem UPDATE em produção.
 - **Implementação:** 🟡 Parcial no pacote W4-04 (onda 4). Feito: lang pt-BR e og:locale pt_BR (index.html e useSEO); manifest em pt-BR; textos do quiz em pt-BR, com a migration para o banco; varredura dos 23 arquivos do funil, que estão limpos. Nesta ronda, src/lib/copy.ts (vai para o bundle via Header, Landing e 404) ficou só com QUIZ_CTA_LABEL e a decisão de idioma. O glossário, os OFFICIAL_PT_TERMS e o findPtPtMarkers (regex com lookbehind e \p{L}) foram para o novo src/lib/copy-glossary.ts, usado só pelos testes. Dois testes novos em copy.test.ts garantem que copy.ts não monta regex e que nenhum arquivo .ts/.tsx do cliente importa copy-glossary. O build confirma que não há '\p{L}' em assets/. Falta, fora do pacote: Intl 'pt-PT' em src/lib/utils.ts; telas admin (W4-05); 'contacto@' em src/config/contact.ts (decisão do dono); comentário 'Partilha' em analytics-events.ts (W4-01); UPDATE em produção dos textos do banco (migration 000200) e dos templates de e-mail (W4-02).
+- **Revisão de 05/11/2026:** `pt-PT` saiu de `src/lib/utils.ts` e as migrations de texto do quiz estão aplicadas. Falta: decisão do dono sobre `contacto@` (`src/config/contact.ts`) e o comentário 'Partilha' em `analytics-events.ts`. Templates de e-mail não conferidos.
 
 </details>
 
@@ -1436,6 +1443,7 @@ Nada aqui gasta dinheiro. O que toca produção (migrations, deploy das function
 - **Arquivos:** `README.md`, `docs/arquitetura.md`, `docs/modelo-comercial.md`, `.env.example`, `supabase/functions/.env.example`, `src/lib/env.ts`, `src/lib/supabase.ts`, `src/vite-env.d.ts`, `scripts/check-env.mjs`, `package.json`
 - **Nota para o dono:** Apagar os VITE_STRIPE_* no Vercel.
 - **Implementação:** 🟡 Parcial no pacote W2-07 (onda 2). Feito: README.md com setup na porta 33401, scripts, testes, CI e variáveis. Novos docs/arquitetura.md, docs/modelo-comercial.md (opção A do chat como padrão pendente de confirmação do dono, estados de acesso, o que não prometer, decisões pendentes) e docs/operacao/README.md (ambientes, publicação, CI, ações do dono). Movi PROGRESSO, PLANO_REFATORACAO, AUDITORIA_BLOCOS, E2E_TEST_PLAN e BACKLOG para docs/historico/, cada um com aviso de não normativo e um README de contexto. O .env.example ficou só com placeholders, sem Price IDs, PostHog, Sentry ou GA reais e sem as VITE_STRIPE_* órfãs. Criei supabase/functions/.env.example (força-adicionado, porque supabase/.gitignore ignora functions/.env.*) e .env.test.example. src/lib/env.ts valida com zod, recusa service role/sb_secret_ no front e é usado em src/lib/supabase.ts; vite-env.d.ts está alinhado. scripts/check-env.mjs cruza front, functions e E2E com os exemplos; tem 7 testes novos e o npm run check-env está ok. Scripts npm: check-env, typecheck:e2e, test:scripts, test:functions, test:e2e:mock, test:e2e:guard, supabase:* e dev em 33401. 'Clone novo sobe só com o README': validei npm ci → supabase:start → supabase:env → Vite, e o app carregou o quiz do banco local (screenshots). Também rodei supabase:reset sem erro. Faltou: 'a raiz só tem README.md como .md'. O TESTING.md continua na raiz porque é do W1-02 e está fora dos meus arquivos.
+- **Revisão de 05/11/2026:** `TESTING.md` saiu da raiz. O critério 'só README.md na raiz' ficou superado pelos arquivos do padrão comum (`AGENTS.md`, `CLAUDE.md`, `ESTADO.md`) e por `DESIGN.md`/`PRODUCT.md`. Falta só apagar os 3 `VITE_STRIPE_*` na Vercel (ainda lá em 05/11).
 
 </details>
 
@@ -1483,7 +1491,7 @@ Nada aqui gasta dinheiro. O que toca produção (migrations, deploy das function
 
 </details>
 
-<details><summary><b>DI-088</b> [P3] Dívida: casts as any, código morto e lint estrito — 🟡 Parcial</summary>
+<details><summary><b>DI-088</b> [P3] Dívida: casts as any, código morto e lint estrito — ✅ Feito</summary>
 
 - **Área:** frontend · **Tipo:** divida-tecnica · **Esforço:** M · **Pacote:** W4-05 · **Mobile:** não
 - **Problema:** 24 casts `as any` obsoletos e funções mortas (getUserLatestAssessment, fetchAssessmentResult, requirePaid, formatCurrency…).
@@ -1494,6 +1502,7 @@ Nada aqui gasta dinheiro. O que toca produção (migrations, deploy das function
   - grep 'as any' = 0
 - **Arquivos:** `src/lib/utils.ts`, `src/hooks/useAssessment.ts`, `src/router/ProtectedRoute.tsx`, `src/hooks/useChatData.ts`, `src/pages/admin/AdminLeadsPage.tsx`, `.eslintrc.cjs`, `package.json`
 - **Implementação:** 🟡 Parcial no pacote W4-05 (onda 4). Igual à ronda anterior nos arquivos do pacote: zero 'as any' e zero 'any'. npm run lint dá 0 erros e 3 avisos, todos em src/hooks/useQuizAdmin.ts (linhas 433, 49, 86 e 182 têm os 3 'as any' restantes). Esse arquivo não é do pacote (regra dura 3), por isso npm run lint:strict continua falhando e o grep 'as any' ainda acha 3. Melhoria da revisão: no csvField, a exceção do sinal agora vale só para telefones com '+' e para números negativos simples ('-5', '-2,5'); '-1-2' e '-(1)' passam a ganhar o apóstrofo. Testes atualizados.
+- **Revisão de 05/11/2026:** `npm run lint:strict` passa e `grep 'as any'` em `src/` dá 0. `useQuizAdmin.ts` passou a usar os tipos gerados do banco.
 
 </details>
 
@@ -1509,5 +1518,6 @@ Nada aqui gasta dinheiro. O que toca produção (migrations, deploy das function
 - **Arquivos:** `scripts/generate-quiz-seed.mjs`, `.gitignore`
 - **Nota para o dono:** Mostrar o diff do worktree antes de removê-lo; apagar as branches remotas exige aprovação.
 - **Implementação:** 🟡 Parcial no pacote W4-06 (onda 4). Commit e9ad649. Feito: (1) generate-quiz-seed.mjs. Sem opção só imprime o SQL. --migration [nome] cria uma migration NOVA (flag 'wx'), com timestamp depois da mais recente, e não cria nada se o quiz não mudou (hash no cabeçalho). --out recusa arquivo existente e qualquer caminho dentro de supabase/migrations. Usa o tsx local. Testes: 'rodar 2x não altera migrations' em scripts/generate-quiz-seed.test.mjs, mais 11 testes puros em scripts/lib/quiz-seed.test.mjs. (2) O SQL não apaga mais nada: o seed antigo fazia TRUNCATE ... CASCADE, e o Postgres avisa 'truncate cascades to table assessments' (FK current_question_id), ou seja, aplicado em produção apagaria os diagnósticos. Agora é upsert por chave natural, is_active=FALSE para o que saiu do código e snapshot em form_versions. Validei num Postgres local descartável (Docker, já parado): aplicado 2x preserva o diagnóstico, desativa o que só existia no banco e chega ao mesmo estado de um banco novo. (3) .spec/.usage.jsonl tirado do git (git rm --cached) e posto no .gitignore, junto com deno.lock. (4) docs/testes.md agora reúne o TESTING.md, que ficou só como ponteiro: comandos, projeto android (Pixel 7), tag @mock-backend e npm run test:e2e:mock, seed do quiz e flags do Checkout. Não feito, pela diretriz: não apaguei branches, o worktree nem os 15 modelos duplicados do .spec (idênticos byte a byte aos de .spec/templates/). A limpeza recomendada, com os comandos, está em docs/operacao/higiene-repositorio.md e depende da aprovação do dono.
+- **Revisão de 05/11/2026:** Limpeza ainda aguarda aprovação do dono: worktree `naughty-montalcini-d38cd0` (3 arquivos sem commit, 107 commits atrás), branches antigas e os 15 modelos duplicados de `.spec/`.
 
 </details>
