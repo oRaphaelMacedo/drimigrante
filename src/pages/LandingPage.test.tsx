@@ -71,7 +71,20 @@ describe('copy honesta (DI-034)', () => {
     expect(screen.getAllByText('Grátis · sem criar conta · poucos minutos').length).toBeGreaterThan(0)
   })
 
-  it('um único cartão de preço, vindo de OFFER', () => {
+  it('o plano grátis vem antes do PRO e avisa que pede nome e e-mail', () => {
+    renderLanding()
+    const free = screen.getByTestId('landing-free')
+    const pro = screen.getByTestId('landing-offer')
+    expect(free.compareDocumentPosition(pro) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(within(free).getByText(OFFER.free.priceLabel)).toBeInTheDocument()
+    expect(within(free).getByRole('heading', { level: 3 })).toHaveTextContent(OFFER.free.name)
+    for (const item of OFFER.free.includes) expect(within(free).getByText(item)).toBeInTheDocument()
+    expect(free).toHaveTextContent(/nome e e-mail/i)
+    expect(within(pro).getByText(OFFER.planLabel)).toBeInTheDocument()
+    expect(within(free).queryByText(OFFER.planLabel)).toBeNull()
+  })
+
+  it('o cartão PRO vem de OFFER e é o único preço em euros', () => {
     renderLanding()
     const offer = screen.getByTestId('landing-offer')
     expect(within(offer).getByText(OFFER.priceLabel)).toBeInTheDocument()
@@ -103,6 +116,7 @@ describe('CTAs', () => {
   })
 
   it.each([
+    ['cta-pricing-free', 'pricing_free'],
     ['cta-pricing-onetime', 'pricing'],
     ['cta-start-quiz-final', 'final'],
     ['cta-start-quiz-sticky', 'sticky'],

@@ -22,7 +22,17 @@ export interface RecurringOffer {
   readonly benefits: readonly string[]
 }
 
+/** Plano grátis (quiz + pré-resultado), mostrado antes do pago na seção de preços da landing. */
+export interface FreeOffer {
+  readonly name: string
+  readonly priceLabel: string
+  readonly includes: readonly string[]
+}
+
 export interface Offer {
+  /** Nome do pagamento único na comparação com o plano grátis (landing). */
+  readonly planLabel: string
+  readonly free: FreeOffer
   /** Valor do pagamento único, em `currency`. */
   readonly price: number
   readonly currency: 'EUR'
@@ -44,6 +54,18 @@ export interface Offer {
 const ACCESS_DAYS = 30
 
 export const OFFER: Offer = {
+  planLabel: 'PRO',
+  free: {
+    name: 'Anamnese para descobrir a viabilidade',
+    priceLabel: '100% grátis',
+    includes: [
+      'Perguntas só sobre o seu caso',
+      'Avalia descendência, casamento, residência e outros caminhos',
+      'Pré-resultado e pontuação na hora',
+      'Caminhos mais compatíveis com você',
+      'Link para rever o resultado depois',
+    ],
+  },
   price: 30,
   currency: 'EUR',
   priceLabel: '€30',

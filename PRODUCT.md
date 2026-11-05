@@ -26,7 +26,9 @@ originária das ex-colônias portuguesas.
 
 ## Funil
 
-1. **Landing → quiz gratuito** (sem conta). O e-mail é pedido no quiz.
+1. **Landing → quiz gratuito** (sem conta). O e-mail é pedido no quiz. A seção "Quanto custa"
+   mostra o plano grátis (`OFFER.free`) primeiro e o pagamento único depois, com o selo
+   `OFFER.planLabel` (PRO). Os dois CTAs levam ao quiz: a compra só existe depois do pré-resultado.
 2. **Pré-resultado** categórico (alta, média ou em desenvolvimento) com o teaser da análise
    desfocado (o blur é decisão do dono e fica).
 3. **Pagamento único** — preço, prazo de acesso, entrega e itens incluídos vêm de `OFFER`
@@ -49,7 +51,7 @@ pagamento único → assinatura e distribuição dos resultados. Eventos só pel
 
 | Assunto | Arquivo |
 | --- | --- |
-| Oferta (preço, prazo, itens, plano mensal, garantia, revisão) | `src/lib/offer.ts` |
+| Oferta (plano grátis, preço, prazo, itens, plano mensal, garantia, revisão) | `src/lib/offer.ts` |
 | E-mails de suporte/privacidade e WhatsApp opcional | `src/config/contact.ts` |
 | Dados da empresa (campos `null` não aparecem) | `src/data/company.ts` |
 | Regras de acesso | `src/lib/access.ts` |

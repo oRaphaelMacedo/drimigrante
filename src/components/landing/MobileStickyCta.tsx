@@ -63,8 +63,8 @@ function useReachedEnd(endRef: RefObject<Element>): boolean {
 export interface MobileStickyCtaProps {
   /** Hero: a barra só aparece depois que ele sai da tela. */
   anchorRef: RefObject<Element>
-  /** CTA inline equivalente (ex.: o do cartão de preço): enquanto visível, a barra some. */
-  inlineCtaRef?: RefObject<Element>
+  /** CTAs inline equivalentes (ex.: os dos cartões de preço): com um deles visível, a barra some. */
+  inlineCtaRef?: RefObject<Element> | RefObject<Element>[]
   /** Seção final (com CTA próprio): a barra some a partir dela. */
   endRef: RefObject<Element>
   /** Texto do botão. */
