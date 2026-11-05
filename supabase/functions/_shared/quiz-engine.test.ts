@@ -33,7 +33,12 @@ import {
   getVisibleQuestions as clientVisibleQuestions,
   QUIZ_QUESTIONS,
   type QuizQuestion,
+  suggestVisas as clientSuggestVisas,
 } from '../../../src/data/quiz-questions.ts'
+import { materializeAnswers } from '../../../src/data/quiz-asked.ts'
+import { answerChoices, walkQuizPaths } from '../../../src/data/quiz-paths.ts'
+import { suggestPathways } from './pathways.ts'
+import { buildAnalysisContext } from './analysis-context.ts'
 
 // O mapQuizRows do front importa tipos via alias `@/`, que só o Vitest resolve.
 interface ClientConditionsModule {
@@ -475,5 +480,53 @@ test('planScoreBackfill dá o mesmo score que o cliente para perfis do fluxo', (
       { scoreNumeric: client.percentage, scoreCategory: client.category },
       change.assessmentId,
     )
+  }
+})
+
+// A tela pergunta menos (src/data/quiz-asked.ts), mas o servidor recebe o formato de sempre.
+test('nos caminhos da tela, servidor e cliente chegam ao mesmo score e às mesmas vias', () => {
+  // Casos isolados e os que têm regras cruzadas; a enumeração de todas as combinações
+  // roda em src/data/quiz-paths.test.ts (aqui a suíte do Deno e a do Vitest ficam rápidas).
+  const cases = ['A', 'B', 'C', 'D', 'E', 'F', 'nenhum', 'A,D', 'C,D', 'C,F', 'D,F', 'C,D,F', 'A,C,D,F']
+  const choicesFor = (q: QuizQuestion) => (q.key === 'caso_tipo' ? cases : answerChoices(q))
+  let walked = 0
+  walkQuizPaths(({ answers }) => {
+    walked++
+    const client = clientComputeScore(answers)
+    const server = computeScore(answers)
+    assertEquals(
+      { total: server.total, max: server.max, percentage: server.percentage, category: server.category },
+      { total: client.total, max: client.max, percentage: client.percentage, category: client.category },
+      JSON.stringify(answers),
+    )
+    const vias = (list: { code: string; name: string; match: string }[]) =>
+      list.map(({ code, name, match }) => ({ code, name, match }))
+    assertEquals(vias(suggestPathways(answers)), vias(clientSuggestVisas(answers)), JSON.stringify(answers))
+  }, QUIZ_QUESTIONS, choicesFor)
+  assert(walked > 1000, `só ${walked} caminhos percorridos`)
+})
+
+test('a IA recebe as respostas deduzidas e combinadas como se tivessem sido perguntadas', () => {
+  const context = buildAnalysisContext(
+    materializeAnswers({
+      processo_tipo: 'nacionalidade',
+      caso_tipo: 'C,D,F',
+      c3_tempo_portugal: '5_ou_mais',
+      d2_tempo_autorizacao: 'mais_5',
+      d7_consultar_agora: 'nao',
+      d8_filhos_portugal: 'nao',
+      f2_quando_mudou: 'antes_1974',
+    }),
+    null,
+  )
+  for (const line of [
+    '- É maior de idade: Sim',
+    '- Mora atualmente em Portugal: Sim',
+    '- Tempo de residência em Portugal: 5 anos ou mais',
+    '- Tem Autorização de Residência em Portugal: Sim',
+    '- Tempo com Autorização de Residência: 5 anos ou mais',
+    '- Quando se mudou para Portugal: Antes de 25 de abril de 1974',
+  ]) {
+    assert(context.includes(line), `falta no contexto da IA: ${line}\n${context}`)
   }
 })
