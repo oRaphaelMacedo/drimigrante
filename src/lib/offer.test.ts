@@ -16,6 +16,10 @@ const FORBIDDEN_COPY = [
 
 function allCopy(): string[] {
   return [
+    OFFER.planLabel,
+    OFFER.free.name,
+    OFFER.free.priceLabel,
+    ...OFFER.free.includes,
     OFFER.priceLabel,
     OFFER.delivery,
     ...OFFER.includes,

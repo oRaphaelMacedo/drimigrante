@@ -90,6 +90,7 @@ export function subscriptionFor(
     recurring_active: false,
     recurring_amount: null,
     recurring_started_at: null,
+    recurring_cancel_at: null,
     recurring_cancelled_at: null,
     stripe_customer_id: null,
     stripe_payment_intent_id: null,

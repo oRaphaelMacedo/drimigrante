@@ -12,33 +12,29 @@ export type Database = {
   __InternalSupabase: {
     PostgrestVersion: "14.5"
   }
-  graphql_public: {
-    Tables: {
-      [_ in never]: never
-    }
-    Views: {
-      [_ in never]: never
-    }
-    Functions: {
-      graphql: {
-        Args: {
-          extensions?: Json
-          operationName?: string
-          query?: string
-          variables?: Json
-        }
-        Returns: Json
-      }
-    }
-    Enums: {
-      [_ in never]: never
-    }
-    CompositeTypes: {
-      [_ in never]: never
-    }
-  }
   public: {
     Tables: {
+      account_deletion_log: {
+        Row: {
+          counts: Json
+          deleted_at: string
+          id: string
+          source: string
+        }
+        Insert: {
+          counts?: Json
+          deleted_at?: string
+          id?: string
+          source?: string
+        }
+        Update: {
+          counts?: Json
+          deleted_at?: string
+          id?: string
+          source?: string
+        }
+        Relationships: []
+      }
       ai_configurations: {
         Row: {
           created_at: string | null
@@ -166,6 +162,7 @@ export type Database = {
           phone: string | null
           questions_answered: number | null
           referrer: string | null
+          resume_token: string
           session_id: string | null
           started_at: string | null
           status: Database["public"]["Enums"]["assessment_status"] | null
@@ -197,6 +194,7 @@ export type Database = {
           phone?: string | null
           questions_answered?: number | null
           referrer?: string | null
+          resume_token?: string
           session_id?: string | null
           started_at?: string | null
           status?: Database["public"]["Enums"]["assessment_status"] | null
@@ -228,6 +226,7 @@ export type Database = {
           phone?: string | null
           questions_answered?: number | null
           referrer?: string | null
+          resume_token?: string
           session_id?: string | null
           started_at?: string | null
           status?: Database["public"]["Enums"]["assessment_status"] | null
@@ -634,6 +633,24 @@ export type Database = {
           },
         ]
       }
+      checkout_claims: {
+        Row: {
+          claimed_at: string
+          stripe_session_id: string
+          user_id: string | null
+        }
+        Insert: {
+          claimed_at?: string
+          stripe_session_id: string
+          user_id?: string | null
+        }
+        Update: {
+          claimed_at?: string
+          stripe_session_id?: string
+          user_id?: string | null
+        }
+        Relationships: []
+      }
       countries: {
         Row: {
           code: string
@@ -943,6 +960,27 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      email_suppressions: {
+        Row: {
+          created_at: string
+          email_hash: string
+          scope: string
+          source: string
+        }
+        Insert: {
+          created_at?: string
+          email_hash: string
+          scope: string
+          source?: string
+        }
+        Update: {
+          created_at?: string
+          email_hash?: string
+          scope?: string
+          source?: string
+        }
+        Relationships: []
       }
       email_templates: {
         Row: {
@@ -1477,6 +1515,7 @@ export type Database = {
           one_time_payment_amount: number | null
           recurring_active: boolean | null
           recurring_amount: number | null
+          recurring_cancel_at: string | null
           recurring_cancelled_at: string | null
           recurring_started_at: string | null
           stripe_customer_id: string | null
@@ -1498,6 +1537,7 @@ export type Database = {
           one_time_payment_amount?: number | null
           recurring_active?: boolean | null
           recurring_amount?: number | null
+          recurring_cancel_at?: string | null
           recurring_cancelled_at?: string | null
           recurring_started_at?: string | null
           stripe_customer_id?: string | null
@@ -1519,6 +1559,7 @@ export type Database = {
           one_time_payment_amount?: number | null
           recurring_active?: boolean | null
           recurring_amount?: number | null
+          recurring_cancel_at?: string | null
           recurring_cancelled_at?: string | null
           recurring_started_at?: string | null
           stripe_customer_id?: string | null
@@ -1812,6 +1853,7 @@ export type Database = {
           phone: string | null
           questions_answered: number | null
           referrer: string | null
+          resume_token: string
           session_id: string | null
           started_at: string | null
           status: Database["public"]["Enums"]["assessment_status"] | null
@@ -1832,29 +1874,34 @@ export type Database = {
           isSetofReturn: true
         }
       }
+      get_assessment_by_resume_token: {
+        Args: { p_token: string }
+        Returns: {
+          answers: Json
+          completed_at: string
+          email: string
+          full_name: string
+          score_category: string
+          score_numeric: number
+        }[]
+      }
+      get_auth_user_id_by_email: { Args: { p_email: string }; Returns: string }
       get_full_analysis: {
         Args: { p_assessment_id: string }
         Returns: {
           assessment_id: string
-          computed_at: string | null
-          ia_explanation_full: string | null
+          computed_at: string
+          ia_explanation_full: string
         }[]
       }
-      get_user_tenant_id: { Args: { _user_id: string }; Returns: string }
       has_active_access: {
         Args: { _feature: string; _user_id: string }
         Returns: boolean
       }
-      has_role: {
-        Args: {
-          _role: Database["public"]["Enums"]["app_role"]
-          _tenant_id?: string
-          _user_id: string
-        }
-        Returns: boolean
+      lgpd_erase_user: {
+        Args: { p_source?: string; p_user_id: string }
+        Returns: Json
       }
-      is_hub_admin: { Args: never; Returns: boolean }
-      is_hub_user: { Args: { _user_id: string }; Returns: boolean }
       link_anon_assessment_to_user: {
         Args: { p_id: string; p_session_id: string }
         Returns: {
@@ -1875,6 +1922,7 @@ export type Database = {
           phone: string | null
           questions_answered: number | null
           referrer: string | null
+          resume_token: string
           session_id: string | null
           started_at: string | null
           status: Database["public"]["Enums"]["assessment_status"] | null
@@ -1929,6 +1977,7 @@ export type Database = {
           phone: string | null
           questions_answered: number | null
           referrer: string | null
+          resume_token: string
           session_id: string | null
           started_at: string | null
           status: Database["public"]["Enums"]["assessment_status"] | null
@@ -2036,12 +2085,12 @@ export type Tables<
   DefaultSchemaTableNameOrOptions extends
     | keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
         DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -2065,11 +2114,11 @@ export type TablesInsert<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -2090,11 +2139,11 @@ export type TablesUpdate<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -2115,11 +2164,11 @@ export type Enums<
   DefaultSchemaEnumNameOrOptions extends
     | keyof DefaultSchema["Enums"]
     | { schema: keyof DatabaseWithoutInternals },
-  EnumName extends DefaultSchemaEnumNameOrOptions extends {
+  EnumName extends (DefaultSchemaEnumNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaEnumNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -2132,11 +2181,11 @@ export type CompositeTypes<
   PublicCompositeTypeNameOrOptions extends
     | keyof DefaultSchema["CompositeTypes"]
     | { schema: keyof DatabaseWithoutInternals },
-  CompositeTypeName extends PublicCompositeTypeNameOrOptions extends {
+  CompositeTypeName extends (PublicCompositeTypeNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
-    : never = never,
+    : never) = never,
 > = PublicCompositeTypeNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -2146,9 +2195,6 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
-  graphql_public: {
-    Enums: {},
-  },
   public: {
     Enums: {
       ai_provider: ["openai", "gemini", "anthropic"],
@@ -2256,5 +2302,13 @@ export type AssessmentResultClientRow = Omit<
   Database['public']['Tables']['assessment_results']['Row'],
   'ia_explanation_full'
 >
-/** Linha devolvida por get_full_analysis (migration 20261020000000). */
-export type FullAnalysisRow = Database['public']['Functions']['get_full_analysis']['Returns'][number]
+/**
+ * Linha devolvida por get_full_analysis (migration 20261020000000).
+ * Adicionado à mão: o gerador declara os campos como não nulos, mas a análise
+ * é gerada sob demanda e `ia_explanation_full` pode ainda não existir (DI-018).
+ */
+export type FullAnalysisRow = {
+  assessment_id: string
+  computed_at: string | null
+  ia_explanation_full: string | null
+}

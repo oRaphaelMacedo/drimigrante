@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { EnvValidationError, loadClientEnv, parseClientEnv } from './env'
+import { CLIENT_ENV_KEYS, EnvValidationError, loadClientEnv, parseClientEnv } from './env'
 
 /** JWT sem assinatura válida, só para o campo `role` (formato das chaves do Supabase). */
 function fakeJwt(role: string): string {
@@ -56,6 +56,35 @@ describe('parseClientEnv', () => {
     expect(result.ok).toBe(false)
     if (result.ok) return
     expect(result.errors[0]).toMatch(/^VITE_SUPABASE_URL: precisa começar com http/)
+  })
+
+  it('recusa URL malformada e valor que não é texto', () => {
+    const malformed = parseClientEnv({ ...BASE, VITE_SUPABASE_URL: 'nao-e-url' })
+    expect(malformed).toMatchObject({
+      ok: false,
+      errors: ['VITE_SUPABASE_URL: precisa ser uma URL completa'],
+    })
+    const notText = parseClientEnv({ ...BASE, VITE_SUPABASE_ANON_KEY: 123 })
+    expect(notText).toMatchObject({
+      ok: false,
+      errors: ['VITE_SUPABASE_ANON_KEY: precisa ser um texto'],
+    })
+  })
+
+  it('lista todas as variáveis que o app lê', () => {
+    expect(CLIENT_ENV_KEYS).toEqual([
+      'VITE_SUPABASE_URL',
+      'VITE_SUPABASE_ANON_KEY',
+      'VITE_SUPABASE_FUNCTIONS_URL',
+      'VITE_APP_URL',
+      'VITE_APP_ENV',
+      'VITE_SENTRY_DSN',
+      'VITE_POSTHOG_KEY',
+      'VITE_POSTHOG_HOST',
+      'VITE_GA_MEASUREMENT_ID',
+      'VITE_META_PIXEL_ID',
+      'VITE_AUTH_EMAIL_CODE',
+    ])
   })
 
   it('recusa chave secreta no front (service role JWT ou sb_secret_)', () => {

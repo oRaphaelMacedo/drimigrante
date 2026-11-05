@@ -10,7 +10,7 @@
  * IntersectionObserver controlado pelo teste.
  */
 import { act, render, screen } from '@testing-library/react'
-import { useRef } from 'react'
+import { useMemo, useRef } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { StickyCTA } from './StickyCTA'
 import { STICKY_CTA_HEIGHT_VAR, STICKY_CTA_RESERVE_ATTR } from './sticky-bar'
@@ -77,6 +77,27 @@ function Harness({ forceHidden = false }: { forceHidden?: boolean }) {
   )
 }
 
+function TwoInlineHarness() {
+  const anchorRef = useRef<HTMLDivElement>(null)
+  const firstRef = useRef<HTMLButtonElement>(null)
+  const secondRef = useRef<HTMLButtonElement>(null)
+  const inlineRefs = useMemo(() => [firstRef, secondRef], [])
+  return (
+    <>
+      <div ref={anchorRef} data-testid="anchor" />
+      <button ref={firstRef} data-testid="inline-first">
+        Grátis
+      </button>
+      <button ref={secondRef} data-testid="inline-second">
+        PRO
+      </button>
+      <StickyCTA anchorRef={anchorRef} inlineCtaRef={inlineRefs}>
+        <button>Começar (barra)</button>
+      </StickyCTA>
+    </>
+  )
+}
+
 const root = document.documentElement
 const bar = () => screen.getByTestId('sticky-cta')
 const published = () => root.style.getPropertyValue(STICKY_CTA_HEIGHT_VAR)
@@ -123,6 +144,25 @@ describe('StickyCTA — CTA inline visível só com metade na tela', () => {
     const [observer] = observersOf(screen.getByTestId('inline-cta'))
     expect(observer.options.rootMargin).toBe('0px 0px 0px 0px')
     expect(observer.options.threshold).toEqual([0, 0.5, 1])
+  })
+
+  it('com dois CTAs inline, a barra só volta quando nenhum deles está na tela', () => {
+    render(<TwoInlineHarness />)
+    passAnchor()
+    const first = screen.getByTestId('inline-first')
+    const second = screen.getByTestId('inline-second')
+    expect(bar()).toHaveAttribute('data-state', 'visible')
+
+    fire(first, { isIntersecting: true, intersectionRatio: 1 })
+    expect(bar()).toHaveAttribute('data-state', 'hidden')
+
+    // Rolando do primeiro para o segundo: os dois aparecem juntos e o primeiro sai.
+    fire(second, { isIntersecting: true, intersectionRatio: 1 })
+    fire(first, { isIntersecting: false, intersectionRatio: 0 })
+    expect(bar()).toHaveAttribute('data-state', 'hidden')
+
+    fire(second, { isIntersecting: false, intersectionRatio: 0 })
+    expect(bar()).toHaveAttribute('data-state', 'visible')
   })
 
   it('poucos pixels do CTA inline na tela não escondem a barra; metade esconde', () => {

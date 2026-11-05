@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef, type ReactNode } from 'react'
 import { Link, useLocation, useNavigationType } from 'react-router-dom'
 import { ArrowRight, Check, ClipboardList, Gauge, Unlock } from 'lucide-react'
 import { track } from '@/lib/analytics'
@@ -25,7 +25,7 @@ import { Testimonials } from '@/components/landing/Testimonials'
 
 const MICROCOPY = 'Grátis · sem criar conta · poucos minutos'
 
-type CtaPosition = 'hero' | 'pricing' | 'final'
+type CtaPosition = 'hero' | 'pricing_free' | 'pricing' | 'final'
 
 const trackCta = (position: CtaPosition) => track('landing_cta_clicked', { position })
 
@@ -227,12 +227,56 @@ function ResultPreview() {
   )
 }
 
+interface PlanCardProps {
+  testId: string
+  title: string
+  badge?: string
+  price: string
+  priceNote: string
+  items: readonly string[]
+  note: string
+  cta: ReactNode
+}
+
+/** Cartão da seção "Quanto custa": a mesma estrutura no plano grátis e no PRO. */
+function PlanCard({ testId, title, badge, price, priceNote, items, note, cta }: PlanCardProps) {
+  return (
+    <Card variant="elevated" data-testid={testId} className="flex flex-col">
+      <div className="flex items-start justify-between gap-2">
+        <h3 className="text-h3 font-semibold text-foreground">{title}</h3>
+        {badge && (
+          <Badge size="sm" variant="primary" className="mt-0.5 shrink-0">
+            {badge}
+          </Badge>
+        )}
+      </div>
+      <p className="mt-2">
+        <span className="block text-4xl font-bold text-foreground">{price}</span>
+        <span className="mt-1 block text-sm text-muted-foreground">{priceNote}</span>
+      </p>
+      <ul className="mt-4 space-y-1.5">
+        {items.map((item) => (
+          <li key={item} className="flex items-start gap-2.5 text-base text-foreground">
+            <Check aria-hidden="true" className="mt-1 h-4 w-4 shrink-0 text-[hsl(var(--success))]" />
+            {item}
+          </li>
+        ))}
+      </ul>
+      <p className="mt-4 text-sm text-muted-foreground">{note}</p>
+      <div className="mt-auto pt-5">{cta}</div>
+    </Card>
+  )
+}
+
 export function LandingPage() {
   useScrollToHash()
   // Âncora do CTA fixo: a linha do CTA do hero (no celular o hero é alto; a barra
   // aparece assim que o botão principal sai da tela, não só depois da prévia).
   const heroCtaRef = useRef<HTMLDivElement>(null)
-  const pricingCtaRef = useRef<HTMLAnchorElement>(null)
+  const freeCtaRef = useRef<HTMLAnchorElement>(null)
+  const proCtaRef = useRef<HTMLAnchorElement>(null)
+  // Os dois levam ao quiz: com qualquer um deles na tela, a barra fixa some.
+  const pricingCtaRefs = useMemo(() => [freeCtaRef, proCtaRef], [])
   const finalRef = useRef<HTMLElement>(null)
   const faqItems = buildFaqItems()
 
@@ -302,43 +346,58 @@ export function LandingPage() {
         </Container>
       </section>
 
-      {/* Preço: um único cartão, vindo de OFFER (sem plano mensal antes do pagamento). */}
+      {/* Preços: primeiro o plano grátis, depois o PRO, vindos de OFFER (sem plano mensal antes do pagamento). */}
       <section id="precos" aria-labelledby="landing-precos" className="scroll-mt-16 bg-muted py-12 sm:py-20">
-        <Container size="sm">
+        <Container size="md">
           <h2 id="landing-precos" className="mb-6 text-h2 text-foreground sm:mb-10 sm:text-center">
             Quanto custa
           </h2>
-          <Card variant="elevated" data-testid="landing-offer" className="mx-auto max-w-md">
-            <h3 className="text-h3 font-semibold text-foreground">Análise completa do seu caminho</h3>
-            <p className="mt-2 flex flex-wrap items-baseline gap-x-2">
-              <span className="text-4xl font-bold text-foreground">{OFFER.priceLabel}</span>
-              <span className="text-sm text-muted-foreground">
-                pagamento único · acesso por {OFFER.accessDays} dias
-              </span>
-            </p>
-            <ul className="mt-4 space-y-1.5">
-              {OFFER.includes.map((item) => (
-                <li key={item} className="flex items-start gap-2.5 text-base text-foreground">
-                  <Check aria-hidden="true" className="mt-1 h-4 w-4 shrink-0 text-[hsl(var(--success))]" />
-                  {item}
-                </li>
-              ))}
-            </ul>
-            <p className="mt-4 text-sm text-muted-foreground">
-              {OFFER.delivery}. Você só decide depois de ver o pré-resultado grátis.
-              {OFFER.guarantee ? ` ${OFFER.guarantee}` : ''}
-            </p>
-            <Button asChild size="md" className="mt-5 w-full">
-              <Link
-                ref={pricingCtaRef}
-                to="/quiz"
-                data-testid="cta-pricing-onetime"
-                onClick={() => trackCta('pricing')}
-              >
-                {QUIZ_CTA_LABEL}
-              </Link>
-            </Button>
-          </Card>
+          <div className="mx-auto grid max-w-md gap-4 md:max-w-none md:grid-cols-2 md:gap-6">
+            <PlanCard
+              testId="landing-free"
+              title={OFFER.free.name}
+              price={OFFER.free.priceLabel}
+              priceNote="sem cartão · sem criar conta"
+              items={OFFER.free.includes}
+              note="No fim, você informa nome e e-mail para ver o resultado."
+              cta={
+                <Button asChild size="md" className="w-full">
+                  <Link
+                    ref={freeCtaRef}
+                    to="/quiz"
+                    data-testid="cta-pricing-free"
+                    onClick={() => trackCta('pricing_free')}
+                  >
+                    {QUIZ_CTA_LABEL}
+                  </Link>
+                </Button>
+              }
+            />
+            <PlanCard
+              testId="landing-offer"
+              title="Análise completa do seu caminho"
+              badge={OFFER.planLabel}
+              price={OFFER.priceLabel}
+              priceNote={`pagamento único · acesso por ${OFFER.accessDays} dias`}
+              items={OFFER.includes}
+              note={`${OFFER.delivery}. Você só decide depois de ver o pré-resultado grátis.${
+                OFFER.guarantee ? ` ${OFFER.guarantee}` : ''
+              }`}
+              cta={
+                // A compra só existe depois do pré-resultado: este botão também leva ao quiz, e o rótulo avisa.
+                <Button asChild variant="outline" size="md" className="w-full">
+                  <Link
+                    ref={proCtaRef}
+                    to="/quiz"
+                    data-testid="cta-pricing-onetime"
+                    onClick={() => trackCta('pricing')}
+                  >
+                    Começar pelo diagnóstico grátis
+                  </Link>
+                </Button>
+              }
+            />
+          </div>
         </Container>
       </section>
 
@@ -359,7 +418,7 @@ export function LandingPage() {
         {/* CTA fixo do celular: o espaçador dele fecha esta seção (some na seção final). */}
         <MobileStickyCta
           anchorRef={heroCtaRef}
-          inlineCtaRef={pricingCtaRef}
+          inlineCtaRef={pricingCtaRefs}
           endRef={finalRef}
           label={QUIZ_CTA_LABEL}
         />

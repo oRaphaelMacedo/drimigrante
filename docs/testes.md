@@ -1,7 +1,7 @@
 # Testes e ambiente local
 
 Guia único para rodar o Doutor Imigrante com Supabase local e para rodar os
-testes sem tocar em produção. O `TESTING.md` da raiz só aponta para cá.
+testes sem tocar em produção.
 
 ## Regras de segurança (leia primeiro)
 

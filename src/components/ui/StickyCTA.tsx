@@ -79,9 +79,10 @@ export interface StickyCTAProps {
   /**
    * CTA inline equivalente. Enquanto pelo menos metade dele estiver visível
    * (descontando o banner de cookies e a BottomNav, que o cobrem), a barra some
-   * para não haver dois CTAs iguais na tela.
+   * para não haver dois CTAs iguais na tela. Com vários, basta um deles visível
+   * (passe um array estável, de `useMemo`: um array novo recria o observador).
    */
-  inlineCtaRef?: React.RefObject<Element>
+  inlineCtaRef?: React.RefObject<Element> | React.RefObject<Element>[]
   /** Esconde a barra (ex.: a página já mostra o próprio CTA). Publica 0px. */
   forceHidden?: boolean
   /** Exibe também a partir de md (padrão: só no celular). */
@@ -163,21 +164,26 @@ export function StickyCTA({
   // Recria o observador quando o banner de cookies/BottomNav muda de altura:
   // o rootMargin negativo tira do "visível" a faixa que eles cobrem.
   React.useEffect(() => {
-    const inlineCta = inlineCtaRef?.current
-    if (!inlineCta || typeof IntersectionObserver === 'undefined') {
+    const refs = Array.isArray(inlineCtaRef) ? inlineCtaRef : inlineCtaRef ? [inlineCtaRef] : []
+    const targets = refs.map((ref) => ref.current).filter((el): el is Element => el !== null)
+    if (targets.length === 0 || typeof IntersectionObserver === 'undefined') {
       setInlineVisible(false)
       return
     }
+    const onScreen = new Set<Element>()
     const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (!entry) return
-        // Sem razão informada (ambientes simulados), vale o isIntersecting.
-        const ratio = typeof entry.intersectionRatio === 'number' ? entry.intersectionRatio : 1
-        setInlineVisible(entry.isIntersecting && ratio >= INLINE_VISIBLE_RATIO - 0.01)
+      (entries) => {
+        for (const entry of entries) {
+          // Sem razão informada (ambientes simulados), vale o isIntersecting.
+          const ratio = typeof entry.intersectionRatio === 'number' ? entry.intersectionRatio : 1
+          if (entry.isIntersecting && ratio >= INLINE_VISIBLE_RATIO - 0.01) onScreen.add(entry.target)
+          else onScreen.delete(entry.target)
+        }
+        setInlineVisible(onScreen.size > 0)
       },
       { rootMargin: `0px 0px ${-Math.round(bottomOverlay)}px 0px`, threshold: [0, INLINE_VISIBLE_RATIO, 1] },
     )
-    observer.observe(inlineCta)
+    for (const target of targets) observer.observe(target)
     return () => observer.disconnect()
   }, [inlineCtaRef, bottomOverlay])
 

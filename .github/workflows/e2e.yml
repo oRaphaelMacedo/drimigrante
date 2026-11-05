@@ -20,7 +20,9 @@ permissions:
 jobs:
   playwright:
     name: playwright
-    runs-on: ubuntu-latest
+    # Fixado: o Playwright 1.60 não instala navegadores no Ubuntu 26.04, que virou o ubuntu-latest.
+    # Voltar para ubuntu-latest ao atualizar o Playwright para uma versão que suporte esse sistema.
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
       # Só o essencial do stack local: banco, Auth, REST, Storage e Functions.

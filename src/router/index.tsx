@@ -1,7 +1,5 @@
 import { createBrowserRouter, type RouteObject } from 'react-router-dom'
 import { Layout } from '@/components/layout/Layout'
-import { DashboardLayout } from '@/components/layout/DashboardLayout'
-import { AdminLayout } from '@/components/layout/AdminLayout'
 import { RouteErrorPage } from '@/components/RouteErrorPage'
 import type { RouteSeoHandle, SeoMeta } from '@/hooks/useSEO'
 // Landing eager: a primeira tela (a mais acessada, no celular) não depende de
@@ -27,6 +25,10 @@ const withSuspense = (Component: React.LazyExoticComponent<() => JSX.Element>) =
  * bloqueia essas rotas, para que o noindex seja lido.
  */
 const seo = (meta: SeoMeta): RouteSeoHandle => ({ seo: meta })
+
+// Layouts da área logada: quem só visita o site público não baixa esse código.
+const DashboardLayout = lazy(() => import('@/components/layout/DashboardLayout').then((m) => ({ default: m.DashboardLayout })))
+const AdminLayout = lazy(() => import('@/components/layout/AdminLayout').then((m) => ({ default: m.AdminLayout })))
 
 // Public
 const NotFoundPage = lazy(() => import('@/pages/NotFoundPage').then((m) => ({ default: m.NotFoundPage })))
@@ -109,7 +111,7 @@ const routes: RouteObject[] = [
   {
     element: (
       <ProtectedRoute>
-        <DashboardLayout />
+        {withSuspense(DashboardLayout)}
       </ProtectedRoute>
     ),
     errorElement: <RouteErrorPage />,
@@ -152,7 +154,7 @@ const routes: RouteObject[] = [
   {
     element: (
       <ProtectedRoute requireAdmin>
-        <AdminLayout />
+        {withSuspense(AdminLayout)}
       </ProtectedRoute>
     ),
     errorElement: <RouteErrorPage />,
