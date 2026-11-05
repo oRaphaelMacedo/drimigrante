@@ -47,3 +47,6 @@ deno.lock
 
 # Claude Code worktrees (local-only, never commit)
 .claude/worktrees/
+
+# Avisos de atividade por sessão de IA (ver ~/Projects/_AI_COORDENACAO/PADRAO.md)
+.ai/claims/
