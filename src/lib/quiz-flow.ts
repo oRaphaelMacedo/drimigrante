@@ -6,7 +6,8 @@
 //   - para onde vai o "Próximo" e quando ele vira "Ver meu resultado" (DI-040);
 //   - onde a pessoa retoma o quiz (DI-041);
 //   - progresso honesto: sem total antes de saber o caso (DI-040).
-import { getVisibleQuestions, type QuizQuestion } from '@/data/quiz-questions'
+import { getAskedQuestions, isValidAnswer } from '@/data/quiz-asked'
+import type { QuizQuestion } from '@/data/quiz-questions'
 
 /** Pergunta de roteamento: só "nacionalidade" segue para o diagnóstico. */
 export const PROCESS_KEY = 'processo_tipo'
@@ -29,9 +30,12 @@ export type QuizStep =
 
 export type Answers = Record<string, string>
 
-export function isAnswered(question: Pick<QuizQuestion, 'key'>, answers: Answers): boolean {
-  const value = answers[question.key]
-  return typeof value === 'string' && value.trim() !== ''
+/** Opção que deixou de ser oferecida (ver quiz-asked.ts) conta como não respondida. */
+export function isAnswered(
+  question: Pick<QuizQuestion, 'key'> & Partial<Pick<QuizQuestion, 'fieldType' | 'options'>>,
+  answers: Answers,
+): boolean {
+  return isValidAnswer(question, answers[question.key])
 }
 
 /** Índice da primeira pergunta obrigatória sem resposta (ou -1). */
@@ -122,7 +126,7 @@ export function nextStepAfter(
   if (currentKey === PROCESS_KEY && routesToComingSoon(answers)) {
     return { kind: 'comingsoon' }
   }
-  const visible = getVisibleQuestions(answers, questions)
+  const visible = getAskedQuestions(answers, questions)
   const index = visible.findIndex((q) => q.key === currentKey)
   if (index >= 0 && index < visible.length - 1) return { kind: 'question', index: index + 1 }
   return { kind: 'capture' }

@@ -384,6 +384,36 @@ describe('envio (DI-041/DI-042)', () => {
     expect((storedResult() as { score: { category: string } }).score.category).toBe(state.result.score.category)
   })
 
+  it('a tela pergunta menos, mas o servidor recebe as respostas no formato de sempre', async () => {
+    vi.useFakeTimers()
+    mocks.persistAssessment.mockResolvedValue(okPersist('a-1'))
+    renderQuiz()
+    act(() => api.startQuiz())
+    answerAndNext('processo_tipo', 'nacionalidade')
+    answerAndNext('caso_tipo', 'C,D')
+    answerAndNext('c3_tempo_portugal', '5_ou_mais')
+    answerAndNext('d2_tempo_autorizacao', 'sem_autorizacao')
+    answerAndNext('d3_disposto_advogado', 'consultar_agora')
+    answerAndNext('d8_filhos_portugal', 'nao')
+    await submit()
+
+    const params = mocks.persistAssessment.mock.calls[0][0] as Record<string, unknown>
+    expect(params.answers).toEqual({
+      processo_tipo: 'nacionalidade',
+      caso_tipo: 'C,D',
+      c1_maior_idade: 'sim',
+      c2_mora_portugal: 'sim',
+      c3_tempo_portugal: '5_ou_mais',
+      d1_situacao_legal: 'nao',
+      d3_disposto_advogado: 'sim',
+      d4_consultou_advogado: 'nao',
+      d7_consultar_agora: 'sim',
+      d8_filhos_portugal: 'nao',
+    })
+    // Os contadores do assessment refletem o que foi perguntado na tela.
+    expect(params).toMatchObject({ questionsAnswered: 6, totalQuestions: 6 })
+  })
+
   it('depois do envio a sessão gira; "Refazer" gera session_id novo e assessmentId não nulo', async () => {
     vi.useFakeTimers()
     mocks.persistAssessment.mockResolvedValueOnce(okPersist('a-1')).mockResolvedValueOnce(okPersist('a-2'))

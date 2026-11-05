@@ -3,6 +3,9 @@
 //
 // Importado também pelo Deno (testes de paridade em supabase/functions/_shared):
 // só imports relativos com extensão `.ts` e sem dependências npm.
+//
+// Estas perguntas são o modelo do motor (score, vias, servidor e IA). O que a pessoa
+// responde na tela é menor: combinadas e deduções ficam em src/data/quiz-asked.ts.
 
 import {
   categoryForPercentage,
@@ -481,7 +484,7 @@ export interface ScoreResult {
  * Condição incompleta (sem answerKey nem answerContains) nunca é satisfeita:
  * antes ela valia "qualquer resposta", o que mostrava perguntas de todos os casos.
  */
-function matchesCondition(answers: Record<string, string>, cond: ShowIfCondition): boolean {
+export function matchesCondition(answers: Record<string, string>, cond: ShowIfCondition): boolean {
   const answer = answers[cond.questionKey]
   if (!answer) return false
   if (cond.answerContains) {

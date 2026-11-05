@@ -15,12 +15,12 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import {
   computeScore,
   getVisibleQuestions,
-  pruneAnswers,
   suggestVisas,
   type QuizQuestion,
   type ScoreResult,
   type VisaSuggestion,
 } from '@/data/quiz-questions'
+import { getAskedQuestions, materializeAnswers } from '@/data/quiz-asked'
 import { joinWaitlist as joinWaitlistRpc, persistAssessment, type PersistAssessmentParams } from '@/hooks/useAssessment'
 import { readStoredQuizSession, useQuizPersistence, type QuizSession } from './useQuizPersistence'
 import { useQuizState, type QuizFlowState, type ResumeStep } from './useQuizState'
@@ -326,8 +326,9 @@ export function useQuiz() {
   const { state, dispatch } = useQuizState()
   const { quizState, currentIndex, animationDirection, result, isSubmitting } = state
 
+  // Só o que a pessoa responde na tela: combinadas e deduções em src/data/quiz-asked.ts.
   const visibleQuestions = useMemo(
-    () => getVisibleQuestions(session.answers, allQuestions),
+    () => getAskedQuestions(session.answers, allQuestions),
     [session.answers, allQuestions],
   )
 
@@ -661,8 +662,9 @@ export function useQuiz() {
       const startedAt = Date.now()
       const deadline = startedAt + PROCESSING_BUDGET_MS
 
-      // Só as respostas das perguntas visíveis (ramos abandonados não vão ao servidor).
-      const answers = pruneAnswers(session.answers, allQuestions)
+      // Formato de sempre para o motor e o servidor: combinadas e deduções aplicadas e
+      // só as perguntas visíveis (ramos abandonados não vão ao servidor).
+      const answers = materializeAnswers(session.answers, allQuestions)
       const visible = getVisibleQuestions(answers, allQuestions)
       const routingThemes = new Set(
         visible.filter((q) => q.key === PROCESS_KEY || q.key === CASE_KEY).map((q) => q.themeCode),
@@ -693,7 +695,9 @@ export function useQuiz() {
         // Conversão (GA4 generate_lead / Meta Lead): uma vez por envio, mesmo com nova tentativa.
         trackOnce('lead_submitted', submissionSessionId, { category: score.category })
 
-        const answeredCount = countAnswered(visible, answers)
+        // Contadores do assessment: perguntas de fato feitas na tela.
+        const asked = getAskedQuestions(session.answers, allQuestions)
+        const answeredCount = countAnswered(asked, session.answers)
         const attribution = readAttribution()
         const paramsFor = (sessionId: string): PersistAssessmentParams => ({
           sessionId,
@@ -702,7 +706,7 @@ export function useQuiz() {
           email: leadInfo.email,
           phone: leadInfo.phone,
           questionsAnswered: answeredCount,
-          totalQuestions: visible.length,
+          totalQuestions: asked.length,
           utmSource: attribution.utm_source,
           utmMedium: attribution.utm_medium,
           utmCampaign: attribution.utm_campaign,

@@ -105,7 +105,7 @@ describe('QuizPage — auto-avanço e foco (DI-039)', () => {
     fireEvent.click(screen.getByTestId('quiz-option-A'))
     await advance(800)
     expect(title()).toHaveTextContent('Quais destas situações')
-    expect(screen.getByTestId('quiz-progress-label')).toHaveTextContent('Pergunta 2 de 4')
+    expect(screen.getByTestId('quiz-progress-label')).toHaveTextContent('Pergunta 2 de 3')
   })
 
   it('"Próximo" logo depois do auto-avanço não pula a pergunta seguinte', async () => {

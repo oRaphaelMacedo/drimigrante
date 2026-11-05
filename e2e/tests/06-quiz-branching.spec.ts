@@ -346,21 +346,86 @@ test.describe('quiz no navegador — ramificação', () => {
     expect(nonGet).toEqual([])
   })
 
-  test('caso D com d1=sim mostra d7 e nada dos outros casos', async ({ page }) => {
+  test('caso D com autorização: uma pergunta para autorização e tempo, depois d7 e nada dos outros casos', async ({ page }) => {
     const { nonGet } = await setupPage(page, 'buggy-db')
     await page.goto('/quiz')
     await page.getByTestId('quiz-intro-start').click()
 
     await answer(page, ['nacionalidade'])
     await answer(page, ['D'])
-    await expectQuestion(page, 'd1_situacao_legal')
-    await answer(page, ['sim'])
     await expectQuestion(page, 'd2_tempo_autorizacao')
     await answer(page, ['mais_5'])
     await expectQuestion(page, 'd7_consultar_agora')
     await answer(page, ['nao'])
     await expectQuestion(page, 'd8_filhos_portugal')
     await answer(page, ['nao'])
+
+    await expect(page.locator('#capture-email')).toBeVisible()
+    expect(nonGet).toEqual([])
+  })
+
+  test('A + C + D + F: não pergunta de novo se mora em Portugal nem sobre laços', async ({ page }) => {
+    const { nonGet } = await setupPage(page, 'buggy-db')
+    await page.goto('/quiz')
+    await page.getByTestId('quiz-intro-start').click()
+
+    await answer(page, ['nacionalidade'])
+    await answer(page, ['A', 'C', 'D', 'F'])
+    await expectQuestion(page, 'a1_antepassado')
+    await answer(page, ['avo'])
+    await expectQuestion(page, 'a2_documento')
+    await answer(page, ['nao_quero_obter'])
+    // a3 veio na opção de a2 e a4 vem de "Moro em Portugal".
+    await expectQuestion(page, 'a6_filiacao')
+    await answer(page, ['natural'])
+    await expectQuestion(page, 'c3_tempo_portugal')
+    await expect(page.getByTestId('quiz-option-nao_mora')).toHaveCount(0)
+    await answer(page, ['5_ou_mais'])
+    await expectQuestion(page, 'd2_tempo_autorizacao')
+    await answer(page, ['mais_5'])
+    await expectQuestion(page, 'd7_consultar_agora')
+    await answer(page, ['nao'])
+    await expectQuestion(page, 'd8_filhos_portugal')
+    await answer(page, ['nao'])
+    await expectQuestion(page, 'f2_quando_mudou')
+    await expect(page.getByTestId('quiz-option-nao_mora')).toHaveCount(0)
+    await answer(page, ['antes_1974'])
+
+    await expect(page.locator('#capture-email')).toBeVisible()
+    expect(nonGet).toEqual([])
+  })
+
+  test('caso D sem autorização: uma pergunta para preparo, consulta e intenção; d6 não se repete', async ({ page }) => {
+    const { nonGet } = await setupPage(page, 'buggy-db')
+    await page.goto('/quiz')
+    await page.getByTestId('quiz-intro-start').click()
+
+    await answer(page, ['nacionalidade'])
+    await answer(page, ['D'])
+    await expectQuestion(page, 'd2_tempo_autorizacao')
+    await answer(page, ['sem_autorizacao'])
+    await expect(page.getByTestId('quiz-question').locator('h2')).toContainText('Sobre contratar um advogado')
+    await answer(page, ['consultou'])
+    await expectQuestion(page, 'd5_motivo_nao_contratou')
+    await answer(page, ['era_caro'])
+    await expectQuestion(page, 'd8_filhos_portugal')
+    await answer(page, ['sim'])
+
+    await expect(page.locator('#capture-email')).toBeVisible()
+    expect(nonGet).toEqual([])
+  })
+
+  test('quem só nasceu em Portugal responde tudo em uma pergunta', async ({ page }) => {
+    const { nonGet } = await setupPage(page, 'buggy-db')
+    await page.goto('/quiz')
+    await page.getByTestId('quiz-intro-start').click()
+
+    await answer(page, ['nacionalidade'])
+    await answer(page, ['C'])
+    await expectQuestion(page, 'c3_tempo_portugal')
+    await expect(page.getByTestId('quiz-option-nao_mora')).toBeVisible()
+    await expect(page.getByTestId('quiz-option-menor_idade')).toBeVisible()
+    await answer(page, ['nao_mora'])
 
     await expect(page.locator('#capture-email')).toBeVisible()
     expect(nonGet).toEqual([])
