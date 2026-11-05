@@ -44,7 +44,7 @@ Módulos de `src/lib/` que são contrato entre as telas:
 
 | Módulo | Papel |
 |---|---|
-| `env.ts` | Valida as variáveis `VITE_*` (zod); o `supabase.ts` falha cedo se faltar URL ou chave anon |
+| `env.ts` | Valida as variáveis `VITE_*` (sem zod, para não pesar na primeira carga); o `supabase.ts` falha cedo se faltar URL ou chave anon |
 | `supabase.ts` | Cliente único do Supabase |
 | `offer.ts` | Oferta comercial (preço, itens, prazo, plano mensal) |
 | `access.ts` | Estado de acesso (`none`, `active`, `expiring`, `expired`, `recurring`) |

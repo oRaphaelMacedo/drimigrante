@@ -5,7 +5,25 @@ import path from 'path'
 
 const THEME_COLOR = '#1f41c7'
 
+/**
+ * Dependências pesadas e estáveis em chunks próprios: o cache do navegador
+ * sobrevive aos deploys, que só trocam o chunk do app. Dependências desses
+ * pacotes vêm junto (Rollup), então os vendors nunca importam o chunk de entrada.
+ */
+function vendorChunk(id: string): string | undefined {
+  if (/node_modules\/(@supabase|iceberg-js)\//.test(id)) return 'vendor-supabase'
+  if (/node_modules\/(react|react-dom|scheduler|react-router|react-router-dom|@remix-run)\//.test(id)) {
+    return 'vendor-react'
+  }
+  return undefined
+}
+
 export default defineConfig({
+  build: {
+    rollupOptions: {
+      output: { manualChunks: vendorChunk },
+    },
+  },
   plugins: [
     react(),
     VitePWA({

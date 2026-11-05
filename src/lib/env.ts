@@ -1,5 +1,5 @@
 /**
- * env — variáveis de ambiente do front (VITE_*), validadas com zod (DI-084).
+ * env — variáveis de ambiente do front (VITE_*), validadas na inicialização (DI-084).
  *
  * Fonte única do que o navegador recebe. Tudo que começa com VITE_ vai para o
  * bundle público: aqui só entram URL e chave anon do Supabase e IDs públicos de
@@ -11,12 +11,17 @@
  * - Opcionais inválidas → ignoradas com aviso (um ID de analytics errado na
  *   Vercel não pode derrubar o site).
  *
+ * Sem zod de propósito: este módulo roda na primeira carga de toda página, e a
+ * biblioteca pesaria no chunk de entrada só para meia dúzia de checagens (DI-055).
+ *
  * As chaves ficam declaradas em .env.example e src/vite-env.d.ts;
  * `npm run check-env` confere que código e exemplos batem.
  */
-import { z } from 'zod'
 
 const SETUP_HINT = 'Copie .env.example para .env.local (ou rode `npm run supabase:env`) — veja o README.md.'
+
+type ValidationResult = { value: string } | { error: string }
+type Validator = (value: string) => ValidationResult
 
 /** Vazio ou só espaços conta como ausente. */
 function blankToUndefined(value: unknown): unknown {
@@ -25,11 +30,15 @@ function blankToUndefined(value: unknown): unknown {
   return trimmed === '' ? undefined : trimmed
 }
 
-const httpUrl = z
-  .string()
-  .url('precisa ser uma URL completa')
-  .refine((value) => /^https?:\/\//i.test(value), 'precisa começar com http:// ou https://')
-  .transform((value) => value.replace(/\/+$/, ''))
+const httpUrl: Validator = (value) => {
+  try {
+    new URL(value)
+  } catch {
+    return { error: 'precisa ser uma URL completa' }
+  }
+  if (!/^https?:\/\//i.test(value)) return { error: 'precisa começar com http:// ou https://' }
+  return { value: value.replace(/\/+$/, '') }
+}
 
 /** Lê o campo `role` de um JWT sem validar a assinatura (só para detectar engano). */
 function jwtRole(token: string): string | undefined {
@@ -44,46 +53,42 @@ function jwtRole(token: string): string | undefined {
   }
 }
 
-const anonKey = z.string().superRefine((value, ctx) => {
-  if (value.startsWith('sb_secret_') || jwtRole(value) === 'service_role') {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: 'é uma chave SECRETA (service role). No front use só a chave anon/publishable.',
-    })
-  }
-})
+const anonKey: Validator = (value) =>
+  value.startsWith('sb_secret_') || jwtRole(value) === 'service_role'
+    ? { error: 'é uma chave SECRETA (service role). No front use só a chave anon/publishable.' }
+    : { value }
 
-const requiredSchema = z.object({
-  VITE_SUPABASE_URL: z.preprocess(
-    blankToUndefined,
-    z.string({ required_error: 'obrigatória' }).pipe(httpUrl),
-  ),
-  VITE_SUPABASE_ANON_KEY: z.preprocess(
-    blankToUndefined,
-    z.string({ required_error: 'obrigatória' }).pipe(anonKey),
-  ),
-})
+const anyText: Validator = (value) => ({ value })
 
-const optionalSchemas = {
+const matching =
+  (pattern: RegExp, error: string): Validator =>
+  (value) =>
+    pattern.test(value) ? { value } : { error }
+
+const requiredValidators = {
+  VITE_SUPABASE_URL: httpUrl,
+  VITE_SUPABASE_ANON_KEY: anonKey,
+} satisfies Record<string, Validator>
+
+const optionalValidators = {
   VITE_SUPABASE_FUNCTIONS_URL: httpUrl,
   VITE_APP_URL: httpUrl,
-  VITE_APP_ENV: z.string().transform((value) => value.toLowerCase()),
+  VITE_APP_ENV: (value) => ({ value: value.toLowerCase() }),
   VITE_SENTRY_DSN: httpUrl,
-  VITE_POSTHOG_KEY: z.string(),
+  VITE_POSTHOG_KEY: anyText,
   VITE_POSTHOG_HOST: httpUrl,
-  VITE_GA_MEASUREMENT_ID: z.string().regex(/^G-[A-Z0-9]+$/i, 'formato esperado: G-XXXXXXX'),
-  VITE_META_PIXEL_ID: z.string().regex(/^\d+$/, 'só dígitos'),
-  VITE_AUTH_EMAIL_CODE: z.enum(['true', 'false'], {
-    errorMap: () => ({ message: 'use true ou false' }),
-  }),
-} as const
+  VITE_GA_MEASUREMENT_ID: matching(/^G-[A-Z0-9]+$/i, 'formato esperado: G-XXXXXXX'),
+  VITE_META_PIXEL_ID: matching(/^\d+$/, 'só dígitos'),
+  VITE_AUTH_EMAIL_CODE: matching(/^(true|false)$/, 'use true ou false'),
+} satisfies Record<string, Validator>
 
-type OptionalKey = keyof typeof optionalSchemas
+type RequiredKey = keyof typeof requiredValidators
+type OptionalKey = keyof typeof optionalValidators
 
 /** Todas as variáveis VITE_* que o app lê (o check-env confere esta lista). */
 export const CLIENT_ENV_KEYS = [
-  ...(Object.keys(requiredSchema.shape) as (keyof typeof requiredSchema.shape)[]),
-  ...(Object.keys(optionalSchemas) as OptionalKey[]),
+  ...(Object.keys(requiredValidators) as RequiredKey[]),
+  ...(Object.keys(optionalValidators) as OptionalKey[]),
 ] as const
 
 export interface ClientEnv {
@@ -106,11 +111,8 @@ export type ClientEnvResult =
   | { ok: true; env: ClientEnv; warnings: string[] }
   | { ok: false; errors: string[]; warnings: string[] }
 
-function issuesOf(key: string, error: z.ZodError): string[] {
-  return error.issues.map((issue) => {
-    const field = issue.path.length > 0 ? String(issue.path[0]) : key
-    return `${field}: ${issue.message}`
-  })
+function validate(value: unknown, validator: Validator): ValidationResult {
+  return typeof value === 'string' ? validator(value) : { error: 'precisa ser um texto' }
 }
 
 /** Valida um objeto de variáveis (ex.: `import.meta.env`). Função pura, testável. */
@@ -118,26 +120,37 @@ export function parseClientEnv(raw: Record<string, unknown>): ClientEnvResult {
   const warnings: string[] = []
   const optional: Partial<Record<OptionalKey, string>> = {}
 
-  for (const key of Object.keys(optionalSchemas) as OptionalKey[]) {
+  for (const key of Object.keys(optionalValidators) as OptionalKey[]) {
     const value = blankToUndefined(raw[key])
     if (value === undefined) continue
-    const parsed = optionalSchemas[key].safeParse(value)
-    if (parsed.success) optional[key] = parsed.data
-    else warnings.push(`${issuesOf(key, parsed.error).join('; ')} (ignorada)`)
+    const result = validate(value, optionalValidators[key])
+    if ('error' in result) warnings.push(`${key}: ${result.error} (ignorada)`)
+    else optional[key] = result.value
   }
 
-  const required = requiredSchema.safeParse(raw)
-  if (!required.success) {
-    return { ok: false, errors: issuesOf('env', required.error), warnings }
+  const errors: string[] = []
+  const required: Partial<Record<RequiredKey, string>> = {}
+
+  for (const key of Object.keys(requiredValidators) as RequiredKey[]) {
+    const value = blankToUndefined(raw[key])
+    if (value === undefined) {
+      errors.push(`${key}: obrigatória`)
+      continue
+    }
+    const result = validate(value, requiredValidators[key])
+    if ('error' in result) errors.push(`${key}: ${result.error}`)
+    else required[key] = result.value
   }
 
-  const supabaseUrl = required.data.VITE_SUPABASE_URL
+  const { VITE_SUPABASE_URL: supabaseUrl, VITE_SUPABASE_ANON_KEY: supabaseAnonKey } = required
+  if (!supabaseUrl || !supabaseAnonKey) return { ok: false, errors, warnings }
+
   return {
     ok: true,
     warnings,
     env: {
       supabaseUrl,
-      supabaseAnonKey: required.data.VITE_SUPABASE_ANON_KEY,
+      supabaseAnonKey,
       supabaseFunctionsUrl: optional.VITE_SUPABASE_FUNCTIONS_URL ?? `${supabaseUrl}/functions/v1`,
       appUrl: optional.VITE_APP_URL,
       appEnv: optional.VITE_APP_ENV,
