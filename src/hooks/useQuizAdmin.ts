@@ -6,13 +6,24 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { supabase } from '@/lib/supabase'
 import type { QuizQuestion } from '@/data/quiz-questions'
+import type { Database } from '@/lib/database.types'
 import type { DbDisplayConditions } from '@/lib/quiz-conditions'
+
+type Tables = Database['public']['Tables']
+type DbFieldType = Database['public']['Enums']['field_type']
+
+/** Formato de form_versions.schema_snapshot, gravado pela RPC snapshot_quiz_version. */
+interface QuizVersionSnapshot {
+  themes?: Tables['form_themes']['Insert'][]
+  questions?: Tables['form_questions']['Insert'][]
+  options?: Tables['form_question_options']['Insert'][]
+}
 
 export interface QuestionUpdate {
   question_text_pt?: string
   question_text_en?: string | null
   help_text?: string | null
-  field_type?: string
+  field_type?: DbFieldType
   is_required?: boolean
   placeholder?: string | null
   validation_rules?: { min?: number; max?: number } | null
@@ -43,10 +54,8 @@ export interface ThemeInput {
 
 async function snapshotBefore(label: string) {
   // Best-effort: never block the edit if snapshot fails.
-  // RPC name not yet in generated types — cast through any.
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { error } = await (supabase as any).rpc('snapshot_quiz_version', { p_label: label })
+    const { error } = await supabase.rpc('snapshot_quiz_version', { p_label: label })
     if (error) console.warn('[snapshot] failed:', error.message)
   } catch (err) {
     console.warn('[snapshot] exception:', err)
@@ -82,8 +91,7 @@ export function useUpdateQuestion() {
 
       const { error: updErr } = await supabase
         .from('form_questions')
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        .update(updates as any)
+        .update(updates)
         .eq('id', questionId)
       if (updErr) throw updErr
 
@@ -154,7 +162,7 @@ export function useCreateQuestion() {
         question_text_pt: string
         question_text_en?: string | null
         help_text?: string | null
-        field_type: string
+        field_type: DbFieldType
         is_required: boolean
         placeholder?: string | null
         validation_rules?: { min?: number; max?: number } | null
@@ -178,8 +186,6 @@ export function useCreateQuestion() {
         .insert({
           theme_id: themeId,
           ...question,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          field_type: question.field_type as any,
           sort_order: nextOrder,
           is_active: true,
         })
@@ -430,7 +436,7 @@ export function useRestoreVersion() {
       if (vErr) throw vErr
       if (!ver?.schema_snapshot) throw new Error('Versão sem snapshot')
 
-      const snap = ver.schema_snapshot as { themes: any[]; questions: any[]; options: any[] }
+      const snap = ver.schema_snapshot as unknown as QuizVersionSnapshot
 
       // Snapshot the current state first (so the restore is reversible)
       await snapshotBefore(`Before restore to v${ver.version_number}`)
